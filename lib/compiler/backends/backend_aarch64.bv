@@ -71,11 +71,11 @@ enum A64Instr {
 // ===== REGISTER ALLOCATION =====
 
 obj RegisterAllocator {
-    used_regs: HashSet<String>,
-    var_to_reg: HashMap<String, String>,
-    reg_to_var: HashMap<String, String>,
-    spill_slots: HashMap<String, Int>,
-    next_spill: Int,
+    used_regs: HashSet<String>
+    var_to_reg: HashMap<String, String>
+    reg_to_var: HashMap<String, String>
+    spill_slots: HashMap<String, Int>
+    next_spill: Int
     spill_instrs: List<A64Instr>  // Instructions generated during spilling
 }
 
@@ -109,9 +109,9 @@ defn all_allocatable_regs() -> List<String> {
 
 defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, RegisterAllocator) {
     // Try hint first
-    [hint.is_some()] {
+    when hint.is_some() {
         let reg = unwrap(hint);
-        [!alloc.used_regs.contains(reg)] {
+        when !alloc.used_regs.contains(reg) {
             let used = alloc.used_regs;
             used = used.insert(reg);
             term (reg, RegisterAllocator {
@@ -128,7 +128,7 @@ defn alloc_reg(alloc: RegisterAllocator, hint: Option<String>) -> (String, Regis
     // Find first available caller-saved register
     let regs = caller_saved_regs();
     let i: Int = 0;
-    [i < regs.len()] {
+    when i < regs.len() {
         [!alloc.used_regs.contains(regs[i])] {
             let used = alloc.used_regs;
             used = used.insert(regs[i]);
@@ -194,7 +194,7 @@ defn spill_reg(alloc: RegisterAllocator, reg: String, var_name: String) -> (Int,
 }
 
 defn reload_reg(alloc: RegisterAllocator, reg: String, var_name: String) -> (List<A64Instr>, RegisterAllocator) {
-    [alloc.spill_slots.contains_key(var_name)] {
+    when alloc.spill_slots.contains_key(var_name) {
         let offset = alloc.spill_slots.get(var_name).unwrap();
         let instrs = [LDR(reg, "X29", offset)];
         term (instrs, alloc);
@@ -258,12 +258,12 @@ defn compute_memory_layout(txns: List<Transaction>) -> MemoryLayout {
     
     // First pass: collect all variables from all transactions
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         let txn = txns[i];
         
         // Parameters get first slots
         let j: Int = 0;
-        [j < txn.params.len()] {
+        when j < txn.params.len() {
             layout.param_offsets = layout.param_offsets.insert(txn.params[j].name, offset);
             offset = offset + 8;  // 8 bytes per parameter
             j = j + 1;
@@ -272,7 +272,7 @@ defn compute_memory_layout(txns: List<Transaction>) -> MemoryLayout {
         // Collect variables from body
         let vars = collect_vars_from_stmts(txn.body);
         let k: Int = 0;
-        [k < vars.len()] {
+        when k < vars.len() {
             [!layout.var_offsets.contains_key(vars[k])] {
                 layout.var_offsets = layout.var_offsets.insert(vars[k], offset);
                 offset = offset + 8;
@@ -294,7 +294,7 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
     let vars: List<String> = [];
     
     let i: Int = 0;
-    [i < stmts.len()] {
+    when i < stmts.len() {
         uni stmts[i](StmtLet(name, _, _, _, _)) = {
             vars = vars.append(name);
         };
@@ -341,10 +341,10 @@ defn collect_vars_from_stmts(stmts: List<Statement>) -> List<String> {
 }
 
 defn get_stack_offset(layout: MemoryLayout, var_name: String) -> Option<Int> {
-    [layout.var_offsets.contains_key(var_name)] {
+    when layout.var_offsets.contains_key(var_name) {
         term Some(layout.var_offsets.get(var_name).unwrap());
     };
-    [layout.param_offsets.contains_key(var_name)] {
+    when layout.param_offsets.contains_key(var_name) {
         term Some(layout.param_offsets.get(var_name).unwrap());
     };
     term None;
@@ -374,18 +374,18 @@ defn generate_epilogue(layout: MemoryLayout) -> List<A64Instr> {
 // ===== BIT-PACKED STRUCT LAYOUT =====
 
 obj BitFieldLayout {
-    field_name: String,
-    bit_start: Int,
-    bit_width: Int,
+    field_name: String
+    bit_start: Int
+    bit_width: Int
     byte_offset: Int,  // Which byte contains the start bit
     mask: Int          // Mask to extract the field
 }
 
 obj PackedStructLayout {
-    fields: List<BitFieldLayout>,
-    total_bits: Int,
-    total_bytes: Int,
-    is_mmio: Bool,
+    fields: List<BitFieldLayout>
+    total_bits: Int
+    total_bytes: Int
+    is_mmio: Bool
     mmio_base_addr: Int
 }
 
@@ -400,17 +400,17 @@ defn new_packed_layout() -> PackedStructLayout {
 }
 
 defn bit_width_for_type(type_name: String, bit_range: Option<Int>) -> Int {
-    [type_name == "Bool"] { term 1; };
-    [type_name == "Char"] { term 8; };
-    [type_name == "Int"] {
-        [bit_range.is_some()] { term bit_range.unwrap(); };
+    when type_name == "Bool" { term 1; };
+    when type_name == "Char" { term 8; };
+    when type_name == "Int" {
+        when bit_range.is_some() { term bit_range.unwrap(); };
         term 64;
     };
-    [type_name == "UInt"] {
-        [bit_range.is_some()] { term bit_range.unwrap(); };
+    when type_name == "UInt" {
+        when bit_range.is_some() { term bit_range.unwrap(); };
         term 64;
     };
-    [type_name == "Float"] { term 64; };
+    when type_name == "Float" { term 64; };
     term 64;  // Default to 64-bit
 }
 
@@ -418,13 +418,13 @@ defn compute_packed_layout(fields: List<(String, String, Option<Int>)>, mmio_bas
     let layout = new_packed_layout();
     let current_bit: Int = 0;
     
-    [mmio_base.is_some()] {
+    when mmio_base.is_some() {
         layout.is_mmio = true;
         layout.mmio_base_addr = mmio_base.unwrap();
     };
     
     let i: Int = 0;
-    [i < fields.len()] {
+    when i < fields.len() {
         let (name, type_name, bit_range) = fields[i];
         let width = bit_width_for_type(type_name, bit_range);
         
@@ -452,13 +452,13 @@ defn compute_packed_layout(fields: List<(String, String, Option<Int>)>, mmio_bas
 }
 
 defn compute_mask(width: Int) -> Int {
-    [width >= 64] { term -1; };  // All bits set
+    when width >= 64 { term -1; };  // All bits set
     term (1 << width) - 1;
 }
 
 defn find_field_layout(layout: PackedStructLayout, field_name: String) -> Option<BitFieldLayout> {
     let i: Int = 0;
-    [i < layout.fields.len()] {
+    when i < layout.fields.len() {
         [layout.fields[i].field_name == field_name] {
             term Some(layout.fields[i]);
         };
@@ -471,20 +471,20 @@ defn find_field_layout(layout: PackedStructLayout, field_name: String) -> Option
 defn emit_load_bitfield(base_reg: String, field: BitFieldLayout, dest_reg: String, is_mmio: Bool) -> List<A64Instr> {
     let instrs: List<A64Instr> = [];
     
-    [is_mmio] {
+    when is_mmio {
         // MMIO: use load with volatile semantics (simplified as regular LDR)
         instrs = instrs.append(LDR(dest_reg, base_reg, field.byte_offset));
     };
-    [!is_mmio] {
+    when !is_mmio {
         // Regular memory
         instrs = instrs.append(LDR(dest_reg, base_reg, field.byte_offset));
     };
     
     // Extract the bit field
     // 1. Right shift to align field to LSB
-    [field.bit_start > 0] {
+    when field.bit_start > 0 {
         let shift = field.bit_start % 8;  // Shift within the byte
-        [shift > 0] {
+        when shift > 0 {
             instrs = instrs.append(LSR(dest_reg, dest_reg, shift));
         };
     };
@@ -511,7 +511,7 @@ defn emit_store_bitfield(base_reg: String, field: BitFieldLayout, value_reg: Str
     
     // Position new value
     let shift = field.bit_start % 8;
-    [shift > 0] {
+    when shift > 0 {
         instrs = instrs.append(LSL(value_reg, value_reg, shift));
     };
     
@@ -522,10 +522,10 @@ defn emit_store_bitfield(base_reg: String, field: BitFieldLayout, value_reg: Str
     instrs = instrs.append(ORR(temp_reg, temp_reg, value_reg));
     
     // Store back
-    [is_mmio] {
+    when is_mmio {
         instrs = instrs.append(STR(temp_reg, base_reg, field.byte_offset));
     };
-    [!is_mmio] {
+    when !is_mmio {
         instrs = instrs.append(STR(temp_reg, base_reg, field.byte_offset));
     };
     
@@ -535,16 +535,16 @@ defn emit_store_bitfield(base_reg: String, field: BitFieldLayout, value_reg: Str
 // ===== MMIO REGISTER MAPPING =====
 
 obj MMIORegister {
-    name: String,
-    address: Int,
+    name: String
+    address: Int
     width: Int,  // in bits
     access: String  // "RO", "WO", "RW"
 }
 
 obj MMIORegion {
-    name: String,
-    base_address: Int,
-    size: Int,
+    name: String
+    base_address: Int
+    size: Int
     registers: List<MMIORegister>
 }
 
@@ -576,7 +576,7 @@ defn add_mmio_register(region: MMIORegion, name: String, offset: Int, width: Int
 
 defn find_mmio_register(region: MMIORegion, name: String) -> Option<MMIORegister> {
     let i: Int = 0;
-    [i < region.registers.len()] {
+    when i < region.registers.len() {
         [region.registers[i].name == name] {
             term Some(region.registers[i]);
         };
@@ -590,10 +590,10 @@ defn emit_mmio_load(base_reg: String, reg: MMIORegister, dest_reg: String) -> Li
     let offset = reg.address - base_reg;  // Simplified - would need base address
     let instrs: List<A64Instr> = [];
     
-    [reg.width <= 32] {
+    when reg.width <= 32 {
         instrs = instrs.append(LDR(dest_reg, base_reg, offset));
     };
-    [reg.width > 32] {
+    when reg.width > 32 {
         instrs = instrs.append(LDR(dest_reg, base_reg, offset));
     };
     
@@ -605,11 +605,11 @@ defn emit_mmio_store(base_reg: String, reg: MMIORegister, value_reg: String) -> 
     let offset = reg.address - base_reg;
     let instrs: List<A64Instr> = [];
     
-    [reg.access == "RO"] {
+    when reg.access == "RO" {
         // Read-only register - emit warning comment
         instrs = instrs.append(Comment("WARNING: Attempted write to read-only register " + reg.name));
     };
-    [reg.access != "RO"] {
+    when reg.access != "RO" {
         instrs = instrs.append(STR(value_reg, base_reg, offset));
     };
     
@@ -831,7 +831,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(B(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;  // PC-relative, divided by 4
             let enc = 0x14000000 | (offset  &  0x3FFFFFF);
@@ -841,7 +841,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BL(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x94000000 | (offset  &  0x3FFFFFF);
@@ -851,7 +851,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BEQ(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x54000000 | (offset  &  0xFFFFF);  // 20-bit offset, condition 0000 = EQ
@@ -861,7 +861,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BNE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x54000001 | (offset  &  0xFFFFF);  // Condition 0001 = NE
@@ -871,7 +871,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BLT(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x5400000A | (offset  &  0xFFFFF);  // Condition 1010 = LT
@@ -881,7 +881,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BGT(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x5400000C | (offset  &  0xFFFFF);  // Condition 1100 = GT
@@ -891,7 +891,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BLE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x5400000E | (offset  &  0xFFFFF);  // Condition 1110 = LE
@@ -901,7 +901,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(BGE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let enc = 0x5400000A | (offset  &  0xFFFFF);  // Condition 1010 = GE (actually CS)
@@ -937,7 +937,7 @@ defn encode_instr_with_labels(instr: A64Instr, pc: Int, labels: HashMap<String, 
     };
     
     uni instr(TBZ(rt, bit, label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = (target - pc) / 4;
             let rt_num = reg_to_num(rt);
@@ -986,7 +986,7 @@ defn resolve_labels(instrs: List<A64Instr>) -> HashMap<String, Int> {
     let pc: Int = 0;
     
     let i: Int = 0;
-    [i < instrs.len()] {
+    when i < instrs.len() {
         uni instrs[i](Label(name)) = {
             labels = labels.insert(name, pc);
         };
@@ -1008,7 +1008,7 @@ defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
     let pc: Int = 0;
     
     let i: Int = 0;
-    [i < instrs.len()] {
+    when i < instrs.len() {
         let bytes = encode_instr_with_labels(instrs[i], pc, labels);
         binary = binary.append_all(bytes);
         pc = pc + instr_byte_size(instrs[i]);
@@ -1019,37 +1019,37 @@ defn emit_binary(instrs: List<A64Instr>) -> List<u8> {
 }
 
 defn reg_to_num(reg: String) -> u32 {
-    [reg == "X0"] { term 0; };
-    [reg == "X1"] { term 1; };
-    [reg == "X2"] { term 2; };
-    [reg == "X3"] { term 3; };
-    [reg == "X4"] { term 4; };
-    [reg == "X5"] { term 5; };
-    [reg == "X6"] { term 6; };
-    [reg == "X7"] { term 7; };
-    [reg == "X8"] { term 8; };
-    [reg == "X9"] { term 9; };
-    [reg == "X10"] { term 10; };
-    [reg == "X11"] { term 11; };
-    [reg == "X12"] { term 12; };
-    [reg == "X13"] { term 13; };
-    [reg == "X14"] { term 14; };
-    [reg == "X15"] { term 15; };
-    [reg == "X16"] { term 16; };
-    [reg == "X17"] { term 17; };
-    [reg == "X18"] { term 18; };
-    [reg == "X19"] { term 19; };
-    [reg == "X20"] { term 20; };
-    [reg == "X21"] { term 21; };
-    [reg == "X22"] { term 22; };
-    [reg == "X23"] { term 23; };
-    [reg == "X24"] { term 24; };
-    [reg == "X25"] { term 25; };
-    [reg == "X26"] { term 26; };
-    [reg == "X27"] { term 27; };
-    [reg == "X28"] { term 28; };
-    [reg == "X29"] { term 29; };
-    [reg == "X30"] { term 30; };
+    when reg == "X0" { term 0; };
+    when reg == "X1" { term 1; };
+    when reg == "X2" { term 2; };
+    when reg == "X3" { term 3; };
+    when reg == "X4" { term 4; };
+    when reg == "X5" { term 5; };
+    when reg == "X6" { term 6; };
+    when reg == "X7" { term 7; };
+    when reg == "X8" { term 8; };
+    when reg == "X9" { term 9; };
+    when reg == "X10" { term 10; };
+    when reg == "X11" { term 11; };
+    when reg == "X12" { term 12; };
+    when reg == "X13" { term 13; };
+    when reg == "X14" { term 14; };
+    when reg == "X15" { term 15; };
+    when reg == "X16" { term 16; };
+    when reg == "X17" { term 17; };
+    when reg == "X18" { term 18; };
+    when reg == "X19" { term 19; };
+    when reg == "X20" { term 20; };
+    when reg == "X21" { term 21; };
+    when reg == "X22" { term 22; };
+    when reg == "X23" { term 23; };
+    when reg == "X24" { term 24; };
+    when reg == "X25" { term 25; };
+    when reg == "X26" { term 26; };
+    when reg == "X27" { term 27; };
+    when reg == "X28" { term 28; };
+    when reg == "X29" { term 29; };
+    when reg == "X30" { term 30; };
     term 0;
 }
 
@@ -1058,51 +1058,51 @@ defn u32_to_le_bytes(n: u32) -> List<u8> {
 }
 
 defn cond_to_num(cond: String) -> u32 {
-    [cond == "EQ"] { term 0x0; };
-    [cond == "NE"] { term 0x1; };
-    [cond == "CS"] { term 0x2; };
-    [cond == "CC"] { term 0x3; };
-    [cond == "MI"] { term 0x4; };
-    [cond == "PL"] { term 0x5; };
-    [cond == "VS"] { term 0x6; };
-    [cond == "VC"] { term 0x7; };
-    [cond == "HI"] { term 0x8; };
-    [cond == "LS"] { term 0x9; };
-    [cond == "GE"] { term 0xA; };
-    [cond == "LT"] { term 0xB; };
-    [cond == "GT"] { term 0xC; };
-    [cond == "LE"] { term 0xD; };
-    [cond == "AL"] { term 0xE; };
+    when cond == "EQ" { term 0x0; };
+    when cond == "NE" { term 0x1; };
+    when cond == "CS" { term 0x2; };
+    when cond == "CC" { term 0x3; };
+    when cond == "MI" { term 0x4; };
+    when cond == "PL" { term 0x5; };
+    when cond == "VS" { term 0x6; };
+    when cond == "VC" { term 0x7; };
+    when cond == "HI" { term 0x8; };
+    when cond == "LS" { term 0x9; };
+    when cond == "GE" { term 0xA; };
+    when cond == "LT" { term 0xB; };
+    when cond == "GT" { term 0xC; };
+    when cond == "LE" { term 0xD; };
+    when cond == "AL" { term 0xE; };
     term 0xE;  // Default: AL (always)
 }
 
 defn invert_cond(cond: String) -> String {
-    [cond == "EQ"] { term "NE"; };
-    [cond == "NE"] { term "EQ"; };
-    [cond == "CS"] { term "CC"; };
-    [cond == "CC"] { term "CS"; };
-    [cond == "MI"] { term "PL"; };
-    [cond == "PL"] { term "MI"; };
-    [cond == "VS"] { term "VC"; };
-    [cond == "VC"] { term "VS"; };
-    [cond == "HI"] { term "LS"; };
-    [cond == "LS"] { term "HI"; };
-    [cond == "GE"] { term "LT"; };
-    [cond == "LT"] { term "GE"; };
-    [cond == "GT"] { term "LE"; };
-    [cond == "LE"] { term "GT"; };
+    when cond == "EQ" { term "NE"; };
+    when cond == "NE" { term "EQ"; };
+    when cond == "CS" { term "CC"; };
+    when cond == "CC" { term "CS"; };
+    when cond == "MI" { term "PL"; };
+    when cond == "PL" { term "MI"; };
+    when cond == "VS" { term "VC"; };
+    when cond == "VC" { term "VS"; };
+    when cond == "HI" { term "LS"; };
+    when cond == "LS" { term "HI"; };
+    when cond == "GE" { term "LT"; };
+    when cond == "LT" { term "GE"; };
+    when cond == "GT" { term "LE"; };
+    when cond == "LE" { term "GT"; };
     term "AL";
 }
 
 defn prfop_to_num(prfop: String) -> u32 {
-    [prfop == "PLDL1KEEP"] { term 0x0; };
-    [prfop == "PLDL1STRM"] { term 0x1; };
-    [prfop == "PLDL2KEEP"] { term 0x2; };
-    [prfop == "PLDL2STRM"] { term 0x3; };
-    [prfop == "PLDL3KEEP"] { term 0x4; };
-    [prfop == "PLDL3STRM"] { term 0x5; };
-    [prfop == "PSTL1KEEP"] { term 0x8; };
-    [prfop == "PSTL1STRM"] { term 0x9; };
+    when prfop == "PLDL1KEEP" { term 0x0; };
+    when prfop == "PLDL1STRM" { term 0x1; };
+    when prfop == "PLDL2KEEP" { term 0x2; };
+    when prfop == "PLDL2STRM" { term 0x3; };
+    when prfop == "PLDL3KEEP" { term 0x4; };
+    when prfop == "PLDL3STRM" { term 0x5; };
+    when prfop == "PSTL1KEEP" { term 0x8; };
+    when prfop == "PSTL1STRM" { term 0x9; };
     term 0x0;
 }
 
@@ -1123,7 +1123,7 @@ defn generate_reactor(txns: List<Transaction>) -> List<A64Instr> {
     
     // Call each transaction
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         instrs = instrs.append(emit_bl(txns[i].name + "_check"));
         i = i + 1;
     };
@@ -1152,7 +1152,7 @@ defn generate_transaction_check(txn: Transaction) -> List<A64Instr> {
     // Load state variables into registers
     // For each parameter, allocate register and load value
     let i: Int = 0;
-    [i < txn.params.len()] {
+    when i < txn.params.len() {
         let param = txn.params[i];
         let (reg, new_alloc) = alloc_reg(alloc, None);
         alloc = new_alloc;
@@ -1188,7 +1188,7 @@ defn generate_statement_list(stmts: List<Statement>, alloc: RegisterAllocator) -
     let current_alloc = alloc;
     
     let i: Int = 0;
-    [i < stmts.len()] {
+    when i < stmts.len() {
         let (stmt_instrs, new_alloc) = generate_statement(stmts[i], current_alloc);
         instrs = instrs.append_all(stmt_instrs);
         current_alloc = new_alloc;
@@ -1229,7 +1229,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         let current_alloc = alloc;
         
         let i: Int = 0;
-        [i < values.len()] {
+        when i < values.len() {
             [values[i].is_some()] {
                 let (expr_instrs, new_alloc) = generate_expr(values[i].unwrap(), current_alloc);
                 instrs = instrs.append_all(expr_instrs);
@@ -1268,7 +1268,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
         let instrs: List<A64Instr> = [emit_comment("#on_exit cleanup")];
         let current_alloc = alloc;
         let i: Int = 0;
-        [i < body.len()] {
+        when i < body.len() {
             let (body_instrs, new_alloc) = generate_statement(body[i], current_alloc);
             instrs = instrs.append_all(body_instrs);
             current_alloc = new_alloc;
@@ -1280,7 +1280,7 @@ defn generate_statement(stmt: Statement, alloc: RegisterAllocator) -> (List<A64I
     uni stmt(StmtAlka(block)) = {
         let instrs: List<A64Instr> = [];
         let label = "alka";
-        [block.dangerous] { label = "alka!"; };
+        when block.dangerous { label = "alka!"; };
         let instrs = [emit_comment(label + ": " + block.content)];
         term (instrs, alloc);
     };
@@ -1323,10 +1323,10 @@ defn generate_expr(expr: Expr, alloc: RegisterAllocator) -> (List<A64Instr>, Reg
         let instrs = left_instrs;
         instrs = instrs.append_all(right_instrs);
         
-        [op == "+"] {
+        when op == "+" {
             instrs = instrs.append(emit_add(result_reg, "X0", "X1"));  // Assume results in X0, X1
         };
-        [op == "-"] {
+        when op == "-" {
             instrs = instrs.append(emit_sub(result_reg, "X0", "X1"));
         };
         
@@ -1343,17 +1343,17 @@ defn generate_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
     let all_instrs: List<A64Instr> = [];
     
     // Emit acyclicity annotation in comment instrs
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         all_instrs = all_instrs.append(Comment("Call graph: acyclic -- static dispatch enabled"));
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         all_instrs = all_instrs.append(Comment("Call graph: cyclic -- dynamic dispatch required"));
     };
     
     // Extract transactions
     let txns: List<Transaction> = [];
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
@@ -1366,7 +1366,7 @@ defn generate_aarch64(program: Program, cg: CallGraphResult) -> List<u8> {
     
     // Generate transaction check functions
     let j: Int = 0;
-    [j < txns.len()] {
+    when j < txns.len() {
         let txn_instrs = generate_transaction_check(txns[j]);
         all_instrs = all_instrs.append_all(txn_instrs);
         j = j + 1;
@@ -1416,7 +1416,7 @@ defn generate_guard_with_prefetch(guard: Expr, data_addrs: List<Int>) -> List<A6
     
     // Insert pre-fetches for associated data
     let i: Int = 0;
-    [i < data_addrs.len()] {
+    when i < data_addrs.len() {
         instrs = instrs.append(PRFM("PLDL1KEEP", data_addrs[i]));
         i = i + 1;
     };
@@ -1437,7 +1437,7 @@ defn can_fuse_transactions(txn1: Transaction, txn2: Transaction) -> Bool {
     
     // Check for conflicts
     let i: Int = 0;
-    [i < writes1.len()] {
+    when i < writes1.len() {
         [reads2.contains(writes1[i])] {
             term false;  // Can't fuse - second reads what first writes
         };
@@ -1482,14 +1482,14 @@ defn calculate_stack_layout(txns: List<Transaction>) -> HashMap<String, Int> {
     let used_slots: HashSet<Int> = new_set();
     
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         let vars = collect_vars(txns[i].body);
         let j: Int = 0;
-        [j < vars.len()] {
+        when j < vars.len() {
             [!layout.contains_key(vars[j])] {
                 // Find first available slot
                 let slot: Int = 0;
-                [used_slots.contains(slot)] {
+                when used_slots.contains(slot) {
                     slot = slot + 1;
                 };
                 layout = layout.insert(vars[j], slot * 8);  // 8 bytes per slot
@@ -1511,7 +1511,7 @@ defn schedule_transactions_parallel(txns: List<Transaction>) -> List<List<Transa
     let scheduled: HashSet<String> = new_set();
     
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         [!scheduled.contains(txns[i].name)] {
             let group: List<Transaction> = [];
             group = group.append(txns[i]);
@@ -1519,7 +1519,7 @@ defn schedule_transactions_parallel(txns: List<Transaction>) -> List<List<Transa
             
             // Find other transactions that can run in parallel
             let j: Int = i + 1;
-            [j < txns.len()] {
+            when j < txns.len() {
                 [!scheduled.contains(txns[j].name)] {
                     [can_run_parallel(txns[i], txns[j])] {
                         group = group.append(txns[j]);
@@ -1549,7 +1549,7 @@ defn can_run_parallel(txn1: Transaction, txn2: Transaction) -> Bool {
     // - One reads what other writes
     
     let i: Int = 0;
-    [i < writes1.len()] {
+    when i < writes1.len() {
         [writes2.contains(writes1[i])] {
             term false;  // Both write same variable
         };
@@ -1560,7 +1560,7 @@ defn can_run_parallel(txn1: Transaction, txn2: Transaction) -> Bool {
     };
     
     let j: Int = 0;
-    [j < writes2.len()] {
+    when j < writes2.len() {
         [reads1.contains(writes2[j])] {
             term false;  // txn1 reads what txn2 writes
         };
@@ -1596,17 +1596,17 @@ defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u
     let all_instrs: List<A64Instr> = [];
     
     // Emit acyclicity annotation in comment instrs
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         all_instrs = all_instrs.append(Comment("Call graph: acyclic -- parallel scheduling enabled"));
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         all_instrs = all_instrs.append(Comment("Call graph: cyclic -- sequential dispatch with depth limit"));
     };
     
     // Extract transactions
     let txns: List<Transaction> = [];
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
@@ -1616,8 +1616,8 @@ defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u
     // OPTIMIZATION 1: Fuse transactions
     let fused_txns: List<Transaction> = [];
     let j: Int = 0;
-    [j < txns.len()] {
-        [j + 1 < txns.len()] {
+    when j < txns.len() {
+        when j + 1 < txns.len() {
             [can_fuse_transactions(txns[j], txns[j+1])] {
                 let fused = fuse_transactions(txns[j], txns[j+1]);
                 fused_txns = fused_txns.append(fused);
@@ -1628,7 +1628,7 @@ defn generate_optimized_aarch64(program: Program, cg: CallGraphResult) -> List<u
                 j = j + 1;
             };
         };
-        [j + 1 >= txns.len()] {
+        when j + 1 >= txns.len() {
             fused_txns = fused_txns.append(txns[j]);
             j = j + 1;
         };
@@ -1658,16 +1658,16 @@ defn generate_optimized_reactor(groups: List<List<Transaction>>, layout: HashMap
     
     // Process each parallel group
     let i: Int = 0;
-    [i < groups.len()] {
+    when i < groups.len() {
         let group = groups[i];
         
-        [group.len() > 1] {
+        when group.len() > 1 {
             // Multiple transactions - can run in parallel
             instrs = instrs.append(emit_comment("Parallel group " + String(i)));
             
             // Spawn threads for parallel execution
             let j: Int = 1;
-            [j < group.len()] {
+            when j < group.len() {
                 instrs = instrs.append(emit_bl(group[j].name + "_check"));
                 j = j + 1;
             };
@@ -1679,7 +1679,7 @@ defn generate_optimized_reactor(groups: List<List<Transaction>>, layout: HashMap
             instrs = instrs.append(emit_comment("Wait for parallel group"));
         };
         
-        [group.len() == 1] {
+        when group.len() == 1 {
             // Single transaction - no parallelism
             instrs = instrs.append(emit_bl(group[0].name + "_check"));
         };
@@ -1699,7 +1699,7 @@ defn calculate_stack_size(layout: HashMap<String, Int>) -> Int {
     let max_offset: Int = 0;
     let offsets = layout.values();
     let i: Int = 0;
-    [i < offsets.len()] {
+    when i < offsets.len() {
         [offsets[i] > max_offset] {
             max_offset = offsets[i];
         };

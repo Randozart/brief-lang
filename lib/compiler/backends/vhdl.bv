@@ -23,39 +23,39 @@ enum PortDirection {
 // ===== VHDL STRUCTS =====
 
 obj Entity {
-    name: String,
-    ports: List<Port>,
+    name: String
+    ports: List<Port>
     generics: List<GenericParam>
 }
 
 obj Architecture {
-    entity_name: String,
-    name: String,
-    signals: List<Signal>,
+    entity_name: String
+    name: String
+    signals: List<Signal>
     processes: List<Process>
 }
 
 obj Port {
-    name: String,
-    direction: PortDirection,
+    name: String
+    direction: PortDirection
     data_type: VhdlDataType
 }
 
 obj GenericParam {
-    name: String,
-    data_type: VhdlDataType,
+    name: String
+    data_type: VhdlDataType
     default_value: String
 }
 
 obj Signal {
-    name: String,
-    data_type: VhdlDataType,
+    name: String
+    data_type: VhdlDataType
     default_value: Option<String>
 }
 
 obj Process {
-    sensitivity_list: List<String>,
-    statements: List<String>,
+    sensitivity_list: List<String>
+    statements: List<String>
     name: String
 }
 
@@ -98,10 +98,10 @@ defn generate_entity(name: String, ports: List<Port>, generics: List<GenericPara
     sb = sb.append_str(name);
     sb = sb.append_str(" is\n");
 
-    [generics.len() > 0] {
+    when generics.len() > 0 {
         sb = sb.append_str("  generic (\n");
         let i: Int = 0;
-        [i < generics.len()] {
+        when i < generics.len() {
             sb = sb.append_str("    ");
             sb = sb.append_str(generics[i].name);
             sb = sb.append_str(": ");
@@ -110,7 +110,7 @@ defn generate_entity(name: String, ports: List<Port>, generics: List<GenericPara
                 sb = sb.append_str(" := ");
                 sb = sb.append_str(generics[i].default_value);
             };
-            [i < generics.len() - 1] { sb = sb.append_str(";"); };
+            when i < generics.len() - 1 { sb = sb.append_str(";"); };
             sb = sb.append_str("\n");
             i = i + 1;
         };
@@ -119,14 +119,14 @@ defn generate_entity(name: String, ports: List<Port>, generics: List<GenericPara
 
     sb = sb.append_str("  port (\n");
     let i: Int = 0;
-    [i < ports.len()] {
+    when i < ports.len() {
         sb = sb.append_str("    ");
         sb = sb.append_str(ports[i].name);
         sb = sb.append_str(": ");
         sb = sb.append_str(port_direction_str(ports[i].direction));
         sb = sb.append_str(" ");
         sb = sb.append_str(vhdl_type_str(ports[i].data_type));
-        [i < ports.len() - 1] { sb = sb.append_str(";"); };
+        when i < ports.len() - 1 { sb = sb.append_str(";"); };
         sb = sb.append_str("\n");
         i = i + 1;
     };
@@ -146,9 +146,9 @@ defn generate_architecture(entity_name: String, signals: List<Signal>, processes
     sb = sb.append_str(" is\n");
 
     // Signal declarations
-    [signals.len() > 0] {
+    when signals.len() > 0 {
         let i: Int = 0;
-        [i < signals.len()] {
+        when i < signals.len() {
             sb = sb.append_str("  signal ");
             sb = sb.append_str(signals[i].name);
             sb = sb.append_str(": ");
@@ -168,7 +168,7 @@ defn generate_architecture(entity_name: String, signals: List<Signal>, processes
 
     // Process bodies
     let i: Int = 0;
-    [i < processes.len()] {
+    when i < processes.len() {
         sb = sb.append_str("  ");
         sb = sb.append_str(processes[i].name);
         sb = sb.append_str(": process (");
@@ -208,7 +208,7 @@ defn transaction_to_vhdl(txn: Transaction, state_names: List<String>) -> Process
 
     // Extract state variable reads/writes from body
     let i: Int = 0;
-    [i < txn.body.len()] {
+    when i < txn.body.len() {
         stmts = append(stmts, statement_to_vhdl(txn.body[i]));
         i = i + 1;
     };
@@ -230,7 +230,7 @@ defn statement_to_vhdl(stmt: Statement) -> String {
     uni stmt(StmtGuarded(guard, body)) = {
         let result = "if " + expr_to_vhdl(guard) + " then\n";
         let i: Int = 0;
-        [i < body.len()] {
+        when i < body.len() {
             result = result + "      " + statement_to_vhdl(body[i]) + "\n";
             i = i + 1;
         };
@@ -290,7 +290,7 @@ defn generate_vhdl(program: Program, cg: CallGraphResult) -> (String, String) {
 
     // Collect state declarations as entity ports
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopState(decl)) = {
             state_names = append(state_names, decl.name);
             ports = append(ports, Port {
@@ -313,7 +313,7 @@ defn generate_vhdl(program: Program, cg: CallGraphResult) -> (String, String) {
 
     // Convert each transaction to a process
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopTxn(txn)) = {
             processes = append(processes, transaction_to_vhdl(txn, state_names));
         };

@@ -97,7 +97,7 @@ defn eval_symbolic(expr: Expr, state: SymbolicState) -> SymbolicValue {
     
     // Variables
     uni expr(ExprVar(name)) = {
-        [state.vars.contains_key(name)] {
+        when state.vars.contains_key(name) {
             term state.vars.get(name).unwrap();
         };
         term SymVar(name);
@@ -139,42 +139,42 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
         // Constant folding
         uni left_simp(SymInt(l)) = {
             uni right_simp(SymInt(r)) = {
-            [op == "+"] { term SymInt(l + r); };
-            [op == "-"] { term SymInt(l - r); };
-            [op == "*"] { term SymInt(l * r); };
-            [op == "/"] { [r != 0] { term SymInt(l / r); }; };
-            [op == "%"] { [r != 0] { term SymInt(l % r); }; };
-            [true] { term SymUnknown; };
+            when op == "+" { term SymInt(l + r); };
+            when op == "-" { term SymInt(l - r); };
+            when op == "*" { term SymInt(l * r); };
+            when op == "/" { [r != 0] { term SymInt(l / r); }; };
+            when op == "%" { [r != 0] { term SymInt(l % r); }; };
+            when true { term SymUnknown; };
         };
-        [true] { term SymUnknown; };
+        when true { term SymUnknown; };
         };
         
         uni left_simp(SymFloat(l)) = {
             uni right_simp(SymFloat(r)) = {
-            [op == "+"] { term SymFloat(l + r); };
-            [op == "-"] { term SymFloat(l - r); };
-            [op == "*"] { term SymFloat(l * r); };
-            [op == "/"] { [r != 0.0] { term SymFloat(l / r); }; };
+            when op == "+" { term SymFloat(l + r); };
+            when op == "-" { term SymFloat(l - r); };
+            when op == "*" { term SymFloat(l * r); };
+            when op == "/" { [r != 0.0] { term SymFloat(l / r); }; };
         };
-        [true] { term SymUnknown; };
+        when true { term SymUnknown; };
         };
         
         uni left_simp(SymBool(l)) = {
             uni right_simp(SymBool(r)) = {
-                [op == "&&"] { term SymBool(l && r); };
-                [op == "||"] { term SymBool(l || r); };
-                [op == "=="] { term SymBool(l == r); };
-                [op == "!="] { term SymBool(l != r); };
+                when op == "&&" { term SymBool(l && r); };
+                when op == "||" { term SymBool(l || r); };
+                when op == "==" { term SymBool(l == r); };
+                when op == "!=" { term SymBool(l != r); };
             };
-            [true] { term SymUnknown; };
+            when true { term SymUnknown; };
         };
         
         // Identity operations
-        [op == "+"] {
+        when op == "+" {
             uni left_simp(SymInt(0)) = { term right_simp; };
             uni right_simp(SymInt(0)) = { term left_simp; };
         };
-        [op == "*"] {
+        when op == "*" {
             uni left_simp(SymInt(1)) = { term right_simp; };
             uni right_simp(SymInt(1)) = { term left_simp; };
             uni left_simp(SymInt(0)) = { term SymInt(0); };
@@ -187,12 +187,12 @@ defn simplify(sym: SymbolicValue) -> SymbolicValue {
     uni sym(SymUnaryOp(op, operand)) = {
         let operand_simp = simplify(operand);
         
-        [op == "-"] {
+        when op == "-" {
             uni operand_simp(SymInt(n)) = {
                 term SymInt(-n);
             };
         };
-        [op == "!"] {
+        when op == "!" {
             uni operand_simp(SymBool(b)) = {
                 term SymBool(!b);
             };
@@ -216,7 +216,7 @@ defn check_constraint(constraint: SymbolicValue) -> Bool {
 
 defn constraints_satisfiable(constraints: List<SymbolicValue>) -> Bool {
     let i: Int = 0;
-    [i < constraints.len()] {
+    when i < constraints.len() {
         [!check_constraint(constraints[i])] {
             term false;
         };
@@ -228,9 +228,9 @@ defn constraints_satisfiable(constraints: List<SymbolicValue>) -> Bool {
 // ===== PATH EXPLORATION =====
 
 obj ExecutionPath {
-    statements: List<Statement>,
-    constraints: List<SymbolicValue>,
-    final_state: SymbolicState,
+    statements: List<Statement>
+    constraints: List<SymbolicValue>
+    final_state: SymbolicState
     feasible: Bool
 }
 
@@ -242,11 +242,11 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
     work_queue = work_queue.append((stmts, initial, []));
     
     let iterations: Int = 0;
-    [iterations < 1000 && work_queue.len() > 0] {
+    when iterations < 1000 && work_queue.len() > 0 {
         let (remaining, state, constraints) = work_queue[0];
         work_queue = work_queue.drop(1);
         
-        [remaining.len() == 0] {
+        when remaining.len() == 0 {
             // Complete path
             paths = paths.append(ExecutionPath {
                 statements: stmts,
@@ -255,7 +255,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
                 feasible: constraints_satisfiable(constraints)
             });
         };
-        [remaining.len() > 0] {
+        when remaining.len() > 0 {
             let stmt = remaining[0];
             let rest = remaining.drop(1);
             
@@ -296,7 +296,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
             };
             
             // Non-branching statement
-            [!was_guarded] {
+            when !was_guarded {
                 let new_state = execute_statement_symbolic(stmt, state);
                 work_queue = work_queue.append((rest, new_state, constraints));
             };
@@ -310,7 +310,7 @@ defn explore_paths(stmts: List<Statement>, initial: SymbolicState) -> List<Execu
 
 defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> SymbolicState {
     uni stmt(StmtLet(name, _, init_opt, _, _)) = {
-        [is_some(init_opt)] {
+        when is_some(init_opt) {
             let init = unwrap(init_opt);
             let value = eval_symbolic(init, state);
             term state_assign(state, name, value);
@@ -331,7 +331,7 @@ defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> Symbol
         // Execute cleanup body inline for symbolic analysis
         let i: Int = 0;
         let st = state;
-        [i < body.len()] {
+        when i < body.len() {
             st = execute_statement_symbolic(body[i], st);
             i = i + 1;
         };
@@ -354,14 +354,14 @@ defn execute_statement_symbolic(stmt: Statement, state: SymbolicState) -> Symbol
 // ===== CONTRACT VERIFICATION =====
 
 obj ProofResult {
-    verified: Bool,
-    counterexample: Option<CounterExample>,
+    verified: Bool
+    counterexample: Option<CounterExample>
     paths_explored: Int
 }
 
 obj CounterExample {
-    inputs: HashMap<String, SymbolicValue>,
-    path: ExecutionPath,
+    inputs: HashMap<String, SymbolicValue>
+    path: ExecutionPath
     violation: String
 }
 
@@ -372,7 +372,7 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     // Add prior state for state variables (for @var postcondition references)
     // and for each parameter
     let i: Int = 0;
-    [i < txn.params.len()] {
+    when i < txn.params.len() {
         let param = txn.params[i];
         initial = state_assign(initial, "@" + param.name, SymVar("@old_" + param.name));
         i = i + 1;
@@ -389,11 +389,11 @@ defn verify_contract(txn: Transaction) -> ProofResult {
     let counterexample: Option<CounterExample> = None;
     
     let i: Int = 0;
-    [i < paths.len()] {
+    when i < paths.len() {
         let path = paths[i];
         
         // Check if path is feasible
-        [path.feasible] {
+        when path.feasible {
             // Evaluate postcondition on final state.
             // @var references are resolved from the initial state,
             // while var references use the post-execution (final) state.
@@ -489,7 +489,7 @@ defn sym_to_debug_string(sym: SymbolicValue) -> String {
 defn str_replace(s: String, from: String, to: String) -> String {
     let result = "";
     let i: Int = 0;
-    [i < s.len()] {
+    when i < s.len() {
         [s[i..i + from.len()] == from] {
             result = result + to;
             i = i + from.len();
@@ -512,7 +512,7 @@ defn verify_precondition(precondition: Expr, state: SymbolicState, strict_mode: 
     uni pre_simp(SymBool(false)) = {
         term false;
     };
-    [strict_mode] {
+    when strict_mode {
         term false;  // Strict: unknown constraints fail verification
     };
     term true;  // Unknown preconditions assumed satisfiable (non-strict mode)
@@ -528,7 +528,7 @@ defn verify_postcondition(postcondition: Expr, state: SymbolicState, strict_mode
     uni post_simp(SymBool(false)) = {
         term false;
     };
-    [strict_mode] {
+    when strict_mode {
         term false;  // Strict: unknown constraints fail verification
     };
     term true;  // Unknown postconditions need manual verification (non-strict mode)
@@ -537,14 +537,14 @@ defn verify_postcondition(postcondition: Expr, state: SymbolicState, strict_mode
 // ===== MUTUAL EXCLUSION CHECKING =====
 
 obj ConflictResult {
-    has_conflict: Bool,
-    conflicting_txns: List<String>,
+    has_conflict: Bool
+    conflicting_txns: List<String>
     explanation: String
 }
 
 defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictResult {
     // Both must be async and reactive to have conflicts
-    [!txn1.is_async || !txn2.is_async] {
+    when !txn1.is_async || !txn2.is_async {
         term ConflictResult {
             has_conflict: false,
             conflicting_txns: [],
@@ -552,7 +552,7 @@ defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictRes
         };
     };
     
-    [!txn1.is_reactive || !txn2.is_reactive] {
+    when !txn1.is_reactive || !txn2.is_reactive {
         term ConflictResult {
             has_conflict: false,
             conflicting_txns: [],
@@ -565,9 +565,9 @@ defn check_mutual_exclusion(txn1: Transaction, txn2: Transaction) -> ConflictRes
     let writes2 = collect_writes(txn2.body);
     
     let i: Int = 0;
-    [i < writes1.len()] {
+    when i < writes1.len() {
         let j: Int = 0;
-        [j < writes2.len()] {
+        when j < writes2.len() {
             [writes1[i] == writes2[j]] {
                 term ConflictResult {
                     has_conflict: true,
@@ -591,7 +591,7 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
     let writes: List<String> = [];
     
     let i: Int = 0;
-    [i < stmts.len()] {
+    when i < stmts.len() {
         uni stmts[i](StmtLet(name, _, _, _, _)) = {
             writes = writes.append(name);
         };
@@ -645,8 +645,8 @@ defn collect_writes(stmts: List<Statement>) -> List<String> {
 // ===== DEADLOCK DETECTION =====
 
 obj DeadlockResult {
-    has_deadlock: Bool,
-    cycle: List<String>,
+    has_deadlock: Bool
+    cycle: List<String>
     explanation: String
 }
 
@@ -655,7 +655,7 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
     let deps: HashMap<String, List<String>> = new_map();
     
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         let cur_txn = txns[i];
         let reads = collect_reads(cur_txn.body);
         let writes = collect_writes(cur_txn.body);
@@ -663,13 +663,13 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
         // Find transactions that write to variables this one reads
         let txn_deps: List<String> = [];
         let j: Int = 0;
-        [j < txns.len()] {
-            [i != j] {
+        when j < txns.len() {
+            when i != j {
                 let other_writes = collect_writes(txns[j].body);
                 let k: Int = 0;
-                [k < reads.len()] {
+                when k < reads.len() {
                     let l: Int = 0;
-                    [l < other_writes.len()] {
+                    when l < other_writes.len() {
                         [reads[k] == other_writes[l]] {
                             txn_deps = txn_deps.append(txns[j].name);
                         };
@@ -690,10 +690,10 @@ defn detect_deadlock(txns: List<Transaction>) -> DeadlockResult {
     let rec_stack: HashSet<String> = new_set();
     
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         [!visited.contains(txns[i].name)] {
             let (has_cycle, cycle) = dfs_cycle(txns[i].name, deps, visited, rec_stack, []);
-            [has_cycle] {
+            when has_cycle {
                 term DeadlockResult {
                     has_deadlock: true,
                     cycle: cycle,
@@ -722,18 +722,18 @@ defn dfs_cycle(node: String, deps: HashMap<String, List<String>>,
     rec_stack = rec_stack.insert(node);
     path = path.append(node);
     
-    [deps.contains_key(node)] {
+    when deps.contains_key(node) {
         let neighbors = deps.get(node).unwrap();
         let i: Int = 0;
-        [i < neighbors.len()] {
+        when i < neighbors.len() {
             let neighbor = neighbors[i];
-            [!visited.contains(neighbor)] {
+            when !visited.contains(neighbor) {
                 let (has_cycle, cycle) = dfs_cycle(neighbor, deps, visited, rec_stack, path);
-                [has_cycle] {
+                when has_cycle {
                     term (true, cycle);
                 };
             };
-            [rec_stack.contains(neighbor)] {
+            when rec_stack.contains(neighbor) {
                 // Found cycle
                 term (true, path.append(neighbor));
             };
@@ -781,7 +781,7 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
     uni expr(ExprCall(_, args)) = {
         let reads: List<String> = [];
         let i: Int = 0;
-        [i < args.len()] {
+        when i < args.len() {
             reads = reads.append_all(collect_reads_expr(args[i]));
             i = i + 1;
         };
@@ -791,7 +791,7 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
     uni expr(ExprList(items)) = {
         let reads: List<String> = [];
         let i: Int = 0;
-        [i < items.len()] {
+        when i < items.len() {
             reads = reads.append_all(collect_reads_expr(items[i]));
             i = i + 1;
         };
@@ -801,7 +801,7 @@ defn collect_reads_expr(expr: Expr) -> List<String> {
     uni expr(ExprStruct(_, fields)) = {
         let reads: List<String> = [];
         let i: Int = 0;
-        [i < fields.len()] {
+        when i < fields.len() {
             reads = reads.append_all(collect_reads_expr(fields[i].1));
             i = i + 1;
         };
@@ -816,9 +816,9 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
     let reads: List<String> = [];
     
     let i: Int = 0;
-    [i < stmts.len()] {
+    when i < stmts.len() {
         uni stmts[i](StmtLet(_, _, init_opt, _, _)) = {
-            [is_some(init_opt)] {
+            when is_some(init_opt) {
                 let init = unwrap(init_opt);
                 reads = reads.append_all(collect_reads_expr(init));
             };
@@ -829,7 +829,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
         };
         uni stmts[i](StmtTerm(values, _)) = {
             let j: Int = 0;
-            [j < values.len()] {
+            when j < values.len() {
                 [values[j].is_some()] {
                     reads = reads.append_all(collect_reads_expr(values[j].unwrap()));
                 };
@@ -871,7 +871,7 @@ defn collect_reads(stmts: List<Statement>) -> List<String> {
 // ===== VERIFICATION CONDITIONS =====
 
 obj VerificationCondition {
-    assumptions: List<SymbolicValue>,
+    assumptions: List<SymbolicValue>
     conclusion: SymbolicValue
 }
 
@@ -892,7 +892,7 @@ defn check_vc(vc: VerificationCondition) -> Bool {
     let state = initial_state();
     
     let i: Int = 0;
-    [i < vc.assumptions.len()] {
+    when i < vc.assumptions.len() {
         state = state_add_constraint(state, vc.assumptions[i]);
         i = i + 1;
     };
@@ -916,7 +916,7 @@ defn sym_to_string(sym: SymbolicValue) -> String {
         term String(f);
     };
     uni sym(SymBool(b)) = {
-        [b] { term "true"; };
+        when b { term "true"; };
         term "false";
     };
     uni sym(SymString(s)) = {
@@ -956,8 +956,8 @@ defn sym_to_string(sym: SymbolicValue) -> String {
 // ===== LIST SIMD LENGTH CHECKING =====
 
 obj SimdOp {
-    left: String,
-    right: String,
+    left: String
+    right: String
     context: String
 }
 
@@ -977,7 +977,7 @@ defn extract_list_name(expr: Expr) -> Option<String> {
 defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
     let ops: List<SimdOp> = [];
     let i: Int = 0;
-    [i < len(body)] {
+    when i < len(body) {
         uni body[i](StmtExpr(expr)) = {
             let result = collect_simd_ops_in_expr(expr, "expr");
             ops = ops.append_all(result);
@@ -987,7 +987,7 @@ defn collect_simd_ops(body: List<Statement>) -> List<SimdOp> {
             ops = ops.append_all(result);
         };
         uni body[i](StmtLet(_, _, init_opt, _, _)) = {
-            [is_some(init_opt)] {
+            when is_some(init_opt) {
                 let init = unwrap(init_opt);
                 let result = collect_simd_ops_in_expr(init, "let");
                 ops = ops.append_all(result);
@@ -1002,7 +1002,7 @@ defn collect_simd_ops_in_expr(expr: Expr, ctx: String) -> List<SimdOp> {
     uni expr(ExprBinOp(op, left, right)) = {
         let left_name = extract_list_name(left);
         let right_name = extract_list_name(right);
-        [left_name.is_some() && right_name.is_some()] {
+        when left_name.is_some() && right_name.is_some() {
             let simd = SimdOp { left: left_name.unwrap(), right: right_name.unwrap(), context: ctx };
             term [simd];
         };
@@ -1014,11 +1014,11 @@ defn collect_simd_ops_in_expr(expr: Expr, ctx: String) -> List<SimdOp> {
 defn check_list_simd_lengths(program: Program) -> List<String> {
     let errors: List<String> = [];
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopTxn(txn)) = {
             let ops = collect_simd_ops(txn.body);
             let j: Int = 0;
-            [j < len(ops)] {
+            when j < len(ops) {
                 let msg = "SIMD op: " + ops[j].left + " " + ops[j].right + " in " + ops[j].context;
                 errors = errors.append(msg);
                 j = j + 1;
@@ -1027,7 +1027,7 @@ defn check_list_simd_lengths(program: Program) -> List<String> {
         uni program.items[i](TopDefn(defn)) = {
             let ops = collect_simd_ops(defn.body);
             let j: Int = 0;
-            [j < len(ops)] {
+            when j < len(ops) {
                 let msg = "SIMD op: " + ops[j].left + " " + ops[j].right + " in " + ops[j].context;
                 errors = errors.append(msg);
                 j = j + 1;

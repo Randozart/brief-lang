@@ -2,8 +2,8 @@
 // Definitive implementation, mirroring src/backend/llvm.rs
 
 obj CgResult {
-    node_count: Int,
-    edge_count: Int,
+    node_count: Int
+    edge_count: Int
     has_cycle: Bool
 }
 
@@ -25,8 +25,8 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
     sb = sb.append_str("%State = type { ");
     let first: Bool = true;
     let fi: Int = 0;
-    [fi < len(fields)] {
-        [!first] { sb = sb.append_str(", "); };
+    when fi < len(fields) {
+        when !first { sb = sb.append_str(", "); };
         sb = sb.append_str(fields[fi]); first = false; fi = fi + 1;
     };
     sb = sb.append_str(" }\n");
@@ -34,7 +34,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
 
     // Definitions
     let di: Int = 0;
-    [di < len(program.items)] {
+    when di < len(program.items) {
         uni program.items[di](TopDefn(defn)) = {
             sb = sb.append_str(emit_defn(defn));
             sb = sb.append_str("\n");
@@ -44,7 +44,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
 
     // Transactions
     let ti: Int = 0;
-    [ti < len(program.items)] {
+    when ti < len(program.items) {
         uni program.items[ti](TopTxn(txn)) = {
             sb = sb.append_str(emit_txn(txn, fields, field_names));
             sb = sb.append_str("\n");
@@ -54,7 +54,7 @@ defn generate_llvm(program: Program, cg: CgResult) -> String {
 
     // Precondition functions
     let pi: Int = 0;
-    [pi < len(program.items)] {
+    when pi < len(program.items) {
         uni program.items[pi](TopTxn(txn)) = {
             sb = sb.append_str(emit_pre_func(txn, fields, field_names));
             sb = sb.append_str("\n");
@@ -92,17 +92,17 @@ defn llvm_type(ty: Type) -> String {
 }
 
 defn align_of(ty: String) -> Int {
-    [ty == "i64"] { term 8; };
-    [ty == "float"] { term 4; };
-    [ty == "i8"] { term 1; };
-    [ty == "i32"] { term 4; };
+    when ty == "i64" { term 8; };
+    when ty == "float" { term 4; };
+    when ty == "i8" { term 1; };
+    when ty == "i32" { term 4; };
     term 8;
 }
 
 defn collect_field_types(program: Program) -> List<String> {
     let result: List<String> = [];
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopState(decl)) = {
             result = result.append(llvm_type(decl.state_type));
         };
@@ -114,7 +114,7 @@ defn collect_field_types(program: Program) -> List<String> {
 defn collect_field_names(program: Program) -> List<String> {
     let result: List<String> = [];
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopState(decl)) = {
             result = result.append(decl.name);
         };
@@ -125,7 +125,7 @@ defn collect_field_names(program: Program) -> List<String> {
 
 defn field_index(name: String, names: List<String>) -> Int {
     let i: Int = 0;
-    [i < len(names)] {
+    when i < len(names) {
         [names[i] == name] { term i; };
         i = i + 1;
     };
@@ -134,7 +134,7 @@ defn field_index(name: String, names: List<String>) -> Int {
 
 defn count_triggers(program: Program) -> Int {
     let c: Int = 0; let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopTrigger(_)) = { c = c + 1; };
         i = i + 1;
     };
@@ -148,7 +148,7 @@ defn emit_init_state(fields: List<String>) -> String {
     sb = sb.append_str("define void @init_state() local_unnamed_addr #0 {\n");
     sb = sb.append_str("  entry:\n");
     let i: Int = 0;
-    [i < len(fields)] {
+    when i < len(fields) {
         let ty = fields[i];
         sb = sb.append_str("  store volatile ");
         sb = sb.append_str(ty);
@@ -173,8 +173,8 @@ defn emit_defn(defn: Definition) -> String {
     sb = sb.append_str(defn.name);
     sb = sb.append_str("(");
     let i: Int = 0;
-    [i < len(defn.params)] {
-        [i > 0] { sb = sb.append_str(", "); };
+    when i < len(defn.params) {
+        when i > 0 { sb = sb.append_str(", "); };
         sb = sb.append_str(llvm_type(defn.params[i].param_type));
         sb = sb.append_str(" %arg");
         sb = sb.append_str(String(i));
@@ -182,7 +182,7 @@ defn emit_defn(defn: Definition) -> String {
     };
     sb = sb.append_str(") local_unnamed_addr #0 {\n  entry:\n");
     let j: Int = 0;
-    [j < len(defn.params)] {
+    when j < len(defn.params) {
         let p = defn.params[j];
         uni p.param_type(TypeBool) = {
             sb = sb.append_str("  %ac" + String(j) + " = zext i8 %arg" + String(j) + " to i64\n");
@@ -233,7 +233,7 @@ defn emit_pre_func(txn: Transaction, fields: List<String>, field_names: List<Str
 defn emit_body(body: List<Statement>) -> String {
     let sb = new_builder();
     let i: Int = 0;
-    [i < len(body)] {
+    when i < len(body) {
         sb = sb.append_str(emit_stmt(body[i]));
         i = i + 1;
     };
@@ -246,7 +246,7 @@ defn emit_stmt(stmt: Statement) -> String {
         term "  ret void\n";
     };
     uni stmt(StmtEscape(expr)) = {
-        [expr.is_some()] { term "  ret i64 0\n"; };
+        when expr.is_some() { term "  ret i64 0\n"; };
         term "  ret void\n";
     };
     uni stmt(StmtAssign(_lhs, _rhs, _mods)) = {
@@ -285,7 +285,7 @@ defn expr_to_ir(expr: Expr, reg: Int) -> String {
         term tmp + " = add i64 0, " + String(n);
     };
     uni expr(ExprBool(b)) = {
-        [b] { term tmp + " = add i64 0, 1"; };
+        when b { term tmp + " = add i64 0, 1"; };
         term tmp + " = add i64 0, 0";
     };
     uni expr(ExprVar(name)) = {

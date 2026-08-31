@@ -66,22 +66,22 @@ defn x64_caller_saved() -> List<String> {
 }
 
 defn x64_reg_to_num(reg: String) -> Int {
-    [reg == "RAX"] { term 0; };
-    [reg == "RCX"] { term 1; };
-    [reg == "RDX"] { term 2; };
-    [reg == "RBX"] { term 3; };
-    [reg == "RSP"] { term 4; };
-    [reg == "RBP"] { term 5; };
-    [reg == "RSI"] { term 6; };
-    [reg == "RDI"] { term 7; };
-    [reg == "R8"] { term 8; };
-    [reg == "R9"] { term 9; };
-    [reg == "R10"] { term 10; };
-    [reg == "R11"] { term 11; };
-    [reg == "R12"] { term 12; };
-    [reg == "R13"] { term 13; };
-    [reg == "R14"] { term 14; };
-    [reg == "R15"] { term 15; };
+    when reg == "RAX" { term 0; };
+    when reg == "RCX" { term 1; };
+    when reg == "RDX" { term 2; };
+    when reg == "RBX" { term 3; };
+    when reg == "RSP" { term 4; };
+    when reg == "RBP" { term 5; };
+    when reg == "RSI" { term 6; };
+    when reg == "RDI" { term 7; };
+    when reg == "R8" { term 8; };
+    when reg == "R9" { term 9; };
+    when reg == "R10" { term 10; };
+    when reg == "R11" { term 11; };
+    when reg == "R12" { term 12; };
+    when reg == "R13" { term 13; };
+    when reg == "R14" { term 14; };
+    when reg == "R15" { term 15; };
     term 0;
 }
 
@@ -270,7 +270,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 6);  // rel32 from end of instruction
             let enc = offset as i32;
@@ -281,7 +281,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JNE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 6);
             let enc = offset as i32;
@@ -292,7 +292,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JL(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 6);
             let enc = offset as i32;
@@ -303,7 +303,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JG(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 6);
             let enc = offset as i32;
@@ -314,7 +314,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JLE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 6);
             let enc = offset as i32;
@@ -325,7 +325,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JGE(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 6);
             let enc = offset as i32;
@@ -336,7 +336,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(JMP(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 5);  // rel32 from end of instruction
             let enc = offset as i32;
@@ -347,7 +347,7 @@ defn x64_encode_instr_with_labels(instr: X64Instr, pc: Int, labels: HashMap<Stri
     };
     
     uni instr(CALL(label)) = {
-        [labels.contains_key(label)] {
+        when labels.contains_key(label) {
             let target = labels.get(label).unwrap();
             let offset = target - (pc + 5);
             let enc = offset as i32;
@@ -400,7 +400,7 @@ defn x64_resolve_labels(instrs: List<X64Instr>) -> HashMap<String, Int> {
     let pc: Int = 0;
     
     let i: Int = 0;
-    [i < instrs.len()] {
+    when i < instrs.len() {
         uni instrs[i](Label(name)) = {
             labels = labels.insert(name, pc);
         };
@@ -422,7 +422,7 @@ defn x64_emit_binary(instrs: List<X64Instr>) -> List<u8> {
     let pc: Int = 0;
     
     let i: Int = 0;
-    [i < instrs.len()] {
+    when i < instrs.len() {
         let bytes = x64_encode_instr_with_labels(instrs[i], pc, labels);
         binary = binary.append_all(bytes);
         pc = pc + x64_instr_byte_size(instrs[i]);
@@ -465,7 +465,7 @@ defn x64_generate_reactor(txns: List<Transaction>) -> List<X64Instr> {
     
     // Call each transaction
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         instrs = instrs.append(x64_emit_call(txns[i].name + "_check"));
         i = i + 1;
     };
@@ -499,17 +499,17 @@ defn generate_x86_64(program: Program, cg: CallGraphResult) -> List<u8> {
     let all_instrs: List<X64Instr> = [];
     
     // Emit acyclicity annotation in comment instrs
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         all_instrs = all_instrs.append(X64Instr::Comment("Call graph: acyclic -- static dispatch".to_string()));
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         all_instrs = all_instrs.append(X64Instr::Comment("Call graph: cyclic -- dynamic dispatch".to_string()));
     };
     
     // Extract transactions
     let txns: List<Transaction> = [];
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopTxn(txn)) = {
             txns = txns.append(txn);
         };
@@ -522,7 +522,7 @@ defn generate_x86_64(program: Program, cg: CallGraphResult) -> List<u8> {
     
     // Generate transaction checks
     let j: Int = 0;
-    [j < txns.len()] {
+    when j < txns.len() {
         let txn_instrs = x64_generate_transaction_check(txns[j]);
         all_instrs = all_instrs.append_all(txn_instrs);
         j = j + 1;

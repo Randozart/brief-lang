@@ -20,17 +20,17 @@ import "call_graph";
 
 // Signal tracking for reactive dependency graph
 obj SignalInfo {
-    name: String,
-    signal_type: String,
-    initializer: String,
-    index: Int,
+    name: String
+    signal_type: String
+    initializer: String
+    index: Int
 }
 
 // Transaction tracking for reactive dispatch
 obj TransactionInfo {
-    name: String,
-    index: Int,
-    guard: String,
+    name: String
+    index: Int
+    guard: String
 }
 
 // Generate the Rust state obj with all reactive signals
@@ -40,7 +40,7 @@ defn generate_state_struct(signals: List<SignalInfo>) -> String {
     output = output.append_str("pub obj State {\n");
     
     let i: Int = 0;
-    [i < signals.len()] {
+    when i < signals.len() {
         output = output.append_str("    ");
         output = output.append_str(signals[i].name);
         output = output.append_str(": ");
@@ -61,7 +61,7 @@ defn generate_reactive_engine(txns: List<TransactionInfo>) -> String {
     output = output.append_str("        let mut changed = false;\n");
     
     let i: Int = 0;
-    [i < txns.len()] {
+    when i < txns.len() {
         output = output.append_str("        ");
         output = output.append_str("// Transaction: ");
         output = output.append_str(txns[i].name);
@@ -95,7 +95,7 @@ defn generate_js_glue(state_name: String, signals: List<SignalInfo>) -> String {
     output = output.append_str("}\n\n");
     
     let i: Int = 0;
-    [i < signals.len()] {
+    when i < signals.len() {
         output = output.append_str("export function get_");
         output = output.append_str(signals[i].name);
         output = output.append_str("() {\n");
@@ -116,7 +116,7 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
     
     // Collect signals and transactions from the program
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopTxn(txn)) = {
             // Register as reactive transaction - construct temp info directly
             signals = signals;
@@ -128,7 +128,7 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
             
             // Collect signal declarations from body
             let j: Int = 0;
-            [j < txn.body.len()] {
+            when j < txn.body.len() {
                 uni txn.body[j](StmtLet(let_stmt)) = {
                     signals = signals.append({
                         name: let_stmt.name,
@@ -155,10 +155,10 @@ defn generate_webstack(program: Program, program_name: String, cg: CallGraphResu
     
     // Emit acyclicity annotation in Rust output
     let acyc_comment: String;
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         acyc_comment = "// Call graph: acyclic -- static dispatch enabled\n";
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         acyc_comment = "// Call graph: cyclic -- dynamic dispatch required\n";
     };
 
@@ -202,7 +202,7 @@ defn initializer_to_string(expr: Option<Expr>) -> String {
 defn expr_to_string(expr: Expr) -> String {
     uni expr(ExprInt(value)) = { term String(value); };
     uni expr(ExprBool(value)) = {
-        [value] { term "true".to_string(); };
+        when value { term "true".to_string(); };
         term "false".to_string();
     };
     uni expr(ExprVar(name)) = { term name; };
@@ -214,10 +214,10 @@ defn expr_to_string(expr: Expr) -> String {
 // ============================================================================
 
 obj WebstackOutput {
-    rust_code: String,
-    js_glue: String,
-    signal_count: Int,
-    txn_count: Int,
+    rust_code: String
+    js_glue: String
+    signal_count: Int
+    txn_count: Int
 }
 
 // ============================================================================

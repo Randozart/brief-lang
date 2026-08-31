@@ -19,10 +19,10 @@ import "backends/llvm";
 // ===== COMPILER STATE =====
 
 obj CompilerState {
-    source: String,
-    file_path: String,
-    verbose: Bool,
-    backend: String,
+    source: String
+    file_path: String
+    verbose: Bool
+    backend: String
 }
 
 // ===== MAIN ENTRY POINT =====
@@ -31,10 +31,10 @@ obj CompilerState {
 
 defn is_strict_extension(path: String) -> Bool {
     let len = path.len();
-    [len >= 4] {
+    when len >= 4 {
         [path[len - 4] == '.' && path[len - 3] == 's' && path[len - 2] == 'b' && path[len - 1] == 'v'] { term true; };
     };
-    [len >= 5] {
+    when len >= 5 {
         [path[len - 5] == '.' && path[len - 4] == 's' && path[len - 3] == 'e' && path[len - 2] == 'b' && path[len - 1] == 'v'] { term true; };
         [path[len - 5] == '.' && path[len - 4] == 's' && path[len - 3] == 'r' && path[len - 2] == 'b' && path[len - 1] == 'v'] { term true; };
     };
@@ -56,7 +56,7 @@ defn compile_file(path: String, backend: String, verbose: Bool) -> Result<String
 let token_result = tokenize(state.source);
          uni token_result(Ok(tokens)) = {
 
-            [state.verbose] {
+            when state.verbose {
                 let sb = new_builder();
                 sb = sb.append_str("[Lexer] Tokenized ");
                 sb = sb.append_str(state.file_path);
@@ -71,7 +71,7 @@ let token_result = tokenize(state.source);
             let parser = set_strict_mode(parser, strict);
             let parse_result = parse_program(parser);
             uni parse_result(Ok(program)) = {
-                [state.verbose] {
+                when state.verbose {
                     let sb = new_builder();
                     sb = sb.append_str("[Parser] Parsed ");
                     sb = sb.append_str(state.file_path);
@@ -83,7 +83,7 @@ let token_result = tokenize(state.source);
                 // Run call graph analysis for acyclicity-based optimizations
                 let cg_result = analyze_call_graph(program);
 
-                [state.verbose] {
+                when state.verbose {
                     let sb = new_builder();
                     sb = sb.append_str("[CallGraph] Nodes: ");
                     sb = sb.append_str(String(cg_result.node_count));
@@ -95,16 +95,16 @@ let token_result = tokenize(state.source);
 
                 // Route to the correct backend
                 let output: String;
-                [state.backend == "wasm"] {
+                when state.backend == "wasm" {
                     output = compile_to_wasm(program, cg_result);
                 };
-                [state.backend == "webstack"] {
+                when state.backend == "webstack" {
                     output = compile_to_webstack(program, cg_result);
                 };
-                [state.backend == "rust" || state.backend == ""] {
+                when state.backend == "rust" || state.backend == "" {
                     output = generate_rust(program, state, cg_result);
                 };
-                [state.backend == "llvm"] {
+                when state.backend == "llvm" {
                     output = generate_llvm(program, cg_result);
                 };
                 term Ok(output);
@@ -127,10 +127,10 @@ let token_result = tokenize(state.source);
 defn compile_to_wasm(program: Program, cg: CallGraphResult) -> String {
     let output = new_builder();
     output = output.append_str(";; WASM binary generation\n");
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         output = output.append_str(";; Call graph: acyclic -- static dispatch enabled\n");
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         output = output.append_str(";; Call graph: cyclic -- dynamic dispatch required\n");
         output = output.append_str(";; Cycles detected: ");
 output = output.append_str(String(len(cg.cylist)));
@@ -148,10 +148,10 @@ defn generate_rust(program: Program, cg: CallGraphResult) -> String {
     // TODO: delegate to backends/rust.bv
     let output = new_builder();
     output = output.append_str("// Rust output\n");
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         output = output.append_str("// Call graph: acyclic -- static dispatch enabled\n");
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         output = output.append_str("// Call graph: cyclic -- dynamic dispatch required\n");
     };
     term output.to_string();
@@ -162,10 +162,10 @@ defn compile_to_webstack(program: Program, cg: CallGraphResult) -> String {
     // TODO: Use backends/webstack.bv emit_webstack when connected
     let output = new_builder();
     output = output.append_str("// Webstack output\n");
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         output = output.append_str("// Call graph: acyclic -- static dispatch enabled\n");
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         output = output.append_str("// Call graph: cyclic -- dynamic dispatch required\n");
         output = output.append_str("// Cycles detected: ");
 output = output.append_str(String(len(cg.cylist)));
@@ -173,7 +173,7 @@ output = output.append_str(String(len(cg.cylist)));
     };
 
     let i: Int = 0;
-    [i < state.program.items.len()] {
+    when i < state.program.items.len() {
         let item = state.program.items[i];
         uni item(TopTxn(txn)) = {
             output = output.append_str("// Transaction: ");
@@ -201,10 +201,10 @@ defn generate_rust(program: Program, state: CompilerState, cg: CallGraphResult) 
     output = output.append_str("\n");
 
     // Emit acyclicity annotation
-    [!cg.has_cycle] {
+    when !cg.has_cycle {
         output = output.append_str("// Call graph: acyclic -- static dispatch enabled\n");
     };
-    [cg.has_cycle] {
+    when cg.has_cycle {
         output = output.append_str("// Call graph: cyclic -- dynamic dispatch required\n");
         output = output.append_str("// Cycles detected: ");
         output = output.append_str(String(len(cg.cylist)));
@@ -239,7 +239,7 @@ defn parse_args(args: List<String>) -> (String, String, Bool, Bool) {
     let strict: Bool = false;
 
     let i: Int = 0;
-    [i < args.len()] {
+    when i < args.len() {
         [args[i] == "--wasm"] {
             backend = "wasm";
         };
@@ -253,7 +253,7 @@ defn parse_args(args: List<String>) -> (String, String, Bool, Bool) {
             strict = true;
         };
         [args[i] != "--wasm" && args[i] != "--webstack" && args[i] != "--verbose" && args[i] != "--strict"] {
-            [file_path == ""] {
+            when file_path == "" {
                 file_path = args[i];
             };
         };
@@ -269,7 +269,7 @@ txn compile_main [true][term] {
     let args: List<String> = [];
     let (file_path, backend, verbose, strict_flag) = parse_args(args);
 
-    [file_path == ""] {
+    when file_path == "" {
         term;
     };
 
@@ -278,7 +278,7 @@ txn compile_main [true][term] {
 
     let result = compile_file(file_path, backend, verbose);
     uni result(Ok(output)) = {
-        [verbose] {
+        when verbose {
             let sb = new_builder();
             sb = sb.append_str("[Output] Compiled to ");
             sb = sb.append_str(backend);

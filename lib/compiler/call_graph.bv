@@ -7,15 +7,15 @@
 //   - cyclic:  dynamic dispatch, bounded execution
 
 obj CallGraph {
-    graph: Map<String, List<String>>,
-    txn_names: List<String>,
+    graph: Map<String, List<String>>
+    txn_names: List<String>
     cylist: List<List<String>>
 }
 
 obj CallGraphResult {
-    has_cycle: Bool,
-    cylist: List<List<String>>,
-    node_count: Int,
+    has_cycle: Bool
+    cylist: List<List<String>>
+    node_count: Int
     edge_count: Int
 }
 
@@ -42,7 +42,7 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
     
     // First pass: collect all transaction names
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopTxn(t)) = {
             &cg.txn_names = append(cg.txn_names, t.name);
             &cg.graph = map_insert(cg.graph, t.name, []);
@@ -52,7 +52,7 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
     
     // Second pass: extract called transactions
     let j: Int = 0;
-    [j < len(program.items)] {
+    when j < len(program.items) {
         uni program.items[j](TopTxn(t)) = {
             let callees = extract_calls_from_body(t.body);
             let existing = map_get(cg.graph, t.name);
@@ -67,7 +67,7 @@ defn analyze_call_graph(program: Program) -> CallGraphResult [
     // Detect cycles
     let has_cycle_result: Bool = has_cycles(cg.graph, cg.txn_names);
     let found_cylist: List<List<String>> = [];
-    [has_cycle_result] {
+    when has_cycle_result {
         found_cylist = find_cycles(cg.graph, cg.txn_names);
     };
     
@@ -89,12 +89,12 @@ defn extract_calls_from_body(body: List<Statement>) -> List<String> [
 ] {
     let called: List<String> = [];
     let i: Int = 0;
-    [i < len(body)] {
+    when i < len(body) {
         uni body[i](StmtAssign(assign_expr, _, _)) = {
             called = called + collect_call_names(assign_expr);
         };
         uni body[i](StmtLet(_, _, opt_expr, _, _)) = {
-            [!opt_expr == None] { called = called + collect_call_names(opt_expr); };
+            when !opt_expr == None { called = called + collect_call_names(opt_expr); };
         };
         uni body[i](StmtExpr(stmt_expr)) = {
             called = called + collect_call_names(stmt_expr);
@@ -116,7 +116,7 @@ defn collect_call_names(expr: Expr) -> List<String> [
     uni expr(ExprCall(name, args)) = {
         let names: List<String> = [name];
         let i: Int = 0;
-        [i < len(args)] {
+        when i < len(args) {
             names = names + collect_call_names(args[i]);
             i = i + 1;
         };
@@ -134,7 +134,7 @@ defn collect_call_names(expr: Expr) -> List<String> [
     uni expr(ExprList(elems)) = {
         let names: List<String> = [];
         let i: Int = 0;
-        [i < len(elems)] {
+        when i < len(elems) {
             names = names + collect_call_names(elems[i]);
             i = i + 1;
         };
@@ -151,7 +151,7 @@ defn count_edges(graph: Map<String, List<String>>, names: List<String>) -> Int [
 ] {
     let total: Int = 0;
     let i: Int = 0;
-    [i < len(names)] {
+    when i < len(names) {
         let edge_result = map_get(graph, names[i]);
         uni edge_result(Some(edges)) = {
             total = total + len(edges);
@@ -168,7 +168,7 @@ defn has_cycles(graph: Map<String, List<String>>, names: List<String>) [
     true
 ] -> Bool {
     let i: Int = 0;
-    [i < len(names)] {
+    when i < len(names) {
         let visited: List<String> = [];
         let path: List<String> = [];
         [detect_cycle(names[i], graph, visited, path)] {
@@ -187,7 +187,7 @@ defn find_cycles(graph: Map<String, List<String>>, names: List<String>) [
 ] -> List<List<String>> {
     let found: List<List<String>> = [];
     let i: Int = 0;
-    [i < len(names)] {
+    when i < len(names) {
         let visited: List<String> = [];
         let path: List<String> = [];
         [detect_cycle(names[i], graph, visited, path)] {
@@ -213,26 +213,26 @@ defn detect_cycle(
     // Check if node is already in current path
     let in_path: Bool = false;
     let pi: Int = 0;
-    [pi < len(path)] {
+    when pi < len(path) {
         [path[pi] == node] {
             in_path = true;
         };
         pi = pi + 1;
     };
-    [in_path] {
+    when in_path {
         term true;
     };
     
     // Check if node was already visited
     let in_visited: Bool = false;
     let vi: Int = 0;
-    [vi < len(visited)] {
+    when vi < len(visited) {
         [visited[vi] == node] {
             in_visited = true;
         };
         vi = vi + 1;
     };
-    [in_visited] {
+    when in_visited {
         term false;
     };
     
@@ -243,7 +243,7 @@ defn detect_cycle(
     let graph_edges = map_get(graph, node);
     uni graph_edges(Some(edges)) = {
         let ei: Int = 0;
-        [ei < len(edges)] {
+        when ei < len(edges) {
             [detect_cycle(edges[ei], graph, new_visited, new_path)] {
                 term true;
             };
@@ -258,7 +258,7 @@ defn detect_cycle(
 defn append_all(a: List<String>, b: List<String>) -> List<String> {
     let result = a;
     let i: Int = 0;
-    [i < len(b)] {
+    when i < len(b) {
         result = append(result, b[i]);
         i = i + 1;
     };

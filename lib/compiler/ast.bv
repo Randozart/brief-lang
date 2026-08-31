@@ -55,8 +55,8 @@ enum Expr {
 // ===== HASHTAG MODIFIERS =====
 
 obj Hashtag {
-    name: String,
-    value: Option<String>,
+    name: String
+    value: Option<String>
     mandatory: Bool,;
     StmtLocalTrigger(String, Type, Option<Expr>),  // name, type, expr
     
@@ -82,57 +82,57 @@ obj Hashtag {
 // ===== CONTRACTS =====
 
 obj Contract {
-    precondition: Expr,
-    postcondition: Expr,
+    precondition: Expr
+    postcondition: Expr
     watchdog: Option<Watchdog>
 }
 
 obj Watchdog {
-    condition: Expr,
+    condition: Expr
     is_required: Bool  // true = !, false = ?
 }
 
 // ===== DEFINITIONS =====
 
 obj Definition {
-    name: String,
-    type_params: List<String>,
-    params: List<Param>,
-    output_type: Option<Type>,
-    contract: Contract,
-    body: List<Statement>,
+    name: String
+    type_params: List<String>
+    params: List<Param>
+    output_type: Option<Type>
+    contract: Contract
+    body: List<Statement>
     modifiers: List<Hashtag>
 }
 
 obj Transaction {
-    name: String,
-    is_async: Bool,
-    is_reactive: Bool,
-    type_params: List<String>,
-    params: List<Param>,
-    contract: Contract,
-    body: List<Statement>,
-    modifiers: List<Hashtag>,
+    name: String
+    is_async: Bool
+    is_reactive: Bool
+    type_params: List<String>
+    params: List<Param>
+    contract: Contract
+    body: List<Statement>
+    modifiers: List<Hashtag>
     dependencies: List<String>
 }
 
 obj Param {
-    name: String,
+    name: String
     param_type: Type
 }
 
 obj Signature {
-    name: String,
-    input_type: Type,
-    output_type: Type,
-    source: Option<String>,
+    name: String
+    input_type: Type
+    output_type: Type
+    source: Option<String>
     bound_defn: Option<String>
 }
 
 // ===== TYPE DEFINITIONS =====
 
 obj Dimension {
-    name: Option<String>,
+    name: Option<String>
     size: Int
 }
 
@@ -162,43 +162,43 @@ enum Type {
 }
 
 obj BitRange {
-    start: Int,
+    start: Int
     end: Int
 }
 
 // ===== STRUCTS AND ENUMS =====
 
 obj StructVariant {
-    contract: Contract,
-    fields: List<StructField>,
-    additions: List<StructField>,
+    contract: Contract
+    fields: List<StructField>
+    additions: List<StructField>
     removals: List<String>
 }
 
 obj StructDefinition {
-    name: String,
-    fields: List<StructField>,
-    methods: List<Transaction>,
-    modifiers: List<Hashtag>,
+    name: String
+    fields: List<StructField>
+    methods: List<Transaction>
+    modifiers: List<Hashtag>
     variants: List<StructVariant>
 }
 
 obj StructField {
-    name: String,
-    field_type: Type,
+    name: String
+    field_type: Type
     default_value: Option<Expr>
 }
 
 obj RStructDefinition {
-    name: String,
-    fields: List<StructField>,
-    methods: List<Transaction>,
+    name: String
+    fields: List<StructField>
+    methods: List<Transaction>
     view: Option<ViewBody>
 }
 
 obj EnumDefinition {
-    name: String,
-    type_params: List<String>,
+    name: String
+    type_params: List<String>
     variants: List<EnumVariant>
 }
 
@@ -232,8 +232,8 @@ enum ViewAttr {
 // ===== IMPORTS =====
 
 obj Import {
-    path: String,
-    items: List<ImportItem>,
+    path: String
+    items: List<ImportItem>
     alias: Option<String>
 }
 
@@ -245,21 +245,21 @@ enum ImportItem {
 // ===== CONSTANTS AND STATE =====
 
 obj Constant {
-    name: String,
-    const_type: Type,
+    name: String
+    const_type: Type
     value: Expr
 }
 
 obj StateDecl {
-    name: String,
-    state_type: Type,
+    name: String
+    state_type: Type
     initial_value: Option<Expr>
 }
 
 obj ForeignBinding {
-    name: String,
-    sig_type: Type,
-    toml_path: Option<String>,
+    name: String
+    sig_type: Type
+    toml_path: Option<String>
     target: String
 }
 
@@ -287,32 +287,32 @@ enum ResultType {
 }
 
 obj MemoryLayout {
-    offset: Int,
-    size: Int,
+    offset: Int
+    size: Int
     alignment: Int
 }
 
 obj ForeignSignature {
-    name: String,
-    location: String,
-    wasm_impl: Option<String>,
-    wasm_setup: Option<String>,
+    name: String
+    location: String
+    wasm_impl: Option<String>
+    wasm_setup: Option<String>
     inputs: List<(String, Type)>,
     success_output: List<(String, Type)>,
-    result_type: ResultType,
-    error_type_name: String,
+    result_type: ResultType
+    error_type_name: String
     error_fields: List<(String, Type)>,
-    input_layout: Option<MemoryLayout>,
-    output_layout: Option<MemoryLayout>,
-    precondition: Option<String>,
-    postcondition: Option<String>,
-    buffer_mode: Option<String>,
+    input_layout: Option<MemoryLayout>
+    output_layout: Option<MemoryLayout>
+    precondition: Option<String>
+    postcondition: Option<String>
+    buffer_mode: Option<String>
     ffi_kind: Option<FfiKind>
 }
 
 obj FfiState {
-    bindings: List<ForeignSignature>,
-    wasm_glue: Option<String>,
+    bindings: List<ForeignSignature>
+    wasm_glue: Option<String>
     profiles: Option<String>
 }
 
@@ -338,7 +338,7 @@ enum TopLevel {
 }
 
 obj Program {
-    items: List<TopLevel>,
+    items: List<TopLevel>
     strict_mode: StrictMode
 }
 
@@ -347,19 +347,19 @@ obj Program {
 // Get expression precedence
 defn expr_precedence(expr: Expr) -> Int {
     uni expr(ExprBinOp(op, _, _)) = {
-        [op == "*"] { term 11; };
-        [op == "/"] { term 11; };
-        [op == "%"] { term 11; };
-        [op == "+"] { term 10; };
-        [op == "-"] { term 10; };
-        [op == "<"] { term 8; };
-        [op == ">"] { term 8; };
-        [op == "<="] { term 8; };
-        [op == ">="] { term 8; };
-        [op == "=="] { term 7; };
-        [op == "!="] { term 7; };
-        [op == "&&"] { term 5; };
-        [op == "||"] { term 4; };
+        when op == "*" { term 11; };
+        when op == "/" { term 11; };
+        when op == "%" { term 11; };
+        when op == "+" { term 10; };
+        when op == "-" { term 10; };
+        when op == "<" { term 8; };
+        when op == ">" { term 8; };
+        when op == "<=" { term 8; };
+        when op == ">=" { term 8; };
+        when op == "==" { term 7; };
+        when op == "!=" { term 7; };
+        when op == "&&" { term 5; };
+        when op == "||" { term 4; };
     };
     term 0;
 }

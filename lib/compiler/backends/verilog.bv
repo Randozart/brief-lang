@@ -23,33 +23,33 @@ enum PortDirection {
 // ===== SV STRUCTS =====
 
 obj Module {
-    name: String,
-    ports: List<Port>,
-    wires: List<Wire>,
-    regs: List<Reg>,
+    name: String
+    ports: List<Port>
+    wires: List<Wire>
+    regs: List<Reg>
     always_blocks: List<AlwaysBlock>
 }
 
 obj Port {
-    name: String,
-    direction: PortDirection,
+    name: String
+    direction: PortDirection
     data_type: SvDataType
 }
 
 obj Wire {
-    name: String,
+    name: String
     data_type: SvDataType
 }
 
 obj Reg {
-    name: String,
-    data_type: SvDataType,
+    name: String
+    data_type: SvDataType
     init_value: Option<String>
 }
 
 obj AlwaysBlock {
     kind: String, // "always_ff", "always_comb", "always_latch"
-    sensitivity: String,
+    sensitivity: String
     body: String
 }
 
@@ -66,11 +66,11 @@ defn briev_type_to_sv(briev_type: Type) -> SvDataType {
 
 defn sv_type_str(data_type: SvDataType) -> String {
     uni data_type(Logic(width)) = {
-        [width == 1] { term "logic"; };
+        when width == 1 { term "logic"; };
         term "logic [" + String(width - 1) + ":0]";
     };
     uni data_type(Bit(width)) = {
-        [width == 1] { term "bit"; };
+        when width == 1 { term "bit"; };
         term "bit [" + String(width - 1) + ":0]";
     };
     uni data_type(Int(width)) = {
@@ -97,14 +97,14 @@ defn generate_module(module: Module) -> String {
 
     // Port list
     let i: Int = 0;
-    [i < module.ports.len()] {
+    when i < module.ports.len() {
         sb = sb.append_str("  ");
         sb = sb.append_str(port_direction_str(module.ports[i].direction));
         sb = sb.append_str(" ");
         sb = sb.append_str(sv_type_str(module.ports[i].data_type));
         sb = sb.append_str(" ");
         sb = sb.append_str(module.ports[i].name);
-        [i < module.ports.len() - 1] { sb = sb.append_str(","); };
+        when i < module.ports.len() - 1 { sb = sb.append_str(","); };
         sb = sb.append_str("\n");
         i = i + 1;
     };
@@ -112,9 +112,9 @@ defn generate_module(module: Module) -> String {
     sb = sb.append_str(");\n\n");
 
     // Wire declarations
-    [module.wires.len() > 0] {
+    when module.wires.len() > 0 {
         let i: Int = 0;
-        [i < module.wires.len()] {
+        when i < module.wires.len() {
             sb = sb.append_str("wire ");
             sb = sb.append_str(sv_type_str(module.wires[i].data_type));
             sb = sb.append_str(" ");
@@ -126,9 +126,9 @@ defn generate_module(module: Module) -> String {
     };
 
     // Register declarations
-    [module.regs.len() > 0] {
+    when module.regs.len() > 0 {
         let i: Int = 0;
-        [i < module.regs.len()] {
+        when i < module.regs.len() {
             sb = sb.append_str("reg ");
             sb = sb.append_str(sv_type_str(module.regs[i].data_type));
             sb = sb.append_str(" ");
@@ -150,7 +150,7 @@ defn generate_module(module: Module) -> String {
 
     // Always blocks
     let i: Int = 0;
-    [i < module.always_blocks.len()] {
+    when i < module.always_blocks.len() {
         sb = sb.append_str(module.always_blocks[i].kind);
         sb = sb.append_str(" @(");
         sb = sb.append_str(module.always_blocks[i].sensitivity);
@@ -179,7 +179,7 @@ defn transaction_to_always(txn: Transaction) -> AlwaysBlock {
 defn build_transaction_body_string(body: List<Statement>) -> String {
     let result = "";
     let i: Int = 0;
-    [i < body.len()] {
+    when i < body.len() {
         result = result + "  " + statement_to_sv(body[i]) + "\n";
         i = i + 1;
     };
@@ -193,7 +193,7 @@ defn statement_to_sv(stmt: Statement) -> String {
     uni stmt(StmtGuarded(guard, body)) = {
         let result = "if (" + expr_to_sv(guard) + ") begin\n";
         let i: Int = 0;
-        [i < body.len()] {
+        when i < body.len() {
             result = result + "    " + statement_to_sv(body[i]) + "\n";
             i = i + 1;
         };
@@ -235,7 +235,7 @@ defn generate_verilog(program: Program, cg: CallGraphResult) -> String {
 
     // Collect state declarations as ports and registers
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopState(decl)) = {
             ports = append(ports, Port {
                 name: decl.name,
@@ -257,7 +257,7 @@ defn generate_verilog(program: Program, cg: CallGraphResult) -> String {
 
     // Convert each transaction to an always block
     let i: Int = 0;
-    [i < program.items.len()] {
+    when i < program.items.len() {
         uni program.items[i](TopTxn(txn)) = {
             always_blocks = append(always_blocks, transaction_to_always(txn));
         };

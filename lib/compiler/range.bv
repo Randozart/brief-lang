@@ -8,16 +8,16 @@
 //   - Removing runtime bounds checks
 
 obj ParamRange {
-    min: Option<Int>,
-    max: Option<Int>,
-    min_inclusive: Bool,
+    min: Option<Int>
+    max: Option<Int>
+    min_inclusive: Bool
     max_inclusive: Bool
 }
 
 obj RangeResult {
-    txn_name: String,
-    param_name: String,
-    min: Option<Int>,
+    txn_name: String
+    param_name: String
+    min: Option<Int>
     max: Option<Int>
 }
 
@@ -44,13 +44,13 @@ defn analyze_parameter_ranges(program: Program) -> Map<String, Map<String, Param
     let ranges: Map<String, Map<String, ParamRange>> = empty_map();
     
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopTxn(t)) = {
             let param_ranges: Map<String, ParamRange> = empty_map();
             
             // Initialize all params as unbounded
             let pi: Int = 0;
-            [pi < len(t.parameters)] {
+            when pi < len(t.parameters) {
                 let param_pair = t.parameters[pi];
             let pname = param_pair.0;
                 param_ranges = map_insert(param_ranges, pname, new_param_range());
@@ -105,7 +105,7 @@ defn apply_comparison(
     // Case 1: var <op> lit  (e.g. x > 0)
     uni left(ExprVar(var_name)) = {
         uni right(ExprInt(val)) = {
-            [op_is_gt] {
+            when op_is_gt {
                 // var > lit => LOWER bound
                 term set_lower_bound(ranges, var_name, val, inclusive);
             };
@@ -118,7 +118,7 @@ defn apply_comparison(
     // Case 2: lit <op> var  (e.g. 0 < x)
     uni left(ExprInt(val)) = {
         uni right(ExprVar(var_name)) = {
-            [op_is_gt] {
+            when op_is_gt {
                 // lit > var => var < lit => UPPER bound
                 term set_upper_bound(ranges, var_name, val, inclusive);
             };
@@ -145,7 +145,7 @@ defn set_lower_bound(
     let range_entry = map_get(ranges, name);
     uni range_entry(Some(range)) = {
         let actual_val = val;
-        [!inclusive] {
+        when !inclusive {
             actual_val = val + 1;
         };
         
@@ -159,7 +159,7 @@ defn set_lower_bound(
             term map_insert(ranges, name, new_range);
         };
         uni range.min(Some(existing)) = {
-            [actual_val > existing] {
+            when actual_val > existing {
                 let new_range = ParamRange {
                     min: Some(actual_val),
                     max: range.max,
@@ -189,7 +189,7 @@ defn set_upper_bound(
     let range_entry = map_get(ranges, name);
     uni range_entry(Some(range)) = {
         let actual_val = val;
-        [!inclusive] {
+        when !inclusive {
             actual_val = val - 1;
         };
 
@@ -203,7 +203,7 @@ defn set_upper_bound(
             term map_insert(ranges, name, new_range);
         };
         uni range.max(Some(existing)) = {
-            [actual_val < existing] {
+            when actual_val < existing {
                 let new_range = ParamRange {
                     min: range.min,
                     max: Some(actual_val),

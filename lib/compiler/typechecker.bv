@@ -4,12 +4,12 @@
 // ===== TYPE CONTEXT =====
 
 obj TypeContext {
-    scopes: Stack<HashMap<String, Type>>,
-    functions: HashMap<String, Definition>,
-    transactions: HashMap<String, Transaction>,
-    structs: HashMap<String, StructDefinition>,
-    enums: HashMap<String, EnumDefinition>,
-    type_aliases: HashMap<String, Type>,
+    scopes: Stack<HashMap<String, Type>>
+    functions: HashMap<String, Definition>
+    transactions: HashMap<String, Transaction>
+    structs: HashMap<String, StructDefinition>
+    enums: HashMap<String, EnumDefinition>
+    type_aliases: HashMap<String, Type>
     current_scope: Int
 }
 
@@ -58,7 +58,7 @@ defn exit_scope(ctx: TypeContext) -> TypeContext {
 
 defn add_binding(ctx: TypeContext, name: String, ty: Type) -> Result<TypeContext, String> {
     let scopes = ctx.scopes;
-    [!is_empty(scopes)] {
+    when !is_empty(scopes) {
         let (current, rest) = unwrap(pop(scopes));
         let current = insert(current, name, ty);
         let scopes = push(rest, current);
@@ -78,9 +78,9 @@ defn add_binding(ctx: TypeContext, name: String, ty: Type) -> Result<TypeContext
 defn lookup_type(ctx: TypeContext, name: String) -> Option<Type> {
     let scopes = ctx.scopes;
     let i: Int = 0;
-    [i < len(scopes)] {
+    when i < len(scopes) {
         let scope = scopes[i];
-        [contains_key(scope, name)] {
+        when contains_key(scope, name) {
             term get(scope, name);
         };
         i = i + 1;
@@ -130,14 +130,14 @@ defn empty_subst() -> Substitution {
 
 defn apply_subst(ty: Type, subst: Substitution) -> Type {
     uni ty(TypeNamed(name, args)) = {
-        [contains_key(subst.bindings, name)] {
+        when contains_key(subst.bindings, name) {
             let bound = unwrap(get(subst.bindings, name));
             term apply_subst(bound, subst);
         };
-        [len(args) > 0] {
+        when len(args) > 0 {
             let new_args: List<Type> = [];
             let i: Int = 0;
-            [i < len(args)] {
+            when i < len(args) {
                 new_args = append(new_args, apply_subst(args[i], subst));
                 i = i + 1;
             };
@@ -161,25 +161,25 @@ defn unify(t1: Type, t2: Type, subst: Substitution) -> Result<Substitution, Stri
     let t1 = apply_subst(t1, subst);
     let t2 = apply_subst(t2, subst);
     
-    [t1 == t2] {
+    when t1 == t2 {
         term Ok(subst);
     };
     
-    [is_type_var(t1)] {
+    when is_type_var(t1) {
         term unify_var(get_name(t1), t2, subst);
     };
     
-    [is_type_var(t2)] {
+    when is_type_var(t2) {
         term unify_var(get_name(t2), t1, subst);
     };
     
     uni ty1(TypeNamed(name1, args1)) = {
         uni ty2(TypeNamed(name2, args2)) = {
-            [name1 == name2] {
-                [len(args1) == len(args2)] {
+            when name1 == name2 {
+                when len(args1) == len(args2) {
                     let new_subst = subst;
                     let i: Int = 0;
-                    [i < len(args1)] {
+                    when i < len(args1) {
                         let result = unify(args1[i], args2[i], new_subst);
                         uni result(Ok(s)) = {
                             new_subst = s;
@@ -202,7 +202,7 @@ defn unify(t1: Type, t2: Type, subst: Substitution) -> Result<Substitution, Stri
 }
 
 defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substitution, String> {
-    [occurs_check(name, ty, subst)] {
+    when occurs_check(name, ty, subst) {
         term Err("Occurs check failed: " + name + " in " + type_to_string(ty));
     };
     
@@ -213,11 +213,11 @@ defn unify_var(name: String, ty: Type, subst: Substitution) -> Result<Substituti
 
 defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
     uni ty(TypeNamed(other, args)) = {
-        [name == other] {
+        when name == other {
             term true;
         };
         let i: Int = 0;
-        [i < len(args)] {
+        when i < len(args) {
             [occurs_check(name, args[i], subst)] {
                 term true;
             };
@@ -240,7 +240,7 @@ defn occurs_check(name: String, ty: Type, subst: Substitution) -> Bool {
 // ===== TYPE INFERENCE =====
 
 obj InferResult {
-    ty: Type,
+    ty: Type
     subst: Substitution
 }
 
@@ -282,7 +282,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
     
     uni expr(ExprTerm) = {
         let opt = lookup_type(ctx, "term");
-        [is_some(opt)] {
+        when is_some(opt) {
             term Ok(InferResult {
                 ty: unwrap(opt),
                 subst: empty_subst()
@@ -293,7 +293,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
     
     uni expr(ExprVar(name)) = {
         let opt = lookup_type(ctx, name);
-        [is_some(opt)] {
+        when is_some(opt) {
             term Ok(InferResult {
                 ty: unwrap(opt),
                 subst: empty_subst()
@@ -310,19 +310,19 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
                 let subst = lr.subst;
                 let result = unify(lr.ty, rr.ty, subst);
                 uni result(Ok(s)) = {
-                    [op == "+" || op == "-" || op == "*" || op == "/"] {
+                    when op == "+" || op == "-" || op == "*" || op == "/" {
                         term Ok(InferResult {
                             ty: lr.ty,
                             subst: s
                         });
                     };
-                    [op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="] {
+                    when op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" {
                         term Ok(InferResult {
                             ty: TypeBool,
                             subst: s
                         });
                     };
-                    [op == "&&" || op == "||"] {
+                    when op == "&&" || op == "||" {
                         term Ok(InferResult {
                             ty: TypeBool,
                             subst: s
@@ -344,12 +344,12 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
     };
     
     uni expr(ExprCall(name, args)) = {
-        [contains_key(ctx.functions, name)] {
+        when contains_key(ctx.functions, name) {
             let d = unwrap(get(ctx.functions, name));
             
             let subst = empty_subst();
             let i: Int = 0;
-            [i < len(args)] {
+            when i < len(args) {
                 let arg_result = infer_expr(args[i], ctx);
                 uni arg_result(Ok(ar)) = {
                     let result = unify(ar.ty, d.params[i].param_type, subst);
@@ -367,7 +367,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
             };
             
             let output = d.output_type;
-            [is_some(output)] {
+            when is_some(output) {
                 term Ok(InferResult {
                     ty: unwrap(output),
                     subst: subst
@@ -384,7 +384,7 @@ defn infer_expr(expr: Expr, ctx: TypeContext) -> Result<InferResult, String> {
     uni expr(ExprTuple(elements)) = {
         let types: List<Type> = [];
         let i: Int = 0;
-        [i < len(elements)] {
+        when i < len(elements) {
             let result = infer_expr(elements[i], ctx);
             uni result(Ok(ir)) = {
             let res_ty = ir.ty;
@@ -412,7 +412,7 @@ defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, 
     let ctx = new_context();
     
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopDefn(d)) = {
             let ctx = add_function(ctx, d);
         };
@@ -427,7 +427,7 @@ defn check_program(program: Program, strict_mode: Bool) -> Result<TypedProgram, 
     };
     
     let i: Int = 0;
-    [i < len(program.items)] {
+    when i < len(program.items) {
         uni program.items[i](TopDefn(d)) = {
             let result = check_definition(d, ctx, strict_mode);
             uni result(Err(e)) = {
@@ -454,7 +454,7 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
     let ctx = enter_scope(ctx);
     
     let i: Int = 0;
-    [i < len(d.params)] {
+    when i < len(d.params) {
         let result = add_binding(ctx, d.params[i].name, d.params[i].param_type);
         uni result(Ok(c)) = {
             ctx = c;
@@ -466,7 +466,7 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
     };
     
     let return_ty = d.output_type;
-    [is_some(return_ty)] {
+    when is_some(return_ty) {
         let result = add_binding(ctx, "term", unwrap(return_ty));
         uni result(Ok(c)) = { ctx = c; };
         uni result(Err(_)) = {};
@@ -474,7 +474,7 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
 
     let contract_result = infer_expr(d.contract.precondition, ctx);
     uni contract_result(Ok((pre_ty, _))) = {
-        [pre_ty != TypeBool] {
+        when pre_ty != TypeBool {
             term Err("Precondition must be Bool, got " + type_to_string(pre_ty));
         };
     };
@@ -484,7 +484,7 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
 
     let contract_result = infer_expr(d.contract.postcondition, ctx);
     uni contract_result(Ok((post_ty, _))) = {
-        [post_ty != TypeBool] {
+        when post_ty != TypeBool {
             term Err("Postcondition must be Bool, got " + type_to_string(post_ty));
         };
     };
@@ -495,7 +495,7 @@ defn check_definition(d: Definition, ctx: TypeContext, strict_mode: Bool) -> Res
     let result = check_block(d.body, ctx);
     uni result(Ok((body_ty, _))) = {
         let output = d.output_type;
-        [is_some(output)] {
+        when is_some(output) {
             let subst = empty_subst();
             let result = unify(body_ty, unwrap(output), subst);
             uni result(Err(e)) = {
@@ -515,7 +515,7 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
     let ctx = enter_scope(ctx);
     
     let i: Int = 0;
-    [i < len(t.params)] {
+    when i < len(t.params) {
         let result = add_binding(ctx, t.params[i].name, t.params[i].param_type);
         uni result(Ok(c)) = {
             ctx = c;
@@ -532,7 +532,7 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
 
     let result = infer_expr(t.contract.precondition, ctx);
     uni result(Ok((pre_ty, _))) = {
-        [pre_ty != TypeBool] {
+        when pre_ty != TypeBool {
             term Err("Precondition must be Bool, got " + type_to_string(pre_ty));
         };
     };
@@ -542,7 +542,7 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
     
     let result = infer_expr(t.contract.postcondition, ctx);
     uni result(Ok((post_ty, _))) = {
-        [post_ty != TypeBool] {
+        when post_ty != TypeBool {
             term Err("Postcondition must be Bool, got " + type_to_string(post_ty));
         };
     };
@@ -552,9 +552,9 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
     
     // Both [true] is always an error — defeats contract-first programming
     uni t.contract.precondition(ExprBool(pre_val)) = {
-        [pre_val] {
+        when pre_val {
             uni t.contract.postcondition(ExprBool(post_val)) = {
-                [post_val] {
+                when post_val {
                     term Err("both precondition and postcondition are [true] — at least one side must specify meaningful constraints");
                 };
             };
@@ -562,14 +562,14 @@ defn check_transaction(t: Transaction, ctx: TypeContext, strict_mode: Bool) -> R
     };
     
     // Strict mode: reject [true] contracts
-    [strict_mode] {
+    when strict_mode {
         uni t.contract.precondition(ExprBool(pre_val)) = {
-            [pre_val] {
+            when pre_val {
                 term Err("Strict mode: precondition [true] is not allowed");
             };
         };
         uni t.contract.postcondition(ExprBool(post_val)) = {
-[post_val] {
+when post_val {
                 term Err("Strict mode: postcondition [true] is not allowed");
             };
         };
@@ -589,7 +589,7 @@ defn check_block(stmts: List<Statement>, ctx: TypeContext) -> Result<(Type, Type
     let last_ty: Type = TypeVoid;
     
     let i: Int = 0;
-    [i < len(stmts)] {
+    when i < len(stmts) {
         let result = check_statement(stmts[i], ctx);
         uni result(Ok((stmt_ty, new_ctx))) = {
             last_ty = stmt_ty;
@@ -610,15 +610,15 @@ defn check_statement(stmt: Statement, ctx: TypeContext) -> Result<(Type, TypeCon
         let ty: Type = TypeVoid;
         
         // Check for tuple destructuring via ExprTupleDestructure in init
-        [is_some(init)] {
+        when is_some(init) {
             let init_expr = unwrap(init);
             uni init_expr(ExprTupleDestructure(names, source_expr)) = {
 let result = infer_expr(source_expr, ctx);
                 uni result(Ok((init_ty, _))) = {
                     uni init_ty(TypeTuple(types)) = {
-                        [types.len() == names.len()] {
+                        when types.len() == names.len() {
                             let i: Int = 0;
-                            [i < types.len()] {
+                            when i < types.len() {
                                 ctx = declare_variable(ctx, names[i], types[i]);
                                 i = i + 1;
                             };
@@ -630,10 +630,10 @@ let result = infer_expr(source_expr, ctx);
             };
         };
         
-        [is_some(init)] {
+        when is_some(init) {
             let result = infer_expr(unwrap(init), ctx);
             uni result(Ok((init_ty, _))) = {
-                [is_some(var_type)] {
+                when is_some(var_type) {
                     let subst = empty_subst();
                     let result = unify(init_ty, unwrap(var_type), subst);
                     uni result(Ok(_)) = {
@@ -643,7 +643,7 @@ let result = infer_expr(source_expr, ctx);
                         term Err(e);
                     };
                 };
-                [!is_some(var_type)] {
+                when !is_some(var_type) {
                     ty = init_ty;
                 };
             };
@@ -651,7 +651,7 @@ let result = infer_expr(source_expr, ctx);
                 term Err(e);
             };
         };
-        [is_some(var_type) && is_none(init)] {
+        when is_some(var_type) && is_none(init) {
             ty = unwrap(var_type);
         };
         
@@ -699,10 +699,10 @@ let result = infer_expr(source_expr, ctx);
     };
     
     uni stmt(StmtTerm(values, _modifiers)) = {
-        [len(values) == 0] {
+        when len(values) == 0 {
             term (TypeVoid, ctx);
         };
-        [len(values) == 1] {
+        when len(values) == 1 {
             let result = infer_expr(unwrap(values[0]), ctx);
             uni result(Ok((ty, _))) = {
                 term (ty, ctx);
@@ -715,7 +715,7 @@ let result = infer_expr(source_expr, ctx);
     };
     
     uni stmt(StmtEscape(value)) = {
-        [is_some(value)] {
+        when is_some(value) {
             let result = infer_expr(unwrap(value), ctx);
             uni result(Err(e)) = {
                 term Err(e);
@@ -729,7 +729,7 @@ let result = infer_expr(source_expr, ctx);
     uni stmt(StmtGuarded(condition, body)) = {
         let result = infer_expr(condition, ctx);
         uni result(Ok((cond_ty, _))) = {
-            [cond_ty != TypeBool] {
+            when cond_ty != TypeBool {
                 term Err("Guard condition must be Bool");
             };
             
@@ -772,7 +772,7 @@ let result = infer_expr(source_expr, ctx);
     };
     
     uni stmt(StmtLocalTrigger(name, ty, trigger_expr)) = {
-        [is_some(trigger_expr)] {
+        when is_some(trigger_expr) {
             let result = infer_expr(unwrap(trigger_expr), ctx);
             uni result(Ok((expr_ty, _))) = {
                 let subst = empty_subst();
@@ -803,11 +803,11 @@ defn type_to_string(ty: Type) -> String {
     uni ty(TypeNamed(name, args)) = {
         let sb = new_builder();
         let sb = append_str(sb, name);
-        [len(args) > 0] {
+        when len(args) > 0 {
             let sb = append_char(sb, '<');
             let i: Int = 0;
-            [i < len(args)] {
-                [i > 0] {
+            when i < len(args) {
+                when i > 0 {
                     let sb = append_str(sb, ", ");
                 };
                 let sb = append_str(sb, type_to_string(args[i]));
