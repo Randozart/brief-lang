@@ -629,6 +629,65 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
     return ok;
 }
 
+// Mapped projection pointer of the kernel's persistent staging buffer —
+// device residency (plan item 3): the runtime packs scalars directly into
+// this region between launches instead of full upload/download cycles.
+static void* briev_dev_vulkan_mapped(void* handle) {
+    BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
+    return k && k->buffer != VK_NULL_HANDLE ? k->mapped : NULL;
+}
+
+// Record + submit + fence-wait with NO host copies. Requires the caller to
+// have seeded/synced the mapped projection itself.
+static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n) {
+    BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
+    int verbose = g_verbose;
+    size_t local_n = VK_LOCAL_SIZE_X;
+    if (!k || k->buffer == VK_NULL_HANDLE) {
+        return 0;
+    }
+    VkCommandBufferBeginInfo bbi = {0};
+    vkResetCommandBuffer(vk_cmd_buf, 0);
+    bbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(vk_cmd_buf, &bbi) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] begin failed\n");
+        return 0;
+    }
+    vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
+    vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
+                            0, 1, &k->desc_set, 0, NULL);
+    size_t groups = (global_n + local_n - 1) / local_n;
+    if (groups == 0) { groups = 1; }
+    vkCmdDispatch(vk_cmd_buf, (uint32_t)groups, 1, 1);
+    if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
+        return 0;
+    }
+    if (k->fence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fci = {0};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(vk_device, &fci, NULL, &k->fence) != VK_SUCCESS) {
+            return 0;
+        }
+    } else {
+        vkResetFences(vk_device, 1, &k->fence);
+    }
+    VkSubmitInfo si = {0};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &vk_cmd_buf;
+    if (vkQueueSubmit(vk_queue, 1, &si, k->fence) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] submit failed\n");
+        return 0;
+    }
+    if (vkWaitForFences(vk_device, 1, &k->fence, 1, 30ULL * 1000 * 1000 * 1000) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] fence wait timed out\n");
+        return 0;
+    }
+    return 1;
+}
+
 static void briev_dev_vulkan_destroy_kernel(void* handle) {
     BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
     if (!k) {
@@ -677,4 +736,6 @@ BrievDeviceDriver briev_dev_vulkan = {
     briev_dev_vulkan_launch,
     briev_dev_vulkan_destroy_kernel,
     briev_dev_vulkan_shutdown,
+    briev_dev_vulkan_mapped,
+    briev_dev_vulkan_launch_dev,
 };

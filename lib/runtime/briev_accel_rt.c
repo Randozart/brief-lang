@@ -76,6 +76,13 @@ typedef struct BrievDeviceDriver {
                   size_t global_n, void* proj_out);
     void (*destroy_kernel)(void* kernel);
     void (*shutdown)(void);
+    // 2026-08-31 (plan item 3, device residency): optional. `mapped` returns
+    // the kernel's persistent host-visible projection pointer (NULL if the
+    // driver cannot keep it mapped); `launch_dev` records dispatch + submit
+    // + fence-wait with NO host copies — the runtime drives the mapped
+    // projection itself. NULL → the runtime falls back to `launch`.
+    void* (*mapped)(void* kernel);
+    int (*launch_dev)(void* kernel, size_t global_n);
 } BrievDeviceDriver;
 
 extern BrievDeviceDriver briev_dev_vulkan;
@@ -87,6 +94,7 @@ extern BrievDeviceDriver briev_dev_opencl;
 
 static const BrievDeviceDriver* g_driver = NULL;
 static int g_init_done = 0;
+static uint8_t* g_resident_seeded = NULL;   // per-kernel first-launch flag (residency)
 // 2026-08-31: shared with the #included device drivers (single TU) — they
 // read it for BRIEV_ACCEL_VERBOSE diagnostics.
 static int g_verbose = 0;
@@ -152,6 +160,8 @@ int briev_accel_init(const BrievKernelDesc* descs, uint32_t n) {
     if (g_kernels == NULL) {
         return 0;
     }
+    free(g_resident_seeded);
+    g_resident_seeded = calloc(n, 1);
     for (uint32_t i = 0; i < n; i++) {
         // 2026-08-31: an EMPTY blob is a per-kernel CPU fallback slot (the
         // compiler keeps descriptor indices stable) — skip, don't fail all.
@@ -251,9 +261,80 @@ int briev_accel_launch(uint32_t idx, void* state, uint64_t work_n) {
     return ok;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Device residency (2026-08-31, plan abv-gpu-by-default item 3): iterative
+// kernels keep their array state ON the device across launches. Only scalar
+// fields (counters, phase gates) cross PCIe each step. `launch_resident`
+// seeds all fields on the first call, then syncs scalars both ways;
+// `download` pulls the full projection back at the end. Requires the driver
+// to expose its persistent mapped projection (Vulkan does; otherwise falls
+// back to the full-copy launch).
+// ────────────────────────────────────────────────────────────────────────────
+
+int briev_accel_launch_resident(uint32_t idx, void* state, uint64_t work_n) {
+    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+        || g_kernels[idx] == NULL) {
+        return 0;
+    }
+    if (g_driver->mapped == NULL || g_driver->launch_dev == NULL) {
+        return briev_accel_launch(idx, state, work_n);  // driver can't
+    }
+    void* mapped = g_driver->mapped(g_kernels[idx]);
+    if (mapped == NULL) {
+        return briev_accel_launch(idx, state, work_n);
+    }
+    const BrievKernelDesc* k = &g_descs[idx];
+    if (g_resident_seeded[idx]) {
+        // Scalars only: the host's counters/phase gates are authoritative
+        // between launches (the phase machine runs on the host).
+        for (uint32_t i = 0; i < k->n_fields; i++) {
+            const BrievField* f = &k->fields[i];
+            if (f->kind == BRIEV_FIELD_SCALAR) {
+                memcpy(mapped + proj_field_offset(k, i),
+                       (const uint8_t*)state + f->host_offset,
+                       (size_t)f->elem_bytes);
+            }
+        }
+    } else {
+        // First launch: seed the FULL projection (arrays are host-authoritative
+        // until the first dispatch writes them on-device).
+        for (uint32_t i = 0; i < k->n_fields; i++) {
+            const BrievField* f = &k->fields[i];
+            memcpy(mapped + proj_field_offset(k, i),
+                   (const uint8_t*)state + f->host_offset,
+                   (size_t)(f->count * f->elem_bytes));
+        }
+        g_resident_seeded[idx] = 1;
+    }
+    // No device→host scalar sync: the host owns the scalars (they were just
+    // uploaded); arrays stay device-resident until briev_accel_download.
+    return g_driver->launch_dev(g_kernels[idx], work_n);
+}
+
+/// Pull the FULL projection back to the host state (end of a resident run —
+/// observables read host state). Returns 0 when residency isn't active for
+/// `idx` (the caller's state is then already current from full-copy launches).
+int briev_accel_download(uint32_t idx, void* state) {
+    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+        || g_kernels[idx] == NULL || !g_resident_seeded[idx]) {
+        return 0;
+    }
+    void* mapped = g_driver->mapped(g_kernels[idx]);
+    if (mapped == NULL) {
+        return 0;
+    }
+    const BrievKernelDesc* k = &g_descs[idx];
+    for (uint32_t i = 0; i < k->n_fields; i++) {
+        const BrievField* f = &k->fields[i];
+        memcpy((uint8_t*)state + f->host_offset,
+               mapped + proj_field_offset(k, i),
+               (size_t)(f->count * f->elem_bytes));
+    }
+    return 1;
+}
+
 /// Free kernel handles + driver shutdown. Called by program exit.
-void briev_accel_shutdown(void) {
-    if (g_driver != NULL && g_kernels != NULL) {
+void briev_accel_shutdown(void) {    if (g_driver != NULL && g_kernels != NULL) {
         for (uint32_t i = 0; i < g_n_kernels; i++) {
             if (g_kernels[i] != NULL) {
                 g_driver->destroy_kernel(g_kernels[i]);
@@ -261,6 +342,8 @@ void briev_accel_shutdown(void) {
         }
         g_driver->shutdown();
     }
+    free(g_resident_seeded);
+    g_resident_seeded = NULL;
     free(g_kernels);
     g_kernels = NULL;
     g_driver = NULL;

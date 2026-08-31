@@ -56,11 +56,26 @@ a follow-up). Results at N=4096 (16M interactions):
   Steady-state would improve with launches but the transfers dominate any
   single-launch, cache-resident CPU comparison.
 
-**The next lever is device residency**: the state arrays stay on the GPU
-across launches (upload once, download once); only scalars (counters,
-phase) cross PCIe each step. ABI sketch: `briev_accel_launch_step(idx,
-state, work_n)` = no upload after the first launch, no download of
-`is_write` array fields (only scalars cross). That turns iterative
-kernels (nbody steps) from bandwidth-bound into compute-bound — the point
-where the GPU beats a cache-resident CPU loop.
+**The next lever is device residency** — IMPLEMENTED + VERIFIED same day:
+- ABI: `briev_accel_launch_resident(idx, state, work_n)` (arrays seed once,
+  then stay on device; scalars sync host→device each step — the host phase
+  machine owns counters) and `briev_accel_download(idx, state)` (final
+  full pull). Driver side: `mapped` + `launch_dev` optional members
+  (OpenCL: NULL → full-copy fallback).
+- Verified: nbody steps evolve correctly across resident launches
+  (px[0] drifts 0.499998 → 0.499990 over 3 launches with zero array
+  transfers), nb=4096/bound=1000 resident matches the C reference
+  (px[0] = -0.301423 vs C -0.301422507).
+- Resident timing: bound=1000/nb=4096 → **0.064s** (vs 0.42s full-copy);
+  bound=5000 → 0.31s.
+
+**Still C wins at this workload** (C: 0.014s at nb=4096/bound=1000, in-cache
+AVX-512 loop): an O(N)-per-step kernel moves ~100KB and does ~40k flops per
+launch — below the ~50µs submit+fence round trip. This is a workload-shape
+conclusion, not a driver deficiency. GPU wins require compute-dense
+launches: the O(N²) all-pairs kernel (verified correct separately) does
+16M interactions per launch; with residency + a reduction kernel chain the
+all-pairs simulation becomes GPU-favorable. Next: reduction kernels for
+the force-accumulation pass, FMA-dense force math, and the wrapper
+emission policy that chooses resident launches for step-looped nodes.
 
