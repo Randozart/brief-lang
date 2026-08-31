@@ -1458,6 +1458,37 @@ fn codegen(
             std::fs::write(&out_path, &binary)
                 .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
             println!("wrote {}", out_path);
+            // 2026-08-31 (plan abv-gpu-by-default item 4): .abv is PURE GPU
+            // code — emit the standalone runner (a self-contained C program
+            // embedding one .spv per kernel + the reactive scheduler). The
+            // user compiles it with any C compiler; `brievc run x.abv` does
+            // it automatically.
+            let kernels = briev_compiler::backend::spirv::runner::build_kernels(
+                items,
+                universe,
+                opts.int_bits,
+                &analysis.accel,
+            )?;
+            let runner =
+                briev_compiler::backend::spirv::runner::emit_runner(items, universe, opts.int_bits, &kernels)?;
+            let runner_path = out_path.replace(".spv", "_runner.c");
+            std::fs::write(&runner_path, &runner)
+                .map_err(|e| format!("cannot write '{}': {}", runner_path, e))?;
+            // The runner #includes the runtime (single TU) — copy the
+            // runtime AND its device drivers beside it.
+            let rt_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("lib/runtime");
+            let rt_dir_out = std::path::Path::new(&runner_path)
+                .parent()
+                .map(|d| d.to_path_buf())
+                .unwrap_or_else(std::path::PathBuf::new);
+            for rt_file in ["briev_accel_rt.c", "briev_dev_vulkan.c", "briev_dev_opencl.c"] {
+                let dest = rt_dir_out.join(rt_file);
+                std::fs::copy(rt_dir.join(rt_file), &dest).map_err(|e| {
+                    format!("cannot copy runtime '{}' to '{}': {}", rt_file, dest.display(), e)
+                })?;
+            }
+            println!("wrote {}", runner_path);
             output = String::new();
             ".spv"
         }
