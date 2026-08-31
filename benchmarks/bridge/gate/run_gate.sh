@@ -23,10 +23,30 @@ BC bindings "$BV" c --out "$WORK" >/dev/null
 for lang in go java lua python node; do
     BC export "$BV" "$lang" --out "$WORK" >/dev/null 2>&1
 done
-BC extension "$BV" python --out "$WORK" >/dev/null 2>&1
-BC extension "$BV" node --out "$WORK" >/dev/null 2>&1
-BC extension "$BV" java --out "$WORK" >/dev/null 2>&1
-BC extension "$BV" lua --out "$WORK" >/dev/null 2>&1
+# Extensions are toolchain-guarded like the host runs below — a missing
+# JDK/Go breaks `brievc extension` (jni.h/go not found) and would abort the
+# whole gate. Only build the shims whose host toolchain is present.
+if command -v python3 >/dev/null; then
+    BC extension "$BV" python --out "$WORK" >/dev/null 2>&1
+fi
+if command -v node >/dev/null; then
+    BC extension "$BV" node --out "$WORK" >/dev/null 2>&1
+fi
+JAVAC=javac; JAVA=java
+J=$(ls -d "$HOME"/briev-tools/jdk-*/bin 2>/dev/null | head -1)
+if [ -n "$J" ]; then JAVAC="$J/javac"; JAVA="$J/java"; fi
+if [ -x "$JAVAC" ]; then
+    BC extension "$BV" java --out "$WORK" >/dev/null 2>&1
+fi
+LUA=$(ls "$HOME"/briev-tools/lua-*/src/lua 2>/dev/null | head -1)
+if [ -z "$LUA" ]; then
+    # System lua (5.4) — the shipped lua glue config's native_include_cmd
+    # falls back to /usr/include/lua5.4, so a system lua5.4 loads the shim.
+    command -v lua5.4 >/dev/null 2>&1 && LUA="$(command -v lua5.4)"
+fi
+if [ -n "$LUA" ] && [ -x "$LUA" ]; then
+    BC extension "$BV" lua --out "$WORK" >/dev/null 2>&1
+fi
 
 median() { # median of the numbers on stdin (one per line)
     sort -n | awk '{a[NR]=$1} END{print (NR%2?a[(NR+1)/2]:(a[NR/2]+a[NR/2+1])/2)}'
@@ -75,9 +95,6 @@ if command -v "$go" >/dev/null 2>&1; then
       && printf "%-6s %8s %8s %6.2f %8s %8s %6.2f\n" "Go" "$bf" "$nf" "$(awk "BEGIN{print $bf/$nf}")" "$ba" "$na" "$(awk "BEGIN{print $ba/$na}")"
 fi
 # Java
-JAVAC=javac; JAVA=java
-J=$(ls -d "$HOME"/briev-tools/jdk-*/bin 2>/dev/null | head -1)
-if [ -n "$J" ]; then JAVAC="$J/javac"; JAVA="$J/java"; fi
 if [ -x "$JAVAC" ]; then
     cp "$HERE/Gate.java" "$WORK/" \
       && (cd "$WORK" && "$JAVAC" Gate.java && "$JAVA" -Djava.library.path="$WORK" bench "$SEED") > "$WORK/java_out" 2>/dev/null \
@@ -86,7 +103,6 @@ if [ -x "$JAVAC" ]; then
       && printf "%-6s %8s %8s %6.2f %8s %8s %6.2f\n" "Java" "$bf" "$nf" "$(awk "BEGIN{print $bf/$nf}")" "$ba" "$na" "$(awk "BEGIN{print $ba/$na}")"
 fi
 # Lua
-LUA=$(ls "$HOME"/briev-tools/lua-*/src/lua 2>/dev/null | head -1)
 if [ -n "$LUA" ] && [ -x "$LUA" ]; then
     collect Lua "$LUA" -e "package.cpath='$WORK/?.so'" "$HERE/gate.lua" "$WORK" "$SEED"
 fi
