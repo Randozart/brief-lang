@@ -1,0 +1,173 @@
+# HANDOFF — GPU backend (.abv / SPIR-V): state, doctrine, next steps
+
+**Date:** 2026-08-31 (end of session)
+**Branch:** main. Session commits: `5a52f961`, `961ca293`, `e8bfc789`,
+`85531646`, `94f9e3dd`, `863dcbc5`, `0dcdeaa1`.
+**Read together with:** `docs/plans/2026-08-31-abv-gpu-by-default.md` (route
++ fixes log) and `docs/plans/2026-08-31-vitriol-gemm-comparison.md` (the
+benchmark target + optimization ladder + ledger).
+
+---
+
+## 1. The doctrine (locked by the user — do not revisit)
+
+- **`.abv` IS the GPU language.** Pure GPU code: every eligible counted loop
+  is a kernel, the extension carries the accel intent (no `!> accel:`
+  metadata, no per-node keywords), compile emits kernels + a runnable
+  program. No CPU fallback lane in the artifact.
+- **`.bv` IS the CPU language** with *annotated, probe-verified* GPU
+  offload (`!> accel:` + optional per-node `accel`). The GPU lane runs only
+  when the auto-tuning probe proves it beats the vectorized CPU fold.
+- **The SPIR-V backend gets the same optimization commitment as LLVM.**
+  Frontend-driven (analysis computes, backend consumes), config-tuned,
+  measured before built. A losing optimization is a VERDICT entry, not a
+  silent revert (VITRIOL evidence rules).
+
+## 2. Architecture map (what exists, where)
+
+Two GPU paths share the runtime; do not conflate them:
+
+| path | frontend | kernels | execution |
+|------|----------|---------|-----------|
+| **`.abv` standalone** (pure GPU) | accel policy auto-injected (`apply_abv_accel_default`, compile.rs) | `src/backend/spirv/` — one .spv PER KERNEL, entry "main" (`runner::build_kernels`) | generated `x_runner.c` — reactive scheduler, resident launches (`runner::emit_runner`) |
+| **`.bv` offload** (accel-annotated) | `AnalysisResults.accel` (src/analysis/accel.rs) | `collect_accel_kernels` → same spirv backend (`llvm/kernel.rs`) | dispatch wrapper `@txn_<name>` → `briev_accel_rt` → driver (Vulkan/OpenCL/CPU) |
+
+Key files:
+- `src/backend/spirv/{mod,kernel,lower,builder,runner}.rs` — the kernel
+  backend (Vulkan-native SPIR-V via rspirv; spirv-val vulkan1.3 clean)
+- `src/backend/llvm/{kernel,dispatch}.rs` + `emit_toplevel.rs` — offload
+  wrappers, descriptor tables, blob embedding
+- `src/analysis/accel.rs` — the eligibility proof (foreach loops now
+  accepted; see below)
+- `lib/runtime/briev_accel_rt.c` (+ `briev_dev_vulkan.c`, `briev_dev_opencl.c`)
+  — device-agnostic dispatch, persistent buffers, device residency,
+  probe. `BRIEV_ACCEL_VERBOSE=1` prints init/launch diagnostics.
+- `src/compile.rs` — `.abv` policy injection, kernel-scoped capability gate,
+  runner emission, runtime copying
+- `src/backend/llvm/loop_engine/ssa.rs` + `dispatch.rs` — accel nodes route
+  through `@txn_<name>` wrappers (do not inline them)
+
+## 3. What works (verified on the RTX 3060, NVIDIA 580.178.04)
+
+- Annotation-free `.abv` → spirv-val(vulkan1.3)-passing kernels: int,
+  float, casts (S/UConvert, FConvert, CToF/FToS), unary ops, const
+  materialization, structured `foreach` loops, bounds guard
+  (`gid < N` from the `[i < N]` bound), phase-gated kernels
+  (`[phase == 1 && i < nb]` conjunctions)
+- `examples/gpu/{mini,scale,fmadd,gemv,gemv_small}.abv` — runnable via the
+  generated runners
+- `.bv` offload: full dispatch chain closed; nbody_newton_accel bit-exact
+  vs the C reference through real Vulkan launches
+- Device residency: arrays stay on GPU across launches, scalars sync
+  host→device per step (the host phase machine owns them);
+  `briev_accel_download` pulls the projection at the end
+- Persistent staging buffers per kernel: ~5× launch cost cut
+
+## 4. Measured reality (do not re-litigate without new evidence)
+
+- O(N)-per-step workloads (nbody accel shape): **launch/PCIe-bound**. C's
+  in-cache AVX-512 loop wins even against resident launches (C 14ms vs
+  resident GPU 64ms at nb=4096/bound=1000). The probe correctly commits
+  CPU. This is the design working.
+- The GPU-favorable territory is **compute-dense launches with device
+  residency**: the O(N²) flattened all-pairs shape is PROVEN expressible
+  and correct (`benchmarks/gpu/pairs.bv`, `pairs.abv`); 16M interactions
+  compute on device.
+- Constraint discovered: 64-bit int div/rem is NOT a shader op — row/col
+  splits use power-of-2 shift/mask until magic-number division lowering
+  exists (tracked).
+- First attempts at every stage failed for boring ABI/layout reasons, all
+  fixed and documented: llc filetype, blob embedding, SSBO member widths,
+  driver Vulkan struct ABIs (sType, 6-arg vkMapMemory, compute stage enum
+  6 not 0x20, bind point 1 not 0x4000, command-buffer reset, memory-type
+  search, features enabled).
+
+## 5. NEXT (priority order — start here in a new session)
+
+1. **M1 benchmark harness + first ledger number.** GEMV M=K=4096: warm-up
+   separated from steady-state, GPU vs single-thread CPU vs llama.cpp
+   GEMV on the same box. Write into the ledger in
+   `docs/plans/2026-08-31-vitriol-gemm-comparison.md`. A reusable bench
+   harness (C, reuses briev_accel_rt) beats ad-hoc runners.
+2. **O3: float4 vectorized loads** (`OpTypeVector float×4`): the big GEMV
+   lever (memory-bound kernel). Needs an alignment proof — the SSBO
+   layout offsets are known; require `offset % 16 == 0` and trip counts
+   divisible by 4, else stay scalar. Measure against M1's number.
+3. **O2: verify FMA fusion** (cheap): check the NVIDIA driver fuses
+   FMul+FAdd in the loop; if not, emit GLSL.std.450 Fma via an
+   ExtInstImport (the import + instruction plumbing is the work).
+4. **Resident-launch policy in wrapper emission** (`.bv` offload): the
+   runtime ABI (`briev_accel_launch_resident`/`download`) exists; the
+   emitted wrapper must choose it for step-looped nodes. Needs the
+   analysis gate: all readers of a resident array are kernels.
+   UNSOUND otherwise (host state goes stale) — the gate is the work.
+5. **Runner multi-const count fix** (small, known): the fast-forward
+   `S_i = N` resolves a const-in-expression bound incorrectly when two
+   consts are in play (N2 resolved as NB). Repro: `benchmarks/gpu/pairs.bv`
+   runner prints `i = 4096` instead of 16777216.
+6. **`brievc run x.abv`** as a native subcommand (currently a 6-line shell
+   wrapper: build → cc runner → exec; see the pattern in the session log).
+
+## 6. O2–O6 ladder (after 1–3)
+
+| rung | what | GPU effect |
+|------|------|-----------|
+| O2 ✓next | FMA fusion check | math throughput |
+| O3 ✓next | float4 loads | memory throughput |
+| O4 | shared-memory tiling (GEMM) | DRAM traffic — the big GEMM lever |
+| O5 | occupancy shaping (LocalSize search) | latency hiding |
+| O6 | tree reductions in shared memory | reduction epilogue |
+
+LocalSize is currently hardcoded 64×1×1 (`VK_LOCAL_SIZE_X` in the driver,
+`LOCAL_SIZE_X` in spirv/kernel.rs — keep them equal).
+
+## 7. Traps that cost this session time (all fixed — do not regress)
+
+1. llc spirv64 needs `-filetype=obj` (LLVM 22 emits assembly text by
+   default) and hex double-bit float literals (decimal floats rejected).
+2. Embedded blob constants: single `c"…"` token, no string juxtaposition.
+3. The SPIR-V normalizer must NOT strip universe properties (bits/
+   protocol-category keys feed the eligibility proof and resolve_spirv_shape).
+4. Top-level `let` parses as `Statement(Let)`, not `StateDecl` — both forms
+   must be handled (collect_state_fields does; keep it that way).
+5. Dispatch wrappers require `accel_kernel_idx` registered BEFORE host
+   emission; collect blobs AFTER, with stable indices (empty blob = CPU
+   fallback slot).
+6. Descriptor field order = kernel SSBO member order = name-sorted
+   collect_state_fields (field_index_map has extra internal fields — never
+   use it for the projection).
+7. Blob pointer in the descriptor is a full `ptr` (the old `i32 ptrtoint`
+   broke PIE and misaligned the C struct).
+8. Driver: every VkStruct field must match the real ABI (verify against
+   /usr/include/vulkan/vulkan_core.h); enable device features (NULL =
+   all-off → Int64/Float64 pipelines fail silently); reset command buffers;
+   prefer HOST_VISIBLE|HOST_COHERENT memory; scalar sync is
+   host→device-only in resident mode (device→host would clobber the
+   fast-forwarded counter).
+9. The FFI cache (`~/.cache/briev-compiler/ffi/*.o`) is content-hashed but
+   STALE BINARIES linger: when runtime C changes, clear the cache AND
+   rebuild, or you debug ghost behavior.
+10. rg `-rn` is "replace with n" — do not use it for searching (cost real
+    time twice).
+
+## 8. Session-start checklist
+
+```bash
+cargo test --lib && cargo test --bin brievc   # both green at handoff
+spirv-val --target-env vulkan1.3 <k.spv>       # every kernel path
+# end-to-end .abv:
+env BOUND=1 ./target/release/brievc build examples/gpu/gemv_small.abv \
+    --out examples/gpu/run_abv
+cc -O2 examples/gpu/run_abv/gemv_small_runner.c \
+    -o examples/gpu/run_abv/gemv_small -lm -ldl
+timeout 30 examples/gpu/run_abv/gemv_small     # prints i = 64
+# end-to-end .bv offload:
+env BOUND=20 BODYCOUNT=1024 ./target/release/brievc build \
+    benchmarks/gpu/nbody_force.bv --out benchmarks/gpu --optimize-budget 2048
+env BOUND=20 BODYCOUNT=1024 BRIEV_ACCEL_DEVICE=vulkan \
+    BRIEV_ACCEL_VERBOSE=1 ./benchmarks/gpu/nbody_force   # 0.499899864
+```
+
+Pre-existing diagnostics baseline (not yours to fix opportunistically
+unless touched): `briev_dev_vulkan.c` clangd noise (single-TU include
+pattern); 2 `brievc` build warnings (unused variable in main.rs, etc.).
