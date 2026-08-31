@@ -92,11 +92,20 @@ typedef enum {
 #define VK_PIPELINE_BIND_POINT_COMPUTE 1u
 #define VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT 0x2u
 #define VK_MEMORY_PROPERTY_HOST_COHERENT_BIT 0x8u
+#define VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT 0x1u
+#define VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT 0x00000800u
+#define VK_PIPELINE_STAGE_TRANSFER_BIT 0x00001000u
+#define VK_ACCESS_SHADER_READ_BIT 0x00000020u
+#define VK_ACCESS_SHADER_WRITE_BIT 0x00000040u
+#define VK_ACCESS_TRANSFER_READ_BIT 0x00000800u
+#define VK_ACCESS_TRANSFER_WRITE_BIT 0x00001000u
+#define VK_QUEUE_FAMILY_IGNORED 0xFFFFFFFFu
+#define VK_WHOLE_SIZE_MACRO 0xFFFFFFFFFFFFFFFFull
 #define VK_COMMAND_BUFFER_LEVEL_PRIMARY 0u
 #define VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 0x1u
 #define VK_MAX_MEMORY_TYPES 32u
 // Must match the kernel's OpExecutionMode LocalSize (spirv/kernel.rs LOCAL_SIZE_X).
-#define VK_LOCAL_SIZE_X 64u
+#define VK_LOCAL_SIZE_X 256u
 
 typedef struct { uint32_t sType; const void* pNext; uint32_t flags;
                  const void* pApplicationInfo; uint32_t enabledLayerCount;
@@ -207,6 +216,8 @@ static int (*vkBeginCommandBuffer)(VkCommandBuffer, const void*) = NULL;
 static void (*vkCmdBindPipeline)(VkCommandBuffer, uint32_t, VkPipeline) = NULL;
 static void (*vkCmdBindDescriptorSets)(VkCommandBuffer, uint32_t, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*) = NULL;
 static void (*vkCmdDispatch)(VkCommandBuffer, uint32_t, uint32_t, uint32_t) = NULL;
+static void (*vkCmdCopyBuffer)(VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, const void*) = NULL;
+static void (*vkCmdPipelineBarrier)(VkCommandBuffer, uint32_t, uint32_t, uint32_t, uint32_t, const void*, uint32_t, const void*, uint32_t, const void*) = NULL;
 static int (*vkEndCommandBuffer)(VkCommandBuffer) = NULL;
 static int (*vkQueueSubmit)(VkQueue, uint32_t, const void*, VkFence) = NULL;
 static int (*vkWaitForFences)(VkDevice, uint32_t, const VkFence*, uint32_t, uint64_t) = NULL;
@@ -255,6 +266,8 @@ static int load_vulkan_symbols(void) {
     LOAD(vkCmdBindPipeline);
     LOAD(vkCmdBindDescriptorSets);
     LOAD(vkCmdDispatch);
+    LOAD(vkCmdCopyBuffer);
+    LOAD(vkCmdPipelineBarrier);
     LOAD(vkEndCommandBuffer);
     LOAD(vkQueueSubmit);
     LOAD(vkWaitForFences);
@@ -307,6 +320,27 @@ static uint32_t pick_host_visible_type(VkPhysicalDevice pd) {
     return 0xFFFFFFFFu;
 }
 
+// Memory-type index with DEVICE_LOCAL — the GPU's own VRAM. The working set
+// (device-resident arrays) lives here; the host-visible buffer is only the
+// seed/staging window. 0xFFFFFFFF = none found → all-host fallback.
+static uint32_t vk_device_local_type = 0xFFFFFFFFu;
+
+static uint32_t pick_device_local_type(VkPhysicalDevice pd) {
+    // Mirrors VkPhysicalDeviceMemoryProperties (see pick_host_visible_type).
+    struct { uint32_t memoryTypeCount;
+             struct { uint32_t propertyFlags; uint32_t heapIndex; } memoryTypes[32];
+             uint32_t memoryHeapCount;
+             struct { uint64_t size; uint32_t flags; } memoryHeaps[16]; } props;
+    vkGetPhysicalDeviceMemoryProperties(pd, &props);
+    for (uint32_t i = 0; i < props.memoryTypeCount && i < 32; i++) {
+        uint32_t f = props.memoryTypes[i].propertyFlags;
+        if ((f & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) && !(f & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+            return i;
+        }
+    }
+    return 0xFFFFFFFFu;
+}
+
 static int briev_dev_vulkan_init(void) {
     int verbose = g_verbose;
     if (!briev_dev_vulkan_available()) {
@@ -348,6 +382,7 @@ static int briev_dev_vulkan_init(void) {
         goto fail;
     }
     vk_host_visible_type = pick_host_visible_type(vk_physical_device);
+    vk_device_local_type = pick_device_local_type(vk_physical_device);
     if (vk_host_visible_type == 0xFFFFFFFFu) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] no host-visible memory type\n");
         goto fail;
@@ -432,6 +467,11 @@ typedef struct {
     // churn dominated kernel time for small workloads (~0.75ms/launch).
     VkBuffer buffer;
     VkDeviceMemory memory;
+    // Device-local working set (plan 2026-08-31-gpu-next): the SSBO the
+    // shader actually reads/writes. The host-visible `buffer` stays as the
+    // seed/scalar-sync staging window. VK_NULL_HANDLE = all-host fallback.
+    VkBuffer dev_buffer;
+    VkDeviceMemory dev_memory;
     void* mapped;
     VkDescriptorPool pool;
     VkDescriptorSet desc_set;
@@ -477,6 +517,62 @@ static int briev_dev_vulkan_create_kernel(const uint8_t* spirv, size_t size, voi
     return 1;
 }
 
+// ── Transfer helpers (plan 2026-08-31-gpu-next): the device-local working
+// set is fed from (or drained to) the host-visible staging window inside the
+// SAME submission as the dispatch — the barriers order transfer vs shader
+// access on the GPU, no host round trip.
+//
+// direction: to_device copies staging→VRAM (seed + scalar sync); otherwise
+// VRAM→staging (download). `dirty` is flat (offset, bytes) pairs; full copy
+// when n_dirty == 0 or too many ranges.
+#define VK_BRIEV_MAX_RANGES 16u
+
+static void record_copy(BrievVulkanKernel* k, int to_device,
+                        const size_t* dirty, uint32_t n_dirty) {
+    if (k->dev_buffer == VK_NULL_HANDLE) {
+        return;
+    }
+    if (to_device && n_dirty > 0 && n_dirty <= VK_BRIEV_MAX_RANGES) {
+        struct { uint64_t srcOffset; uint64_t dstOffset; uint64_t size; } regions[VK_BRIEV_MAX_RANGES];
+        for (uint32_t r = 0; r < n_dirty; r++) {
+            regions[r].srcOffset = dirty[2 * r];
+            regions[r].dstOffset = dirty[2 * r];
+            regions[r].size = dirty[2 * r + 1];
+        }
+        vkCmdCopyBuffer(vk_cmd_buf, k->buffer, k->dev_buffer, n_dirty, regions);
+        return;
+    }
+    struct { uint64_t srcOffset; uint64_t dstOffset; uint64_t size; } one =
+        { 0, 0, k->bytes };
+    if (to_device) {
+        vkCmdCopyBuffer(vk_cmd_buf, k->buffer, k->dev_buffer, 1, &one);
+    } else {
+        vkCmdCopyBuffer(vk_cmd_buf, k->dev_buffer, k->buffer, 1, &one);
+    }
+}
+
+static void record_barrier(BrievVulkanKernel* k, uint32_t src_stage,
+                           uint32_t dst_stage, uint32_t src_access,
+                           uint32_t dst_access) {
+    // VkBufferMemoryBarrier — `buffer` MUST name the transferred buffer (a
+    // null buffer makes the submission invalid and the GPU silently drops
+    // the whole command buffer — found on device: y stayed zero).
+    struct { uint32_t sType; const void* pNext; uint32_t srcAccessMask;
+             uint32_t dstAccessMask; uint32_t srcQueueFamilyIndex;
+             uint32_t dstQueueFamilyIndex; uint64_t buffer; uint64_t offset;
+             uint64_t size; } bmb = {0};
+    bmb.sType = 44; // VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
+    bmb.srcAccessMask = src_access;
+    bmb.dstAccessMask = dst_access;
+    bmb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bmb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    bmb.buffer = (uint64_t)k->dev_buffer;
+    bmb.offset = 0;
+    bmb.size = k->bytes;
+    vkCmdPipelineBarrier(vk_cmd_buf, src_stage, dst_stage, 0,
+                         0, NULL, 1, &bmb, 0, NULL);
+}
+
 // One launch = memcpy the projection into the kernel's PERSISTENT mapped
 // staging buffer, record dispatch + submit + fence-wait, read back. All
 // device objects live on the kernel handle (allocated at first launch —
@@ -505,7 +601,8 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
                  const uint32_t* pQueueFamilyIndices; } binfo = {0};
         binfo.sType = 8; // VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
         binfo.size = proj_bytes;
-        binfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        binfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                    | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         if (vkCreateBuffer(vk_device, &binfo, NULL, &k->buffer) != VK_SUCCESS) {
             if (verbose) fprintf(stderr, "[briev_accel/vulkan] buffer create failed\n");
             return 0;
@@ -544,6 +641,39 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
         }
         k->mapped = host_ptr;
         k->bytes = proj_bytes;
+        // Device-local working set (plan 2026-08-31-gpu-next): allocate the
+        // VRAM buffer the shader actually accesses. Non-fatal on failure —
+        // the all-host path remains correct, just PCIe-bound.
+        if (vk_device_local_type != 0xFFFFFFFFu) {
+            struct { uint32_t sType; const void* pNext; uint32_t flags; uint64_t size;
+                     uint32_t usage; uint32_t sharing; uint32_t queueFamilyIndexCount;
+                     const uint32_t* pQueueFamilyIndices; } dbinfo = {0};
+            dbinfo.sType = 8; // VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+            dbinfo.size = proj_bytes;
+            dbinfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
+                         | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+            if (vkCreateBuffer(vk_device, &dbinfo, NULL, &k->dev_buffer) == VK_SUCCESS) {
+                struct { uint64_t size; uint64_t alignment; uint32_t memoryTypeBits; } dreqs = {0};
+                vkGetBufferMemoryRequirements(vk_device, k->dev_buffer, &dreqs);
+                struct { uint32_t sType; const void* pNext; uint64_t allocationSize;
+                         uint32_t memoryTypeIndex; } dalloc = {0};
+                dalloc.sType = 5; // VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+                dalloc.allocationSize = dreqs.size;
+                dalloc.memoryTypeIndex = vk_device_local_type;
+                if (vkAllocateMemory(vk_device, &dalloc, NULL, &k->dev_memory) == VK_SUCCESS
+                    && vkBindBufferMemory(vk_device, k->dev_buffer, k->dev_memory, 0) == VK_SUCCESS) {
+                    if (verbose) fprintf(stderr, "[briev_accel/vulkan] device-local working set ON\n");
+                } else {
+                    if (verbose) fprintf(stderr, "[briev_accel/vulkan] device-local alloc failed — all-host\n");
+                    vkDestroyBuffer(vk_device, k->dev_buffer, NULL);
+                    vkFreeMemory(vk_device, k->dev_memory, NULL);
+                    k->dev_buffer = VK_NULL_HANDLE; k->dev_memory = VK_NULL_HANDLE;
+                }
+            } else {
+                if (verbose) fprintf(stderr, "[briev_accel/vulkan] device-local buffer create failed\n");
+                k->dev_buffer = VK_NULL_HANDLE;
+            }
+        }
         VkDescriptorPoolCreateInfo dpi = {0};
         dpi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         dpi.maxSets = 1;
@@ -567,7 +697,9 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
             k->buffer = VK_NULL_HANDLE;
             return 0;
         }
-        VkDescriptorBufferInfo bi = { (uint64_t)k->buffer, 0, proj_bytes };
+        // The shader reads the DEVICE buffer when one exists; the host-visible
+        // buffer is only the seed/sync window.
+        VkDescriptorBufferInfo bi = { (uint64_t)(k->dev_buffer ? k->dev_buffer : k->buffer), 0, proj_bytes };
         VkWriteDescriptorSet wds = {0};
         wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         wds.dstSet = (uint64_t)k->desc_set;
@@ -593,11 +725,22 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
     vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
                             0, 1, &k->desc_set, 0, NULL);
+    if (k->dev_buffer != VK_NULL_HANDLE) {
+        // Device working set: push fresh input to VRAM, pull results after.
+        record_copy(k, 1, NULL, 0);
+        record_barrier(k, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    }
     // The kernel declares LocalSize 64×1×1; dispatch ceil(n/64) workgroups
     // (the old n×1×1 launched one-thread workgroups — correct but 32× under).
     size_t groups = (global_n + local_n - 1) / local_n;
     if (groups == 0) { groups = 1; }
     vkCmdDispatch(vk_cmd_buf, (uint32_t)groups, 1, 1);
+    if (k->dev_buffer != VK_NULL_HANDLE) {
+        record_barrier(k, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        record_copy(k, 0, NULL, 0);
+    }
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
         return 0;
@@ -644,13 +787,32 @@ static void* briev_dev_vulkan_mapped(void* handle) {
 // (ceil(nx/64), ny, 1) — a 2D launch covers nx*ny work items exactly like
 // the flat ceil(nx*ny/64) grid, but the hardware hands each invocation its
 // (x, y) position directly (the kernel reconstructs i = y*nx + x).
-static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny);
+static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n);
+
+static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
+                                         int full_sync, const size_t* dirty,
+                                         uint32_t n_dirty);
+
+static int briev_dev_vulkan_download_dev(void* handle);
 
 static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n) {
-    return briev_dev_vulkan_launch_dev2d(handle, global_n, 1);
+    return briev_dev_vulkan_launch_dev2d(handle, global_n, 1, 0, NULL, 0);
 }
 
-static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny) {
+// 2D dispatch (plan 2026-08-31-gpu-next §2b): nx columns × ny rows; ny == 1
+// is the flat 1D form. Workgroups stay 64×1×1, so the grid is
+// (ceil(nx/64), ny, 1) — a 2D launch covers nx*ny work items exactly like
+// the flat ceil(nx*ny/64) grid, but the hardware hands each invocation its
+// (x, y) position directly (the kernel reconstructs i = y*nx + x).
+//
+// Device working set (plan 2026-08-31-gpu-next): with a VRAM buffer, the
+// input side is pushed staging→VRAM inside this submission — full copy when
+// `full_sync` (the seed), else only the `dirty` (offset, bytes) pairs (the
+// scalar counters the host phase machine owns). Dispatch reads VRAM
+// directly; nothing crosses PCIe per launch.
+static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
+                                         int full_sync, const size_t* dirty,
+                                         uint32_t n_dirty) {
     BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
     int verbose = g_verbose;
     size_t local_n = VK_LOCAL_SIZE_X;
@@ -668,6 +830,15 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny) {
     vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
                             0, 1, &k->desc_set, 0, NULL);
+    if (k->dev_buffer != VK_NULL_HANDLE) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] 2d launch: full=%d dirty=%u\n", full_sync, n_dirty);
+        if (full_sync || (n_dirty > 0 && n_dirty <= VK_BRIEV_MAX_RANGES)) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] recording copy staging->dev (full=%d)\n", full_sync);
+            record_copy(k, 1, dirty, n_dirty);
+            record_barrier(k, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        }
+    }
     size_t groups_x = (nx + local_n - 1) / local_n;
     if (groups_x == 0) { groups_x = 1; }
     if (ny == 0) { ny = 1; }
@@ -739,6 +910,42 @@ static void briev_dev_vulkan_shutdown(void) {
     vk_ready = 0;
 }
 
+// Pull the device working set into the host-visible staging window so the
+// runtime's mapped read sees current data (briev_accel_download's tail).
+static int briev_dev_vulkan_download_dev(void* handle) {
+    BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
+    int verbose = g_verbose;
+    if (!k || k->dev_buffer == VK_NULL_HANDLE) {
+        return 0;  // nothing to pull — staging is already the source of truth
+    }
+    VkCommandBufferBeginInfo bbi = {0};
+    vkResetCommandBuffer(vk_cmd_buf, 0);
+    bbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(vk_cmd_buf, &bbi) != VK_SUCCESS) {
+        return 0;
+    }
+    record_copy(k, 0, NULL, 0);
+    if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
+        return 0;
+    }
+    if (k->fence != VK_NULL_HANDLE) {
+        vkResetFences(vk_device, 1, &k->fence);
+    }
+    VkSubmitInfo si = {0};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &vk_cmd_buf;
+    if (vkQueueSubmit(vk_queue, 1, &si, k->fence) != VK_SUCCESS) {
+        return 0;
+    }
+    if (vkWaitForFences(vk_device, 1, &k->fence, 1, 30ULL * 1000 * 1000 * 1000) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] download fence wait timed out\n");
+        return 0;
+    }
+    return 1;
+}
+
 BrievDeviceDriver briev_dev_vulkan = {
     "vulkan",
     0,  // capabilities: host-visible buffer copies, no zero-copy
@@ -751,4 +958,5 @@ BrievDeviceDriver briev_dev_vulkan = {
     briev_dev_vulkan_mapped,
     briev_dev_vulkan_launch_dev,
     briev_dev_vulkan_launch_dev2d,
+    briev_dev_vulkan_download_dev,
 };

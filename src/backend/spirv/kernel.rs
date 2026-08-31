@@ -19,7 +19,7 @@ use crate::backend::spirv::lower::{collect_locals, collect_state_fields, FnLower
 use crate::analysis::accel::KernelShape;
 
 /// Local workgroup size — matches the WorkgroupSize# intrinsic constants.
-const LOCAL_SIZE_X: u32 = 64;
+const LOCAL_SIZE_X: u32 = 256;
 
 /// Emit one GPU kernel from an analyzed shape. Returns the function id.
 pub fn emit_kernel(

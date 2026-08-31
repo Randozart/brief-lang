@@ -84,14 +84,22 @@ typedef struct BrievDeviceDriver {
     void* (*mapped)(void* kernel);
     int (*launch_dev)(void* kernel, size_t global_n);
     // 2026-08-31 (plan 2026-08-31-gpu-next §2b): 2D dispatch — `nx` work
-    // items per row, `ny` rows. NULL → the runtime flattens to
-    // `launch_dev(nx*ny)` (identical work-item coverage, different
-    // hardware routing).
-    int (*launch_dev2d)(void* kernel, size_t nx, size_t ny);
+    // items per row, `ny` rows. `full_sync` pushes the ENTIRE staging
+    // projection to the device working set first (the seed); otherwise only
+    // the `dirty` (offset, bytes) pairs cross (the scalar counters). NULL →
+    // the runtime falls back to the full-copy launch.
+    int (*launch_dev2d)(void* kernel, size_t nx, size_t ny,
+                        int full_sync, const size_t* dirty, uint32_t n_dirty);
+    // Pull the device working set into the staging window (device residency
+    // download). NULL → the staging window is the source of truth already.
+    int (*download_dev)(void* kernel);
 } BrievDeviceDriver;
 
 extern BrievDeviceDriver briev_dev_vulkan;
 extern BrievDeviceDriver briev_dev_opencl;
+
+int briev_accel_launch_resident_2d(uint32_t idx, void* state,
+                                   uint64_t nx, uint64_t ny);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Device selection (config default + BRIEV_ACCEL_DEVICE env + fallback chain)
@@ -277,76 +285,36 @@ int briev_accel_launch(uint32_t idx, void* state, uint64_t work_n) {
 // ────────────────────────────────────────────────────────────────────────────
 
 int briev_accel_launch_resident(uint32_t idx, void* state, uint64_t work_n) {
-    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
-        || g_kernels[idx] == NULL) {
-        return 0;
-    }
-    if (g_driver->mapped == NULL || g_driver->launch_dev == NULL) {
-        return briev_accel_launch(idx, state, work_n);  // driver can't
-    }
-    void* mapped = g_driver->mapped(g_kernels[idx]);
-    if (mapped == NULL) {
-        return briev_accel_launch(idx, state, work_n);
-    }
-    const BrievKernelDesc* k = &g_descs[idx];
-    if (g_resident_seeded[idx]) {
-        // Scalars only: the host's counters/phase gates are authoritative
-        // between launches (the phase machine runs on the host).
-        for (uint32_t i = 0; i < k->n_fields; i++) {
-            const BrievField* f = &k->fields[i];
-            if (f->kind == BRIEV_FIELD_SCALAR) {
-                memcpy(mapped + proj_field_offset(k, i),
-                       (const uint8_t*)state + f->host_offset,
-                       (size_t)f->elem_bytes);
-            }
-        }
-    } else {
-        // First launch: seed the FULL projection (arrays are host-authoritative
-        // until the first dispatch writes them on-device).
-        for (uint32_t i = 0; i < k->n_fields; i++) {
-            const BrievField* f = &k->fields[i];
-            memcpy(mapped + proj_field_offset(k, i),
-                   (const uint8_t*)state + f->host_offset,
-                   (size_t)(f->count * f->elem_bytes));
-        }
-        g_resident_seeded[idx] = 1;
-    }
-    // No device→host scalar sync: the host owns the scalars (they were just
-    // uploaded); arrays stay device-resident until briev_accel_download.
-    return g_driver->launch_dev(g_kernels[idx], work_n);
+    return briev_accel_launch_resident_2d(idx, state, work_n, 1);
 }
 
-// 2D resident launch (plan 2026-08-31-gpu-next §2b): same scalar sync as
-// `launch_resident`, but the dispatch is a 2D grid (nx columns × ny rows).
-// Falls back to the flat 1D launch when the driver has no 2D op — the
-// kernel reconstructs its linear index either way, coverage is identical.
+// 2D resident launch (plan 2026-08-31-gpu-next §2b): ny == 1 is the flat
+// form. Scalars sync host→device as dirty byte ranges; the first launch
+// seeds the full projection. Everything else stays in VRAM.
 int briev_accel_launch_resident_2d(uint32_t idx, void* state,
                                    uint64_t nx, uint64_t ny) {
     if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
         || g_kernels[idx] == NULL) {
         return 0;
     }
-    if (g_driver->launch_dev2d == NULL) {
-        return briev_accel_launch_resident(idx, state, nx * ny);
-    }
-    if (g_driver->mapped == NULL || g_driver->launch_dev == NULL) {
-        return briev_accel_launch(idx, state, nx * ny);
+    if (g_driver->launch_dev2d == NULL || g_driver->mapped == NULL
+        || g_driver->launch_dev == NULL) {
+        fprintf(stderr, "[briev_accel] DBG fallback: 2d=%p mapped=%p dev=%p\n",
+                (void*)(size_t)!!g_driver->launch_dev2d,
+                (void*)(size_t)!!g_driver->mapped,
+                (void*)(size_t)!!g_driver->launch_dev);
+        return briev_accel_launch(idx, state, nx * ny);  // driver can't
     }
     void* mapped = g_driver->mapped(g_kernels[idx]);
     if (mapped == NULL) {
         return briev_accel_launch(idx, state, nx * ny);
     }
     const BrievKernelDesc* k = &g_descs[idx];
-    if (g_resident_seeded[idx]) {
-        for (uint32_t i = 0; i < k->n_fields; i++) {
-            const BrievField* f = &k->fields[i];
-            if (f->kind == BRIEV_FIELD_SCALAR) {
-                memcpy(mapped + proj_field_offset(k, i),
-                       (const uint8_t*)state + f->host_offset,
-                       (size_t)f->elem_bytes);
-            }
-        }
-    } else {
+    int full_sync = 0;
+    size_t dirty[2 * 16];
+    uint32_t n_dirty = 0;
+    if (!g_resident_seeded[idx]) {
+        full_sync = 1;
         for (uint32_t i = 0; i < k->n_fields; i++) {
             const BrievField* f = &k->fields[i];
             memcpy(mapped + proj_field_offset(k, i),
@@ -354,8 +322,27 @@ int briev_accel_launch_resident_2d(uint32_t idx, void* state,
                    (size_t)(f->count * f->elem_bytes));
         }
         g_resident_seeded[idx] = 1;
+    } else {
+        // Scalars only: the host's counters/phase gates are authoritative
+        // between launches (the phase machine runs on the host).
+        for (uint32_t i = 0; i < k->n_fields && n_dirty < 16; i++) {
+            const BrievField* f = &k->fields[i];
+            if (f->kind != BRIEV_FIELD_SCALAR) {
+                continue;
+            }
+            uint64_t off = proj_field_offset(k, i);
+            dirty[2 * n_dirty] = off;
+            dirty[2 * n_dirty + 1] = f->elem_bytes;
+            n_dirty++;
+            memcpy(mapped + off,
+                   (const uint8_t*)state + f->host_offset,
+                   (size_t)f->elem_bytes);
+        }
     }
-    return g_driver->launch_dev2d(g_kernels[idx], nx, ny);
+    // No device→host scalar sync: the host owns the scalars (they were just
+    // uploaded); arrays stay device-resident until briev_accel_download.
+    return g_driver->launch_dev2d(g_kernels[idx], nx, ny, full_sync,
+                                  dirty, n_dirty);
 }
 
 /// Pull the FULL projection back to the host state (end of a resident run —
