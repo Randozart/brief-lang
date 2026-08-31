@@ -181,6 +181,28 @@ contract == tamer behavior.
   (deterministic layout rule). Dynamic/symbolic trigger addresses are
   capability errors (hardware pins are static). Pin assignment is a
   typechecker-level input-pin error.
+- **Device-local residency ABI** (2026-08-31, plan 2026-08-31-gpu-next):
+  the runtime driver keeps TWO buffers per kernel — a DEVICE_LOCAL working
+  set the shader actually reads/writes (bound in the descriptor set), and a
+  HOST_VISIBLE|HOST_COHERENT staging window the runtime writes. Seed and
+  scalar counters cross inside the dispatch submission (vkCmdCopyBuffer with
+  transfer→compute barriers); results stay in VRAM until
+  `briev_accel_download` pulls them (`download_dev` op). An all-host
+  fallback (no VRAM type / no 2D op) preserves the pre-residency behavior.
+  Rationale, measured: a mapped-host SSBO makes every array read cross PCIe
+  (~4GB/s effective — GEMV 15.5ms); VRAM residency cut it to 0.9ms
+  (~38 GFLOP/s). "Device residency" means VRAM, not mapped host memory.
+- **Driver traps (recorded, do not regress)**: a VkBufferMemoryBarrier with
+  buffer = NULL is INVALID — the driver silently drops the entire command
+  buffer (symptom: outputs stay zero, submit "succeeds"). The runner's
+  runtime files are COPIED next to the generated runner: recompiling a
+  runner after editing lib/runtime without recopying runs stale code.
+- **Dispatch geometry** (§2b of gpu-next): the kernel may reconstruct its
+  linear index as `i = gid.y * cols + gid.x` when the analysis derives
+  `work_cols` from the body's own shift/mask decomposition. Correct under
+  ANY launcher covering the total count (flat 1D gives gid.y == 0). The
+  bounds guard is REQUIRED for 2D shapes (tail reaches cols-1 items) and
+  for literal counts not divisible by the workgroup size.
 - Canonical host ids mirror the VM table (`GetGlobalId#` etc. lower to
   BuiltIn inputs here).
 - Validation: spirv-val on every emitted binary + spirv-dis structural
