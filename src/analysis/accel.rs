@@ -612,39 +612,63 @@ fn scan_expr_work_cols(
     shift_cols: &mut Option<u64>,
     mask_cols: &mut Option<u64>,
 ) {
-    match e {
-        Expr::BinaryOp(BinaryOpKind::Shr, l, r)
-            if matches!(l.as_ref(), Expr::Identifier(v) if v == index_var) =>
-        {
-            if let Expr::Decimal(k) = r.as_ref() {
-                if *k >= 1 && *k <= 31 {
-                    let cols = 1u64 << *k;
-                    if shift_cols.is_none() {
-                        *shift_cols = Some(cols);
-                    }
-                }
-            }
+    if let Some(cols) = shift_of_index(e, index_var) {
+        if shift_cols.is_none() {
+            *shift_cols = Some(cols);
         }
-        Expr::BinaryOp(BinaryOpKind::BitAnd, l, r)
-            if matches!(l.as_ref(), Expr::Identifier(v) if v == index_var) =>
-        {
-            if let Expr::Decimal(m) = r.as_ref() {
-                if *m > 0 && (*m as u64).next_power_of_two() == *m as u64 {
-                    let cols = *m as u64 + 1;
-                    if mask_cols.is_none() {
-                        *mask_cols = Some(cols);
-                    } else if *mask_cols != Some(cols) {
-                        // conflicting masks: poison the mask evidence
-                        *mask_cols = Some(u64::MAX);
-                    }
-                }
-            }
+        return;
+    }
+    if let Some(cols) = mask_of_index(e, index_var) {
+        update_mask_evidence(mask_cols, cols);
+        return;
+    }
+    for child in child_exprs(e) {
+        scan_expr_work_cols(child, index_var, shift_cols, mask_cols);
+    }
+}
+
+/// `i >> k` with k in 1..=31 names cols = 2^k.
+fn shift_of_index(e: &Expr, index_var: &str) -> Option<u64> {
+    let Expr::BinaryOp(BinaryOpKind::Shr, l, r) = e else {
+        return None;
+    };
+    if !matches!(l.as_ref(), Expr::Identifier(v) if v == index_var) {
+        return None;
+    }
+    let Expr::Decimal(k) = r.as_ref() else {
+        return None;
+    };
+    if *k < 1 || *k > 31 {
+        return None;
+    }
+    Some(1u64 << *k)
+}
+
+/// `i & m` with m+1 a power of two names cols = m+1.
+fn mask_of_index(e: &Expr, index_var: &str) -> Option<u64> {
+    let Expr::BinaryOp(BinaryOpKind::BitAnd, l, r) = e else {
+        return None;
+    };
+    if !matches!(l.as_ref(), Expr::Identifier(v) if v == index_var) {
+        return None;
+    }
+    let Expr::Decimal(m) = r.as_ref() else {
+        return None;
+    };
+    if *m <= 0 || (*m as u64).next_power_of_two() != *m as u64 {
+        return None;
+    }
+    Some(*m as u64 + 1)
+}
+
+fn update_mask_evidence(mask_cols: &mut Option<u64>, cols: u64) {
+    match mask_cols {
+        None => *mask_cols = Some(cols),
+        Some(existing) if *existing != cols => {
+            // conflicting masks: poison the mask evidence
+            *mask_cols = Some(u64::MAX);
         }
-        _ => {
-            for child in child_exprs(e) {
-                scan_expr_work_cols(child, index_var, shift_cols, mask_cols);
-            }
-        }
+        _ => {}
     }
 }
 
