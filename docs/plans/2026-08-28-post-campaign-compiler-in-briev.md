@@ -49,28 +49,46 @@ Any entry still genuinely open stays open with an accurate note.
 
 ---
 
-## C. Compiler-in-Briev pass migration
+## C. Compiler-in-Briev pass migration — PROGRESS LEDGER
 
-`lib/compiler/main.bv` fails to parse: 11 "expected identifier, found '}'"
-errors — legacy syntax (old `defn ... -> T { term ...; }` return style
-without `endprogram`, `output.to_string()` method calls that no longer
-exist, flipped-form initializers). The pass imports std/io, std/string,
-std/string_builder, std/collections, std/option — all now working.
+`lib/compiler/main.bv` failed to parse (11 errors) — the whole corpus
+(`~11.6k` lines across ~19 files) predates several grammar rewrites.
 
-**Steps:**
-1. Parse each legacy construct against the CURRENT grammar (learn-briev/,
-   spec/SPEC.md) — migrate, don't paper over.
-2. Walk the import chain: main.bv → ast.bv, lexer.bv, parser.bv,
-   typechecker.bv, proof_engine.bv, token.bv, call_graph.bv, range.bv,
-   needs_state.bv, reader.bv, backends/.
-3. Goal: `brievc check lib/compiler/main.bv` passes type-checking.
-4. If the pass reaches codegen, link + run a smoke (the pass's own
-   lexer/parser on a small input).
+### Completed (2026-08-28)
 
-Scope guard: this is a LARGE legacy surface. The plan's check gate is
-"type-checks cleanly"; codegen-and-runs is a stretch goal — if the surface
-is too large for one session, commit the parse+typecheck wins and log the
-residual in BUGS.md.
+| Item | Result |
+|------|--------|
+| token.bv (354 lines) | Fully migrated — `brievc check OK` |
+| obj-decl field commas | Stripped corpus-wide (944 changed lines; obj decls are newline-separated, struct literals keep commas) |
+| guard-blocks `[expr] { }` → `when expr { }` | 761 sites corpus-wide (incl. char-literal-bracket conditions) |
+| lexer.bv | PARSES clean (was 20 parse errors); only type errors remain |
+| active pass (reader/needs_state/soa_reorder) | Still `OK`; soa_reorder gained the explicit `cstr_to_briev` cast |
+
+`cargo test --lib` 1991 green; `c_driver_needs_state` passes.
+
+### Remaining (next session)
+
+| File | Parse errors | Legacy constructs |
+|------|--------------|-------------------|
+| parser.bv | 45 | ~433 `uni` |
+| ast.bv | 47 | 13 `uni` + types |
+| main.bv | 10 | 25 legacy |
+| range.bv | 10 | 22 |
+| call_graph.bv | 9 | 16 |
+| typechecker.bv | 13 | 130 `uni` |
+| proof_engine.bv | 40 | 136 |
+| backends/* | ~80 | mix |
+
+**Recipe (from token.bv):**
+- `uni x(Pattern) = expr;` chain → `term match x { Pattern => expr, ..., _ => fallback };`
+- `uni x(Pattern) = { stmts };` → statement-position match arm `Pattern => { stmts },`
+- guard-blocks INSIDE match arms → `when` (the `[ ]` form is rejected there)
+- `.len()` on String → `x .^Length`; `String(n)` → `n as String`; `to_string(sb)` → `sb.buffer`
+- add missing imports (`std/string`, `std/option`, `std/string_builder`, `std/result`)
+- Char semantics: `source[i]` indexing + `.char_at(0)` need the modern Char
+  element-read (lexer.bv's remaining type errors)
+- `uni` conversion is done PER-FUNCTION (token.bv style) — the multi-line
+  block arms make scripted bulk conversion risky at 433 sites
 
 ---
 
