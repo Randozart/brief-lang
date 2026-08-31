@@ -1,0 +1,20 @@
+// ── Axiom Policy (plan 2026-08-26-axiom-facility) ────────────────────
+// Declared-authority enforcement dial. `axiom` marks knowledge taken on
+// authority instead of proof (SPEC §8.7): axiomatic cast edges, authoritative
+// contract posts, op lemmas. The policy governs how the compiler treats each
+// declared site; the .s strict report ALWAYS renders the full ledger
+// regardless of this setting.
+//
+//   allow — accepted; one info line per site in the warnings stream.
+//   warn  — accepted; a prominent warning naming every site and what was
+//           skipped rides alongside it.
+//   deny  — any axiom site is a hard error: prove it or remove the shortcut.
+//
+// lemma_properties: closed vocabulary of optimizer-exploitable properties an
+// op binding may declare. Anything outside this list is rejected at parse
+// validation — the compiler learns nothing hardcoded.
+
+// allow | warn | deny
+policy: allow;
+
+lemma_properties: commutative;

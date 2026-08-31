@@ -309,3 +309,9 @@ tmp_fixtures/hw/
 
 # Generated LLVM IR from example builds
 examples/*.ll
+
+# GPU bench binaries + generated runner build dirs (2026-08-31)
+benchmarks/gpu/nbody_force
+benchmarks/gpu/pairs
+benchmarks/gpu/run_abv/
+examples/gpu/run_abv/
