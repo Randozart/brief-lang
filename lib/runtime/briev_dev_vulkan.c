@@ -639,7 +639,18 @@ static void* briev_dev_vulkan_mapped(void* handle) {
 
 // Record + submit + fence-wait with NO host copies. Requires the caller to
 // have seeded/synced the mapped projection itself.
+// 2D dispatch (plan 2026-08-31-gpu-next §2b): nx columns × ny rows; ny == 1
+// is the flat 1D form. Workgroups stay 64×1×1, so the grid is
+// (ceil(nx/64), ny, 1) — a 2D launch covers nx*ny work items exactly like
+// the flat ceil(nx*ny/64) grid, but the hardware hands each invocation its
+// (x, y) position directly (the kernel reconstructs i = y*nx + x).
+static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny);
+
 static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n) {
+    return briev_dev_vulkan_launch_dev2d(handle, global_n, 1);
+}
+
+static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny) {
     BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
     int verbose = g_verbose;
     size_t local_n = VK_LOCAL_SIZE_X;
@@ -657,9 +668,10 @@ static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n) {
     vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
                             0, 1, &k->desc_set, 0, NULL);
-    size_t groups = (global_n + local_n - 1) / local_n;
-    if (groups == 0) { groups = 1; }
-    vkCmdDispatch(vk_cmd_buf, (uint32_t)groups, 1, 1);
+    size_t groups_x = (nx + local_n - 1) / local_n;
+    if (groups_x == 0) { groups_x = 1; }
+    if (ny == 0) { ny = 1; }
+    vkCmdDispatch(vk_cmd_buf, (uint32_t)groups_x, (uint32_t)ny, 1);
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
         return 0;
@@ -738,4 +750,5 @@ BrievDeviceDriver briev_dev_vulkan = {
     briev_dev_vulkan_shutdown,
     briev_dev_vulkan_mapped,
     briev_dev_vulkan_launch_dev,
+    briev_dev_vulkan_launch_dev2d,
 };

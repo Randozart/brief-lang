@@ -44,6 +44,9 @@ pub struct RunnerKernel {
     pub spirv: Vec<u8>,
     pub index_var: String,
     pub count_expr: Expr,
+    /// 2D dispatch width (None = 1D). Mirrors `KernelShape::work_cols` —
+    /// the runner must dispatch the SAME geometry the blob was built for.
+    pub work_cols: Option<u64>,
 }
 
 /// The SSBO layout EXACTLY as the kernel sees it (name-sorted, real element
@@ -411,10 +414,23 @@ pub fn emit_runner(
             let ci = c_ident(name);
             out.push_str(&format!("    // kernel node '{}'\n", name));
             out.push_str(&format!("    if ({}) {{\n", pre));
-            out.push_str(&format!(
-                "      fired = 1;\n      long long n_{} = {};\n      if (n_{} > 0 && !briev_accel_launch_resident({}, state, n_{})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
-                ci, count_c, ci, kidx.unwrap(), ci
-            ));
+            out.push_str(&format!("      fired = 1;\n      long long n_{} = {};\n", ci, count_c));
+            if let Some(cols) = k.work_cols {
+                // 2D geometry (plan 2026-08-31-gpu-next §2b): cols columns ×
+                // ceil(count/cols) rows. Coverage is identical to the flat
+                // launch; the hardware routes (x, y) directly.
+                out.push_str(&format!(
+                    "      long long rows_{ci} = (n_{ci} + {cols} - 1) / {cols};\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, {cols}, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
+                    kidx.unwrap()
+                ));
+            } else {
+                out.push_str(&format!(
+                    "      if (n_{} > 0 && !briev_accel_launch_resident({}, state, n_{})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
+                    kidx.unwrap(),
+                    ci,
+                    ci
+                ));
+            }
             out.push_str(&format!(
                 "      S_{} = n_{};\n",
                 c_ident(&k.index_var),
@@ -497,6 +513,7 @@ pub fn build_kernels(
             spirv: sb.build()?,
             index_var: e.shape.index_var.clone(),
             count_expr: e.shape.count_expr.clone().unwrap_or(Expr::Decimal(0)),
+            work_cols: e.shape.work_cols,
         });
     }
     Ok(out)

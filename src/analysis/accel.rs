@@ -104,6 +104,13 @@ pub struct KernelShape {
     pub eligible: bool,
     /// Ineligibility evidence (optimization remarks).
     pub reasons: Vec<String>,
+    /// 2D dispatch width (plan 2026-08-31-gpu-next §2b): when the body
+    /// decomposes the work-item id row/col style (`i >> k`, `i & (2^k - 1)`),
+    /// the kernel reconstructs `i = gid.y * cols + gid.x` and launchers may
+    /// dispatch a 2D grid. None = plain 1D. Reconstruction is correct under
+    /// ANY launch shape that covers the total count, so 1D launchers stay
+    /// sound (flat: gid.y is always 0 and gid.x spans the count).
+    pub work_cols: Option<u64>,
 }
 
 /// One analyzed candidate body, keyed by transaction name.
@@ -491,6 +498,7 @@ fn prove_kernel(
         scalar_ins: Vec::new(),
         eligible: false,
         reasons: Vec::new(),
+        work_cols: None,
     };
 
     // 1. Bound: the contract precondition must CONTAIN an `[i < N]` conjunct
@@ -572,9 +580,109 @@ fn prove_kernel(
         }
     }
 
+    // 6. 2D dispatch geometry (plan 2026-08-31-gpu-next §2b): the body's own
+    //    row/col decomposition names the width — `i >> k` says cols = 2^k,
+    //    `i & (cols-1)` confirms it. Best-effort: no match stays 1D.
+    shape.work_cols = detect_work_cols(&shape.kernel_stmts, &index_var);
+
     shape.eligible = reasons.is_empty();
     shape.reasons = reasons;
     shape
+}
+
+/// Derive the 2D dispatch width from the kernel body's shift/mask uses of
+/// the work-item id. Returns Some(cols) when a shift `i >> k` (k in 1..=31)
+/// appears and every mask `i & m` agrees with cols = 2^k (m == cols - 1).
+fn detect_work_cols(stmts: &[Statement], index_var: &str) -> Option<u64> {
+    let mut shift_cols: Option<u64> = None;
+    let mut mask_cols: Option<u64> = None;
+    for stmt in stmts {
+        scan_stmt_work_cols(stmt, index_var, &mut shift_cols, &mut mask_cols);
+    }
+    match (shift_cols, mask_cols) {
+        (Some(c), Some(m)) if c == m => Some(c),
+        (Some(c), None) => Some(c),
+        _ => None,
+    }
+}
+
+fn scan_expr_work_cols(
+    e: &Expr,
+    index_var: &str,
+    shift_cols: &mut Option<u64>,
+    mask_cols: &mut Option<u64>,
+) {
+    match e {
+        Expr::BinaryOp(BinaryOpKind::Shr, l, r)
+            if matches!(l.as_ref(), Expr::Identifier(v) if v == index_var) =>
+        {
+            if let Expr::Decimal(k) = r.as_ref() {
+                if *k >= 1 && *k <= 31 {
+                    let cols = 1u64 << *k;
+                    if shift_cols.is_none() {
+                        *shift_cols = Some(cols);
+                    }
+                }
+            }
+        }
+        Expr::BinaryOp(BinaryOpKind::BitAnd, l, r)
+            if matches!(l.as_ref(), Expr::Identifier(v) if v == index_var) =>
+        {
+            if let Expr::Decimal(m) = r.as_ref() {
+                if *m > 0 && (*m as u64).next_power_of_two() == *m as u64 {
+                    let cols = *m as u64 + 1;
+                    if mask_cols.is_none() {
+                        *mask_cols = Some(cols);
+                    } else if *mask_cols != Some(cols) {
+                        // conflicting masks: poison the mask evidence
+                        *mask_cols = Some(u64::MAX);
+                    }
+                }
+            }
+        }
+        _ => {
+            for child in child_exprs(e) {
+                scan_expr_work_cols(child, index_var, shift_cols, mask_cols);
+            }
+        }
+    }
+}
+
+fn scan_stmt_work_cols(
+    stmt: &Statement,
+    index_var: &str,
+    shift_cols: &mut Option<u64>,
+    mask_cols: &mut Option<u64>,
+) {
+    match stmt {
+        Statement::Assign(lhs, rhs) => {
+            scan_expr_work_cols(lhs, index_var, shift_cols, mask_cols);
+            scan_expr_work_cols(rhs, index_var, shift_cols, mask_cols);
+        }
+        Statement::Foreach { list, body, .. } => {
+            scan_expr_work_cols(list, index_var, shift_cols, mask_cols);
+            for s in body {
+                scan_stmt_work_cols(s, index_var, shift_cols, mask_cols);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Direct expression children (best-effort walk for the 2D scan).
+fn child_exprs(e: &Expr) -> Vec<&Expr> {
+    match e {
+        Expr::BinaryOp(_, l, r) => vec![l.as_ref(), r.as_ref()],
+        Expr::UnaryOp(_, a) => vec![a.as_ref()],
+        Expr::Index(o, i) => vec![o.as_ref(), i.as_ref()],
+        Expr::Call(_, args, _) => args.iter().collect(),
+        Expr::MethodCall(recv, _, args, _) => {
+            let mut v: Vec<&Expr> = vec![recv.as_ref()];
+            v.extend(args.iter());
+            v
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Walk kernel statements collecting the buffer contract:
@@ -1121,5 +1229,85 @@ mod tests {
         // No module key → absent → unmarked body is not a candidate.
         let map = analyze(&items, &HashMap::new(), Some(&universe()));
         assert!(!map.contains_key("t"));
+    }
+
+    // ── 2D dispatch geometry (plan 2026-08-31-gpu-next §2b) ──────
+
+    #[test]
+    fn shift_mask_body_sets_work_cols() {
+        let mut items = vec![];
+        state(&mut items);
+        // pairs-style body: row = i >> 12, col = i & 4095 → cols = 4096.
+        let body = vec![
+            Statement::Assign(
+                Expr::Index(
+                    Box::new(Expr::Identifier("dv".into())),
+                    Box::new(Expr::Identifier("i".into())),
+                ),
+                Expr::Index(
+                    Box::new(Expr::Identifier("sv".into())),
+                    Box::new(Expr::BinaryOp(
+                        BinaryOpKind::Shr,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(12)),
+                    )),
+                ),
+            ),
+            inc_i(),
+        ];
+        items.push(txn_with("pairs", pre_lt("i", Expr::Identifier("nb".into())), body));
+        let map = analyze(&items, &HashMap::new(), Some(&universe()));
+        assert_eq!(entry(&map, "pairs").shape.work_cols, Some(4096));
+    }
+
+    #[test]
+    fn plain_body_stays_1d() {
+        let mut items = vec![];
+        state(&mut items);
+        let body = vec![
+            Statement::Assign(
+                Expr::Index(
+                    Box::new(Expr::Identifier("dv".into())),
+                    Box::new(Expr::Identifier("i".into())),
+                ),
+                Expr::Decimal(1),
+            ),
+            inc_i(),
+        ];
+        items.push(txn_with("flat", pre_lt("i", Expr::Identifier("nb".into())), body));
+        let map = analyze(&items, &HashMap::new(), Some(&universe()));
+        assert_eq!(entry(&map, "flat").shape.work_cols, None);
+    }
+
+    #[test]
+    fn conflicting_masks_poison_detection() {
+        // A shift says cols = 4096; a mask says 1024 → no 2D claim.
+        let mut items = vec![];
+        state(&mut items);
+        let idx = |e: Expr| {
+            Expr::Index(Box::new(Expr::Identifier("sv".into())), Box::new(e))
+        };
+        let body = vec![
+            Statement::Assign(
+                idx(Expr::BinaryOp(
+                    BinaryOpKind::Shr,
+                    Box::new(Expr::Identifier("i".into())),
+                    Box::new(Expr::Decimal(12)),
+                )),
+                Expr::Decimal(1),
+            ),
+            Statement::Assign(
+                idx(Expr::BinaryOp(
+                    BinaryOpKind::BitAnd,
+                    Box::new(Expr::Identifier("i".into())),
+                    Box::new(Expr::Decimal(1023)),
+                )),
+                Expr::Decimal(2),
+            ),
+            inc_i(),
+        ];
+        items.push(txn_with("mix", pre_lt("i", Expr::Identifier("nb".into())), body));
+        let map = analyze(&items, &HashMap::new(), Some(&universe()));
+        assert_eq!(entry(&map, "mix").shape.work_cols, None);
     }
 }

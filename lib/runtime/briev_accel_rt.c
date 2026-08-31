@@ -83,6 +83,11 @@ typedef struct BrievDeviceDriver {
     // projection itself. NULL → the runtime falls back to `launch`.
     void* (*mapped)(void* kernel);
     int (*launch_dev)(void* kernel, size_t global_n);
+    // 2026-08-31 (plan 2026-08-31-gpu-next §2b): 2D dispatch — `nx` work
+    // items per row, `ny` rows. NULL → the runtime flattens to
+    // `launch_dev(nx*ny)` (identical work-item coverage, different
+    // hardware routing).
+    int (*launch_dev2d)(void* kernel, size_t nx, size_t ny);
 } BrievDeviceDriver;
 
 extern BrievDeviceDriver briev_dev_vulkan;
@@ -311,11 +316,52 @@ int briev_accel_launch_resident(uint32_t idx, void* state, uint64_t work_n) {
     return g_driver->launch_dev(g_kernels[idx], work_n);
 }
 
+// 2D resident launch (plan 2026-08-31-gpu-next §2b): same scalar sync as
+// `launch_resident`, but the dispatch is a 2D grid (nx columns × ny rows).
+// Falls back to the flat 1D launch when the driver has no 2D op — the
+// kernel reconstructs its linear index either way, coverage is identical.
+int briev_accel_launch_resident_2d(uint32_t idx, void* state,
+                                   uint64_t nx, uint64_t ny) {
+    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+        || g_kernels[idx] == NULL) {
+        return 0;
+    }
+    if (g_driver->launch_dev2d == NULL) {
+        return briev_accel_launch_resident(idx, state, nx * ny);
+    }
+    if (g_driver->mapped == NULL || g_driver->launch_dev == NULL) {
+        return briev_accel_launch(idx, state, nx * ny);
+    }
+    void* mapped = g_driver->mapped(g_kernels[idx]);
+    if (mapped == NULL) {
+        return briev_accel_launch(idx, state, nx * ny);
+    }
+    const BrievKernelDesc* k = &g_descs[idx];
+    if (g_resident_seeded[idx]) {
+        for (uint32_t i = 0; i < k->n_fields; i++) {
+            const BrievField* f = &k->fields[i];
+            if (f->kind == BRIEV_FIELD_SCALAR) {
+                memcpy(mapped + proj_field_offset(k, i),
+                       (const uint8_t*)state + f->host_offset,
+                       (size_t)f->elem_bytes);
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < k->n_fields; i++) {
+            const BrievField* f = &k->fields[i];
+            memcpy(mapped + proj_field_offset(k, i),
+                   (const uint8_t*)state + f->host_offset,
+                   (size_t)(f->count * f->elem_bytes));
+        }
+        g_resident_seeded[idx] = 1;
+    }
+    return g_driver->launch_dev2d(g_kernels[idx], nx, ny);
+}
+
 /// Pull the FULL projection back to the host state (end of a resident run —
 /// observables read host state). Returns 0 when residency isn't active for
 /// `idx` (the caller's state is then already current from full-copy launches).
-int briev_accel_download(uint32_t idx, void* state) {
-    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+int briev_accel_download(uint32_t idx, void* state) {    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
         || g_kernels[idx] == NULL || !g_resident_seeded[idx]) {
         return 0;
     }

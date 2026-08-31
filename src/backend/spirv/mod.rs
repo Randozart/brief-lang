@@ -183,6 +183,7 @@ mod tests {
             scalar_ins: vec![],
             eligible: true,
             reasons: vec![],
+            work_cols: None,
         }
     }
 
@@ -534,6 +535,7 @@ mod tests {
             scalar_ins: vec![],
             eligible: true,
             reasons: vec![],
+            work_cols: None,
         };
 
         let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
@@ -678,6 +680,7 @@ mod tests {
             scalar_ins: vec![],
             eligible: true,
             reasons: vec![],
+            work_cols: None,
         };
 
         let mut builder = SpirvBuilder::new();

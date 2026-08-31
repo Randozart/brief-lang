@@ -104,27 +104,30 @@ pub fn emit_kernel(
         lower.vars.insert(name.clone(), (*var, ty.clone()));
     }
 
-    // 2026-08-31 (plan abv-gpu-by-default): BIND the work-item index. The
-    // doc claimed "index_var binds to get_global_id(0)" but nothing stored
-    // it — the standalone kernels were never executed, so every invocation
-    // read an undefined index. Widening u32→i64 mirrors the builtin path.
-    {
-        let (gid64, _t) = lower.emit_expr(&Expr::Call(
-            "GetGlobalId#".into(),
-            vec![Expr::Decimal(0)],
-            None,
-        ))?;
-        lower.builder.store(index_var, gid64);
-    }
+    bind_work_item_index(&mut lower, index_var, shape.work_cols);
 
     // 2026-08-31 (plan abv-gpu-by-default): BOUNDS GUARD. The host dispatches
     // ceil(N / LocalSize) workgroups, so up to LocalSize-1 extra invocations
     // run; each must exit before touching state when its global id exceeds
     // the work-item count (a runtime field or a literal — exactly the bound
     // the eligibility proof extracted from `[i < N]`).
+    //
+    // 2D (plan 2026-08-31-gpu-next §2b): the flat-launch tail argument only
+    // holds when N is a multiple of the workgroup size. With 2D geometry the
+    // tail can reach cols-1 items, and even a literal count need not be a
+    // multiple — so a 2D shape ALWAYS carries the guard. (Found while
+    // wiring this up: a literal count not divisible by 64 had the same hole
+    // in pure 1D; the literal%64 check closes that too.)
     let count_is_literal = matches!(shape.count_expr, Some(Expr::Decimal(_)));
+    let count_multiple_of_workgroup = match shape.count_expr {
+        Some(Expr::Decimal(n)) => n % LOCAL_SIZE_X as i64 == 0,
+        _ => false,
+    };
+    let needs_guard = !count_is_literal
+        || shape.work_cols.is_some()
+        || !count_multiple_of_workgroup;
     let exit_bb = lower.builder.gen_id();
-    if !count_is_literal {
+    if needs_guard {
         let body_bb = lower.builder.gen_id();
         let bound_expr = shape
             .count_expr
@@ -188,4 +191,45 @@ pub fn emit_kernel(
     );
 
     Ok(func_id)
+}
+
+/// BIND the work-item index (2026-08-31, plan abv-gpu-by-default): the doc
+/// once claimed "index_var binds to get_global_id(0)" but nothing stored it —
+/// the standalone kernels were never executed, so every invocation read an
+/// undefined index. Widening u32→i64 mirrors the builtin path.
+///
+/// 2D (plan 2026-08-31-gpu-next §2b): when the shape carries a dispatch
+/// width, reconstruct `i = gid.y * cols + gid.x`. The values are IDENTICAL
+/// to a 1D linearization for every covered item, so any launcher that
+/// covers the total count stays correct (a flat 1D launch has gid.y == 0
+/// and gid.x spanning the count); the 2D shape exists so the launcher can
+/// hand the row/col split to the hardware.
+fn bind_work_item_index(
+    lower: &mut FnLowerer,
+    index_var: spirv::Word,
+    work_cols: Option<u64>,
+) -> Result<(), String> {
+    let idx_expr = match work_cols {
+        Some(cols) if cols > 1 => Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Add,
+            Box::new(Expr::BinaryOp(
+                crate::ast::BinaryOpKind::Mul,
+                Box::new(Expr::Call(
+                    "GetGlobalId#".into(),
+                    vec![Expr::Decimal(1)],
+                    None,
+                )),
+                Box::new(Expr::Decimal(cols as i64)),
+            )),
+            Box::new(Expr::Call(
+                "GetGlobalId#".into(),
+                vec![Expr::Decimal(0)],
+                None,
+            )),
+        ),
+        _ => Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None),
+    };
+    let (gid64, _t) = lower.emit_expr(&idx_expr)?;
+    lower.builder.store(index_var, gid64);
+    Ok(())
 }

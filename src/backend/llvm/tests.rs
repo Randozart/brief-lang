@@ -1906,6 +1906,7 @@ fn accel_test_entry(buffer: &str, write: bool) -> crate::analysis::accel::AccelE
         scalar_ins: vec![],
         eligible: true,
         reasons: vec![],
+        work_cols: None,
     };
     AccelEntry {
         mode: AccelMode::TryKeyword,
