@@ -180,6 +180,27 @@ Once the analysis is trustworthy, wire it into:
 This is deliberately out of scope for the analysis phase — the pass must be
 proven correct before any codegen relies on it (AGENTS Rule 9: tests first).
 
+### 5.1 Wiring status — IMPLEMENTED (2026-08-31)
+
+- **`ExportDecl` ownership tagging**: `src/glue/export.rs` now carries
+  `param_ownership: Vec<String>` and `return_ownership: Option<String>` on each
+  export, populated from `compute_boundary_ownership`. The `bridge-exports.dbvl`
+  metadata serializes them as fields 6 (params) and 7 (return):
+  `export,echo,CStr,CStr,pure,borrowed,zero-copy`.
+- **Ownership report**: `brievc ownership <file.bv>` prints every export and
+  frgn boundary's per-param/return ownership class.
+- **Copy-elimination verification**: the codegen already honors the asymmetry —
+  `String → CStr` (classified `ZeroCopy`) emits `str_to_c` (the pointer-offset
+  zero-copy delta), never `cstr_to_briev` (the allocating copy). A regression
+  test (`string_to_cstr_cast_becomes_zero_copy_str_to_c`) locks this. No
+  redundant copy existed to remove; the wiring makes the zero-copy contract
+  explicit and auditable.
+- **Declared-protocol resolution**: the analysis resolves boundary types
+  (`CStr`, `CDouble`) from `type X: #Proto<Var>` declarations as a fallback,
+  because the GLUE commands (`bindings`/`extension`/`export`/`ownership`) use
+  `parse_and_check` which does not run the normalizer that registers `Cast.*`
+  universe properties.
+
 ## 6. Composition with Phase 9 keywords
 
 Phase 9 (`2026-08-20-ownership-algebra-phase9.md`) provides explicit

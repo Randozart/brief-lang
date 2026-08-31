@@ -513,4 +513,52 @@ mod tests {
             other => panic!("expected a binding call, got {:?}", other),
         }
     }
+
+    #[test]
+    fn string_to_cstr_cast_becomes_zero_copy_str_to_c() {
+        // 2026-08-31 (boundary ownership plan §5 verification): the ZeroCopy
+        // direction (String → CStr) must emit `str_to_c` — the pointer-offset
+        // delta that is copy-free — NOT `cstr_to_briev` (the allocating copy).
+        // The ownership pass classifies this boundary ZeroCopy; this test locks
+        // that the marshalling honors it (no copy introduced).
+        let universe = TypeUniverse::new();
+        let mut items = vec![
+            cstr_proto(),
+            cstr_type(),
+            TopLevel::Definition(Definition {
+                name: "marshall_out".to_string(),
+                type_params: vec![],
+                parameters: vec![("s".to_string(), Type::Custom("String".to_string()))],
+                output_type: Some(OutputType::Single(Type::Custom("CStr".to_string()))),
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::Bool(true),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    span: None,
+                    explicit: false,
+                post_authority: false},
+                body: vec![Statement::Term(Some(Expr::Cast(
+                    Box::new(Expr::Identifier("s".to_string())),
+                    Type::Custom("CStr".to_string()),
+                )))],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                annotations: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        rewrite_boundary_marshalling(&mut items, &universe);
+        let TopLevel::Definition(d) = &items[2] else { panic!() };
+        let Statement::Term(Some(expr)) = &d.body[0] else { panic!() };
+        match expr {
+            Expr::Call(name, args, _) => {
+                assert_eq!(name, "str_to_c", "String→CStr must emit str_to_c (zero-copy)");
+                assert!(matches!(args[0], Expr::Identifier(ref n) if n == "s"));
+            }
+            other => panic!("expected a str_to_c binding call, got {:?}", other),
+        }
+    }
 }

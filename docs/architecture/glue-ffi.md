@@ -48,6 +48,15 @@ unnecessary copies (a follow-up wiring phase). Explicit `borrow`/`consume`/
 inference where it cannot see (custom pointer types, opaque C returns, host-GC
 bridges).
 
+**Audit:** `brievc ownership <bridge.bv>` prints every boundary's ownership
+class — a developer sees immediately whether a String return is `zero-copy`
+(host receives the NUL-terminated data pointer, no copy) or `owned` (Briev
+holds the arena handle). The `bridge-exports.dbvl` metadata carries it per
+export (fields 6/7), so wrapper generators can render ownership-aware
+marshalling. The codegen already honors the asymmetry (`String → CStr` emits
+`str_to_c`, copy-free; `CStr → String` emits `cstr_to_briev`, the inherent
+length-header allocation).
+
 ---
 
 ## 2. How to link

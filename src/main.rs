@@ -35,6 +35,7 @@ fn main() {
         "link" => run_link(&args[2..]),
         "audit" => run_audit_cmd(&args[2..]),
         "memcheck" => run_memcheck_cmd(&args[2..]),
+        "ownership" => run_ownership_cmd(&args[2..]),
         "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "bounty" => run_bounty(&args[2..]),
@@ -728,6 +729,41 @@ fn run_audit_cmd(args: &[String]) -> Result<(), String> {
     let source_file = args.first().map(|s| s.as_str());
     let results = briev_compiler::macros::audit::run_audit(source_file)?;
     briev_compiler::macros::audit::print_audit(&results);
+    Ok(())
+}
+
+/// `brievc ownership <file.bv>` — audit report of every FFI boundary's
+/// ownership class (value / owned / zero-copy / borrowed / zero-cost).
+/// 2026-08-31 (boundary ownership plan §5): the compiler's view of each
+/// export/frgn parameter and return — is this boundary copy-free, and why.
+fn run_ownership_cmd(args: &[String]) -> Result<(), String> {
+    let file_path = args.first().ok_or("usage: brievc ownership <file.bv>")?;
+    let source = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
+    let (items, universe) = briev_compiler::library::parse_and_check(file_path, &source)?;
+    let ownership = briev_compiler::analysis::boundary_ownership::compute_boundary_ownership(
+        &items,
+        Some(&universe),
+        &|_| None,
+    );
+
+    println!("== Boundary ownership: {}", file_path);
+    let mut export_names: Vec<&String> = ownership.exports.keys().collect();
+    export_names.sort();
+    for name in export_names {
+        let e = &ownership.exports[name];
+        let params: Vec<String> = e.params.iter().map(|o| o.as_str().to_string()).collect();
+        let ret = e.ret.map(|o| o.as_str().to_string()).unwrap_or_else(|| "void".to_string());
+        println!("  export {:<24} params: [{}]  return: {}", name, params.join(", "), ret);
+    }
+    let mut frgn_names: Vec<&String> = ownership.frgns.keys().collect();
+    frgn_names.sort();
+    for name in frgn_names {
+        let e = &ownership.frgns[name];
+        let params: Vec<String> = e.params.iter().map(|o| o.as_str().to_string()).collect();
+        let ret = e.ret.map(|o| o.as_str().to_string()).unwrap_or_else(|| "void".to_string());
+        println!("  frgn   {:<24} params: [{}]  return: {}", name, params.join(", "), ret);
+    }
     Ok(())
 }
 

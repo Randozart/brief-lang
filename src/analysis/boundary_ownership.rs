@@ -73,6 +73,17 @@ impl BoundaryOwnership {
             _ => self.meet(other),
         }
     }
+
+    /// Stable text name for the boundary contract (dbvl metadata, reports).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BoundaryOwnership::Value => "value",
+            BoundaryOwnership::Owned => "owned",
+            BoundaryOwnership::ZeroCopy => "zero-copy",
+            BoundaryOwnership::Borrowed => "borrowed",
+            BoundaryOwnership::ZeroCost => "zero-cost",
+        }
+    }
 }
 
 /// Ownership of a single boundary (an export or a frgn).
@@ -111,6 +122,12 @@ pub fn compute_boundary_ownership(
     let mut frgns: HashMap<String, Vec<(String, Type)>> = HashMap::new();
     let mut frgn_ret: HashMap<String, Option<Type>> = HashMap::new();
     let mut state_fields: HashSet<String> = HashSet::new();
+    // 2026-08-31: declared boundary protocols from `type CStr: #String<C_String>`.
+    // The universe registers these during the full compile (normalizer), but the
+    // GLUE commands (bindings/extension/export/ownership) use parse_and_check,
+    // which does not run the normalizer — so resolve the category/variant from
+    // the type declarations as a fallback (same source build_type_protocols uses).
+    let mut declared_protocols: HashMap<String, String> = HashMap::new();
 
     for item in items {
         match item {
@@ -138,6 +155,11 @@ pub fn compute_boundary_ownership(
             TopLevel::StateDecl(s) => {
                 state_fields.insert(s.name.clone());
             }
+            TopLevel::TypeDef(td) => {
+                if let Some(p) = td.protocol.as_ref() {
+                    declared_protocols.insert(td.name.clone(), p.clone());
+                }
+            }
             _ => {}
         }
     }
@@ -147,12 +169,12 @@ pub fn compute_boundary_ownership(
         let convention = convention_of(name).unwrap_or_else(|| "c_abi".to_string());
         let param_owns: Vec<BoundaryOwnership> = params
             .iter()
-            .map(|(_, t)| seed_from_protocol(t, &convention, Direction::Param, universe))
+            .map(|(_, t)| seed_from_protocol(t, &convention, Direction::Param, universe, &declared_protocols))
             .collect();
         let ret = frgn_ret
             .get(name)
             .and_then(|o| o.as_ref())
-            .map(|t| seed_from_protocol(t, &convention, Direction::Return, universe));
+            .map(|t| seed_from_protocol(t, &convention, Direction::Return, universe, &declared_protocols));
         result.frgns.insert(name.clone(), BoundaryEntry {
             params: param_owns,
             ret,
@@ -165,6 +187,7 @@ pub fn compute_boundary_ownership(
         frgn_owns: &result.frgns,
         state_fields: &state_fields,
         universe,
+        declared_protocols: &declared_protocols,
         memo: HashMap::new(),
         visiting: Vec::new(),
     };
@@ -190,6 +213,7 @@ fn seed_from_protocol(
     convention: &str,
     dir: Direction,
     universe: Option<&TypeUniverse>,
+    declared_protocols: &HashMap<String, String>,
 ) -> BoundaryOwnership {
     // 2026-08-31 (lto = IR merger, no boundary): the host and Briev share
     // layout and lifetime, so there is nothing to copy. Undo: if a future
@@ -198,7 +222,7 @@ fn seed_from_protocol(
         return BoundaryOwnership::ZeroCost;
     }
 
-    let (cat, variant) = match protocol_of(ty, universe) {
+    let (cat, variant) = match protocol_of(ty, universe, declared_protocols) {
         Some(p) => p,
         // 2026-08-31 (unknown/custom type): conservative — assume the host
         // owns it and Briev may need a copy. Phase 9 `borrow`/`consume`/`owned`
@@ -229,25 +253,55 @@ fn seed_from_protocol(
 ///
 /// Mirrors `frgn_dispatch::lookup_foreign_type`: HashWord/HashWordVariant are
 /// used directly; Custom types are resolved through the universe's Cast.*
-/// properties (category) and `base` (variant). Never matches type names.
-fn protocol_of(ty: &Type, universe: Option<&TypeUniverse>) -> Option<(String, String)> {
+/// properties (category) and `base` (variant). When the universe has not
+/// registered the type (GLUE commands use parse_and_check, no normalizer), the
+/// declared `type CStr: #String<C_String>` protocol string is parsed instead.
+/// Never matches type names.
+fn protocol_of(
+    ty: &Type,
+    universe: Option<&TypeUniverse>,
+    declared_protocols: &HashMap<String, String>,
+) -> Option<(String, String)> {
     match ty {
         Type::HashWord(cat) => Some((cat.trim_start_matches('#').to_string(), String::new())),
         Type::HashWordVariant(cat, var) => {
             Some((cat.trim_start_matches('#').to_string(), var.clone()))
         }
         Type::Custom(name) | Type::Applied(name, _) => {
-            let u = universe?;
-            let rt = u.types.get(name)?;
-            // Category from the first Cast.<Category> property.
-            for key in rt.properties.keys() {
-                if let Some(cat) = key.strip_prefix("Cast.") {
-                    return Some((cat.to_string(), rt.base.clone()));
+            // Universe first (full compile path registers Cast.* properties).
+            if let Some(u) = universe {
+                if let Some(rt) = u.types.get(name) {
+                    // Category from the first Cast.<Category> property.
+                    for key in rt.properties.keys() {
+                        if let Some(cat) = key.strip_prefix("Cast.") {
+                            return Some((cat.to_string(), rt.base.clone()));
+                        }
+                    }
                 }
+            }
+            // Declared protocol string fallback (`#String<C_String>`).
+            if let Some(p) = declared_protocols.get(name) {
+                return parse_declared_protocol(p);
             }
             None
         }
         _ => None,
+    }
+}
+
+/// Parse a declared protocol string like `#String<C_String>` → (cat, variant).
+/// A bare `#String` → ("String", "") → the seed's default-variant handling.
+fn parse_declared_protocol(p: &str) -> Option<(String, String)> {
+    let p = p.trim().trim_start_matches('#');
+    if let Some(open) = p.find('<') {
+        if let Some(close) = p.find('>') {
+            return Some((p[..open].to_string(), p[open + 1..close].to_string()));
+        }
+    }
+    if p.is_empty() {
+        None
+    } else {
+        Some((p.to_string(), String::new()))
     }
 }
 
@@ -259,6 +313,7 @@ struct FlowCtx<'a> {
     frgn_owns: &'a HashMap<String, BoundaryEntry>,
     state_fields: &'a HashSet<String>,
     universe: Option<&'a TypeUniverse>,
+    declared_protocols: &'a HashMap<String, String>,
     memo: HashMap<String, BoundaryEntry>,
     visiting: Vec<String>,
 }
@@ -290,7 +345,7 @@ impl<'a> FlowCtx<'a> {
         let params: Vec<BoundaryOwnership> = d
             .parameters
             .iter()
-            .map(|(_, t)| seed_from_protocol(t, "c_abi", Direction::Param, self.universe))
+            .map(|(_, t)| seed_from_protocol(t, "c_abi", Direction::Param, self.universe, self.declared_protocols))
             .collect();
 
         self.visiting.push(name.to_string());
@@ -298,7 +353,7 @@ impl<'a> FlowCtx<'a> {
         // refine with the body's terminal flow (which may carry a stricter class,
         // e.g. a frgn CStr return → ZeroCopy). A literal in an `-> Int` export is
         // Value; a literal in an `-> String` export is Owned.
-        let decl_ret = output_type_ownership(&d.output_type, self.universe);
+        let decl_ret = output_type_ownership(&d.output_type, self.universe, self.declared_protocols);
         let flow_ret = self.body_ownership(&d.body);
         self.visiting.pop();
 
@@ -420,17 +475,18 @@ impl<'a> FlowCtx<'a> {
 fn output_type_ownership(
     output: &Option<crate::ast::OutputType>,
     universe: Option<&TypeUniverse>,
+    declared_protocols: &HashMap<String, String>,
 ) -> Option<BoundaryOwnership> {
     use crate::ast::OutputType;
     let o = output.as_ref()?;
     match o {
-        OutputType::Single(t) => Some(seed_from_protocol(t, "c_abi", Direction::Return, universe)),
-        OutputType::Union(v) => v.iter().filter_map(|x| output_type_ownership(&Some(x.clone()), universe))
+        OutputType::Single(t) => Some(seed_from_protocol(t, "c_abi", Direction::Return, universe, declared_protocols)),
+        OutputType::Union(v) => v.iter().filter_map(|x| output_type_ownership(&Some(x.clone()), universe, declared_protocols))
             .reduce(BoundaryOwnership::meet),
-        OutputType::Tuple(v) => v.iter().filter_map(|x| output_type_ownership(&Some(x.clone()), universe))
+        OutputType::Tuple(v) => v.iter().filter_map(|x| output_type_ownership(&Some(x.clone()), universe, declared_protocols))
             .reduce(BoundaryOwnership::meet),
-        OutputType::Array(inner) => output_type_ownership(&Some((**inner).clone()), universe),
-        OutputType::Named(_, inner) => output_type_ownership(&Some((**inner).clone()), universe),
+        OutputType::Array(inner) => output_type_ownership(&Some((**inner).clone()), universe, declared_protocols),
+        OutputType::Named(_, inner) => output_type_ownership(&Some((**inner).clone()), universe, declared_protocols),
     }
 }
 
@@ -542,43 +598,43 @@ mod tests {
         let _ = &mut items;
         // Directly exercise the seed function:
         let ty = Type::HashWordVariant("String".into(), "C_String".into());
-        let o = seed_from_protocol(&ty, "c_abi", Direction::Return, None);
+        let o = seed_from_protocol(&ty, "c_abi", Direction::Return, None, &HashMap::new());
         assert_eq!(o, BoundaryOwnership::ZeroCopy);
     }
 
     #[test]
     fn cstr_param_is_borrowed() {
         let ty = Type::HashWordVariant("String".into(), "C_String".into());
-        let o = seed_from_protocol(&ty, "c_abi", Direction::Param, None);
+        let o = seed_from_protocol(&ty, "c_abi", Direction::Param, None, &HashMap::new());
         assert_eq!(o, BoundaryOwnership::Borrowed);
     }
 
     #[test]
     fn utf8_string_is_owned() {
         let ty = Type::HashWordVariant("String".into(), "UTF8".into());
-        assert_eq!(seed_from_protocol(&ty, "c_abi", Direction::Return, None), BoundaryOwnership::Owned);
-        assert_eq!(seed_from_protocol(&ty, "c_abi", Direction::Param, None), BoundaryOwnership::Owned);
+        assert_eq!(seed_from_protocol(&ty, "c_abi", Direction::Return, None, &HashMap::new()), BoundaryOwnership::Owned);
+        assert_eq!(seed_from_protocol(&ty, "c_abi", Direction::Param, None, &HashMap::new()), BoundaryOwnership::Owned);
     }
 
     #[test]
     fn lto_is_zero_cost() {
         let ty = Type::HashWordVariant("String".into(), "C_String".into());
-        assert_eq!(seed_from_protocol(&ty, "lto", Direction::Return, None), BoundaryOwnership::ZeroCost);
+        assert_eq!(seed_from_protocol(&ty, "lto", Direction::Return, None, &HashMap::new()), BoundaryOwnership::ZeroCost);
     }
 
     #[test]
     fn unknown_type_is_borrowed() {
         // Bits and Void are compiler constructs → Borrowed via the fallback
         // (they resolve to no protocol category here).
-        assert_eq!(seed_from_protocol(&Type::Bits(64), "c_abi", Direction::Return, None), BoundaryOwnership::Borrowed);
+        assert_eq!(seed_from_protocol(&Type::Bits(64), "c_abi", Direction::Return, None, &HashMap::new()), BoundaryOwnership::Borrowed);
     }
 
     #[test]
     fn scalar_seed_is_value() {
         let ty = Type::HashWord("Int".into());
-        assert_eq!(seed_from_protocol(&ty, "c_abi", Direction::Return, None), BoundaryOwnership::Value);
+        assert_eq!(seed_from_protocol(&ty, "c_abi", Direction::Return, None, &HashMap::new()), BoundaryOwnership::Value);
         let f = Type::HashWord("Float".into());
-        assert_eq!(seed_from_protocol(&f, "c_abi", Direction::Param, None), BoundaryOwnership::Value);
+        assert_eq!(seed_from_protocol(&f, "c_abi", Direction::Param, None, &HashMap::new()), BoundaryOwnership::Value);
     }
 
     #[test]
@@ -623,5 +679,65 @@ mod tests {
         let items = vec![TopLevel::Statement(Box::new(let_stmt)), exported(d)];
         let r = compute_boundary_ownership(&items, None, &no_convention);
         assert_eq!(r.exports["read"].ret, Some(BoundaryOwnership::Owned));
+    }
+
+    #[test]
+    fn cstr_typedef_declared_protocol_end_to_end() {
+        // Realistic program: `type CStr: #String<C_String>` + an export
+        // `echo(name: CStr) -> CStr { term name; }`. The CStr type resolves via
+        // the DECLARED protocol (no universe — GLUE commands run parse_and_check,
+        // which does not run the normalizer). Param → borrowed (host owns the C
+        // string); return → zero-copy (Briev sends the NUL-terminated data ptr).
+        let typedef = TopLevel::TypeDef(Box::new(crate::ast::top::TypeDef {
+            name: "CStr".to_string(),
+            type_params: vec![],
+            parent: None,
+            protocol: Some("#String<C_String>".to_string()),
+            traits: vec![],
+            bit_range: None,
+            coll: false,
+            ports_in: vec![],
+            ports_out: vec![],
+            seq: false,
+            body: crate::ast::top::TypeDefBody {
+                slots: vec![],
+                metadata: std::collections::HashMap::new(),
+                projections: vec![],
+                bindings: vec![],
+                operators: vec![],
+                op_bindings: vec![],
+                constraints: vec![],
+                members: vec![],
+                span: None,
+            },
+            span: None,
+        }));
+        let d = Definition {
+            name: "echo".to_string(),
+            type_params: vec![],
+            parameters: vec![("name".to_string(), Type::Custom("CStr".to_string()))],
+            output_type: Some(OutputType::Single(Type::Custom("CStr".to_string()))),
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                span: None,
+                explicit: false,
+                post_authority: false,
+            },
+            body: vec![Statement::Term(Some(Expr::Identifier("name".into())))],
+            metadata: std::collections::HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: None,
+        };
+        let items = vec![typedef, exported(d)];
+        let r = compute_boundary_ownership(&items, None, &no_convention);
+        let e = &r.exports["echo"];
+        assert_eq!(e.params, vec![BoundaryOwnership::Borrowed]);
+        assert_eq!(e.ret, Some(BoundaryOwnership::ZeroCopy));
     }
 }

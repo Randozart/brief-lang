@@ -52,6 +52,13 @@ pub struct ExportDecl {
     /// `ptr %state` parameter (body-dependent ABI, export_abi analysis).
     /// Wrappers/bindings must pass/omit the state handle to match.
     pub needs_state: bool,
+    /// 2026-08-31 (boundary ownership plan): per-parameter ownership class
+    /// (value / owned / zero-copy / borrowed / zero-cost) from the frontend
+    /// inference. Wrappers render ownership-aware marshalling; the audit
+    /// report reads it back.
+    pub param_ownership: Vec<String>,
+    /// 2026-08-31 (boundary ownership plan): return ownership class.
+    pub return_ownership: Option<String>,
 }
 
 /// A foreign function declared via `frgn` in the bridge.
@@ -87,10 +94,16 @@ pub struct AdapterEntry {
 
 /// Extract bridge information from a parsed program.
 /// Walks the AST to find #export pragmas, frgn declarations, and meld routes.
-pub fn extract_bridge_info(items: &[TopLevel], name: &str) -> BridgeInfo {
+/// `universe` feeds the boundary-ownership inference (CStr vs String classes);
+/// None disables ownership tagging (the contract degrades to needs_state only).
+pub fn extract_bridge_info(
+    items: &[TopLevel],
+    name: &str,
+    universe: Option<&crate::type_universe::TypeUniverse>,
+) -> BridgeInfo {
     BridgeInfo {
         name: name.to_string(),
-        exports: extract_exports(items),
+        exports: extract_exports(items, universe),
         frgns: extract_frgns(items),
     }
 }
@@ -99,13 +112,24 @@ fn has_export_modifier(modifiers: &[Annotation]) -> bool {
     modifiers.iter().any(|m| m.name == "export")
 }
 
-fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
+fn extract_exports(
+    items: &[TopLevel],
+    universe: Option<&crate::type_universe::TypeUniverse>,
+) -> Vec<ExportDecl> {
     // 2026-08-03: Body-dependent ABI — whether each export carries the
     // leading state param. Shared with the backend (src/analysis/export_abi.rs).
     // 2026-08-04 (compiler-in-Briev, P4): the Briev pass (briev_pass.rs)
     // computes this through the GLUE C ABI when its library is present;
     // otherwise the Rust reference runs.
     let needs_state = crate::glue::briev_pass::compute_export_needs_state(items);
+    // 2026-08-31 (boundary ownership plan): per-export param/return ownership
+    // classes. The convention is defaulted to c_abi (the GLUE target config
+    // is not threaded here); lto/wasm refinements are a later wiring step.
+    let ownership = crate::analysis::boundary_ownership::compute_boundary_ownership(
+        items,
+        universe,
+        &|_| None,
+    );
     let mut exports = Vec::new();
     for item in items {
         match item {
@@ -125,11 +149,19 @@ fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
                             }
                         })
                         .unwrap_or_else(|| "Void".to_string());
+                    let entry = ownership.exports.get(&defn.name);
+                    let param_ownership = entry
+                        .map(|e| e.params.iter().map(|o| o.as_str().to_string()).collect())
+                        .unwrap_or_default();
+                    let return_ownership = entry
+                        .and_then(|e| e.ret.map(|o| o.as_str().to_string()));
                     exports.push(ExportDecl {
                         name: defn.name.clone(),
                         params,
                         return_type,
                         needs_state: needs_state.get(&defn.name).copied().unwrap_or(false),
+                        param_ownership,
+                        return_ownership,
                     });
                 }
             }
@@ -148,11 +180,19 @@ fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
                         }
                     })
                     .unwrap_or_else(|| "Void".to_string());
+                let entry = ownership.exports.get(&defn.name);
+                let param_ownership = entry
+                    .map(|e| e.params.iter().map(|o| o.as_str().to_string()).collect())
+                    .unwrap_or_default();
+                let return_ownership = entry
+                    .and_then(|e| e.ret.map(|o| o.as_str().to_string()));
                 exports.push(ExportDecl {
                     name: defn.name.clone(),
                     params,
                     return_type,
                     needs_state: needs_state.get(&defn.name).copied().unwrap_or(false),
+                    param_ownership,
+                    return_ownership,
                 });
             }
             _ => {}
@@ -246,7 +286,13 @@ fn serialize_exports_tagged(exports: &[ExportDecl]) -> String {
         // 2026-08-03: 5th field = needs_state (leading state param in the
         // emitted C ABI). Consumers use it to pass/omit the state handle.
         let ns = if e.needs_state { "state" } else { "pure" };
-        lines.push(format!("export,{},{},{},{}", e.name, params.join("|"), e.return_type, ns));
+        // 2026-08-31 (boundary ownership plan): 6th field = per-param
+        // ownership classes (value/owned/zero-copy/borrowed/zero-cost);
+        // 7th field = return ownership. A consumer that sees zero-copy can
+        // pass the pointer without copying.
+        let pown = e.param_ownership.join("|");
+        let rown = e.return_ownership.clone().unwrap_or_else(|| "".to_string());
+        lines.push(format!("export,{},{},{},{},{},{}", e.name, params.join("|"), e.return_type, ns, pown, rown));
     }
     lines.join("\n")
 }
@@ -438,7 +484,7 @@ pub fn run_bindings_cli(file_path: &str, language: &str, out_dir: &str) -> Resul
     let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
     let target = crate::glue::config::load_glue_language(language)?;
-    let info = extract_bridge_info(&items, bridge_name);
+    let info = extract_bridge_info(&items, bridge_name, Some(&universe));
     if std::env::var("BRIEV_DEBUG_BINDINGS").is_ok() {
         eprintln!("DBG target.templates keys: {:?}", target.templates.keys().collect::<Vec<_>>());
         eprintln!("DBG exports: {:?}", info.exports.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
@@ -502,10 +548,10 @@ pub fn run_extension_cli(file_path: &str, language: &str, out_dir: &str) -> Resu
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("bridge");
-    let (items, _universe) = crate::library::parse_and_check(file_path, &source)?;
+    let (items, universe) = crate::library::parse_and_check(file_path, &source)?;
 
     let target = crate::glue::config::load_glue_language(language)?;
-    let info = extract_bridge_info(&items, bridge_name);
+    let info = extract_bridge_info(&items, bridge_name, Some(&universe));
     let type_protocols = build_type_protocols(&items);
 
     // Build the bridge static library (.a) with the current compiler, so the
@@ -749,7 +795,7 @@ pub fn run_export_cli(file_path: &str, language: &str, out_dir: &str) -> Result<
     let target = crate::glue::config::load_glue_language(language)?;
     // Full registry for frgn dispatch routing (extension → language).
     let glue_targets = crate::glue::config::load_glue_config(None)?;
-    let info = extract_bridge_info(&items, bridge_name);
+    let info = extract_bridge_info(&items, bridge_name, Some(&universe));
     let type_protocols = build_type_protocols(&items);
     println!("  Bridge '{}': {} exports, {} frgns",
         info.name, info.exports.len(), info.frgns.len());
@@ -1036,9 +1082,11 @@ mod tests {
             params: vec![("n".to_string(), "Int".to_string())],
             return_type: "Int".to_string(),
             needs_state: false,
+            param_ownership: vec!["value".to_string()],
+            return_ownership: Some("value".to_string()),
         }];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,print_int,Int,Int,pure");
+        assert_eq!(result, "export,print_int,Int,Int,pure,value,value");
     }
 
     #[test]
@@ -1051,9 +1099,11 @@ mod tests {
             ],
             return_type: "Int".to_string(),
             needs_state: true,
+            param_ownership: vec!["owned".to_string(), "owned".to_string()],
+            return_ownership: Some("value".to_string()),
         }];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,write_file,String|Blob,Int,state");
+        assert_eq!(result, "export,write_file,String|Blob,Int,state,owned|owned,value");
     }
 
     #[test]
@@ -1081,15 +1131,19 @@ mod tests {
                 params: vec![("a".to_string(), "Int".to_string()), ("b".to_string(), "Int".to_string())],
                 return_type: "Int".to_string(),
                 needs_state: false,
+                param_ownership: vec!["value".to_string(), "value".to_string()],
+                return_ownership: Some("value".to_string()),
             },
             ExportDecl {
                 name: "greet".to_string(),
                 params: vec![("name".to_string(), "String".to_string())],
                 return_type: "String".to_string(),
                 needs_state: true,
+                param_ownership: vec!["borrowed".to_string()],
+                return_ownership: Some("owned".to_string()),
             },
         ];
         let result = serialize_exports_tagged(&exports);
-        assert_eq!(result, "export,add,Int|Int,Int,pure\nexport,greet,String,String,state");
+        assert_eq!(result, "export,add,Int|Int,Int,pure,value|value,value\nexport,greet,String,String,state,borrowed,owned");
     }
 }
