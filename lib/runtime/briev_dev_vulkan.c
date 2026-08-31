@@ -210,6 +210,7 @@ static void (*vkCmdDispatch)(VkCommandBuffer, uint32_t, uint32_t, uint32_t) = NU
 static int (*vkEndCommandBuffer)(VkCommandBuffer) = NULL;
 static int (*vkQueueSubmit)(VkQueue, uint32_t, const void*, VkFence) = NULL;
 static int (*vkWaitForFences)(VkDevice, uint32_t, const VkFence*, uint32_t, uint64_t) = NULL;
+static int (*vkResetFences)(VkDevice, uint32_t, const VkFence*) = NULL;
 static int (*vkCreateFence)(VkDevice, const void*, const void*, VkFence*) = NULL;
 static void (*vkDestroyFence)(VkDevice, VkFence, const void*) = NULL;
 static void (*vkDestroyCommandPool)(VkDevice, VkCommandPool, const void*) = NULL;
@@ -257,6 +258,7 @@ static int load_vulkan_symbols(void) {
     LOAD(vkEndCommandBuffer);
     LOAD(vkQueueSubmit);
     LOAD(vkWaitForFences);
+    LOAD(vkResetFences);
     LOAD(vkCreateFence);
     LOAD(vkDestroyFence);
     LOAD(vkDestroyCommandPool);
@@ -425,6 +427,16 @@ fail:
 typedef struct {
     VkShaderModule module;
     VkPipeline pipeline;
+    // 2026-08-31 (plan item 3): PERSISTENT staging resources — allocated at
+    // first launch, reused every launch. The per-launch create/map/destroy
+    // churn dominated kernel time for small workloads (~0.75ms/launch).
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+    void* mapped;
+    VkDescriptorPool pool;
+    VkDescriptorSet desc_set;
+    size_t bytes;
+    VkFence fence;
 } BrievVulkanKernel;
 
 static int briev_dev_vulkan_create_kernel(const uint8_t* spirv, size_t size, void** out) {
@@ -465,97 +477,108 @@ static int briev_dev_vulkan_create_kernel(const uint8_t* spirv, size_t size, voi
     return 1;
 }
 
-// One launch = upload the projection to a fresh staging buffer, dispatch
-// ceil(n/local) workgroups, read back. The staging buffer is created per
-// launch (simple, correct); persistence is plan item 5, gated on
-// measurements showing the churn dominates.
+// One launch = memcpy the projection into the kernel's PERSISTENT mapped
+// staging buffer, record dispatch + submit + fence-wait, read back. All
+// device objects live on the kernel handle (allocated at first launch —
+// that is when the projection size is known); the per-launch cost is now
+// two memcpys + one submit round trip.
 static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_bytes,
                                   size_t global_n, void* proj_out) {
     int verbose = g_verbose;
     size_t local_n = VK_LOCAL_SIZE_X;
     BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
-    VkBuffer buffer;
-    // VkBufferCreateInfo { sType, pNext, flags, size(VkDeviceSize=u64), usage,
-    //                      sharing, ... } — size sits after the 3 u32+pad.
-    struct { uint32_t sType; const void* pNext; uint32_t flags; uint64_t size;
-             uint32_t usage; uint32_t sharing; uint32_t queueFamilyIndexCount;
-             const uint32_t* pQueueFamilyIndices; } binfo = {0};
-    binfo.sType = 8; // VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
-    binfo.size = proj_bytes;
-    binfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    if (vkCreateBuffer(vk_device, &binfo, NULL, &buffer) != VK_SUCCESS) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] buffer create failed\n");
-        return 0;
-    }
-    struct { uint64_t size; uint64_t alignment; uint32_t memoryTypeBits; } mem_reqs = {0};
-    vkGetBufferMemoryRequirements(vk_device, buffer, &mem_reqs);
-    // VkMemoryAllocateInfo { sType=5, pNext, allocationSize(u64), memoryTypeIndex }
-    struct { uint32_t sType; const void* pNext; uint64_t allocationSize;
-             uint32_t memoryTypeIndex; } alloc = {0};
-    alloc.sType = 5; // VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-    alloc.allocationSize = mem_reqs.size;
-    alloc.memoryTypeIndex = vk_host_visible_type;
-    VkDeviceMemory memory;
-    if (vkAllocateMemory(vk_device, &alloc, NULL, &memory) != VK_SUCCESS) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] memory alloc failed\n");
-        vkDestroyBuffer(vk_device, buffer, NULL);
-        return 0;
-    }
-    if (vkBindBufferMemory(vk_device, buffer, memory, 0) != VK_SUCCESS) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] bind failed\n");
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
-        return 0;
-    }
-    // vkMapMemory is a SIX-arg call — the mapped pointer goes through the
-    // out-parameter (the old 5-arg/return-value signature made the driver
-    // write through an uninitialized register).
-    void* host_ptr = NULL;
-    if (vkMapMemory(vk_device, memory, 0, proj_bytes, 0, &host_ptr) != VK_SUCCESS || !host_ptr) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] map failed\n");
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
-        return 0;
-    }
-    memcpy(host_ptr, proj, proj_bytes);
 
-    VkDescriptorPoolCreateInfo dpi = {0};
-    dpi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    dpi.maxSets = 1;
-    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
-    dpi.poolSizeCount = 1;
-    dpi.pPoolSizes = &ps;
-    VkDescriptorPool pool;
-    if (vkCreateDescriptorPool(vk_device, &dpi, NULL, &pool) != VK_SUCCESS) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] pool create failed\n");
-        vkUnmapMemory(vk_device, memory);
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
-        return 0;
+    if (k->buffer == VK_NULL_HANDLE || k->bytes < proj_bytes) {
+        // First launch (or the projection grew): allocate the persistent
+        // staging buffer + memory + descriptor pool + descriptor set.
+        if (k->buffer != VK_NULL_HANDLE) {
+            // Grow: tear the old set down first (rare — projections are
+            // fixed per program once the bound is known).
+            vkDestroyDescriptorPool(vk_device, k->pool, NULL);
+            vkUnmapMemory(vk_device, k->memory);
+            vkFreeMemory(vk_device, k->memory, NULL);
+            vkDestroyBuffer(vk_device, k->buffer, NULL);
+            k->buffer = VK_NULL_HANDLE;
+        }
+        struct { uint32_t sType; const void* pNext; uint32_t flags; uint64_t size;
+                 uint32_t usage; uint32_t sharing; uint32_t queueFamilyIndexCount;
+                 const uint32_t* pQueueFamilyIndices; } binfo = {0};
+        binfo.sType = 8; // VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        binfo.size = proj_bytes;
+        binfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (vkCreateBuffer(vk_device, &binfo, NULL, &k->buffer) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] buffer create failed\n");
+            return 0;
+        }
+        struct { uint64_t size; uint64_t alignment; uint32_t memoryTypeBits; } mem_reqs = {0};
+        vkGetBufferMemoryRequirements(vk_device, k->buffer, &mem_reqs);
+        // VkMemoryAllocateInfo { sType=5, pNext, allocationSize(u64), memoryTypeIndex }
+        struct { uint32_t sType; const void* pNext; uint64_t allocationSize;
+                 uint32_t memoryTypeIndex; } alloc = {0};
+        alloc.sType = 5; // VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        alloc.allocationSize = mem_reqs.size;
+        alloc.memoryTypeIndex = vk_host_visible_type;
+        if (vkAllocateMemory(vk_device, &alloc, NULL, &k->memory) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] memory alloc failed\n");
+            vkDestroyBuffer(vk_device, k->buffer, NULL);
+            k->buffer = VK_NULL_HANDLE;
+            return 0;
+        }
+        if (vkBindBufferMemory(vk_device, k->buffer, k->memory, 0) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] bind failed\n");
+            vkFreeMemory(vk_device, k->memory, NULL);
+            vkDestroyBuffer(vk_device, k->buffer, NULL);
+            k->buffer = VK_NULL_HANDLE;
+            return 0;
+        }
+        // vkMapMemory is a SIX-arg call — the mapped pointer goes through
+        // the out-parameter (the old 5-arg/return-value signature made the
+        // driver write through an uninitialized register).
+        void* host_ptr = NULL;
+        if (vkMapMemory(vk_device, k->memory, 0, proj_bytes, 0, &host_ptr) != VK_SUCCESS || !host_ptr) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] map failed\n");
+            vkFreeMemory(vk_device, k->memory, NULL);
+            vkDestroyBuffer(vk_device, k->buffer, NULL);
+            k->buffer = VK_NULL_HANDLE;
+            return 0;
+        }
+        k->mapped = host_ptr;
+        k->bytes = proj_bytes;
+        VkDescriptorPoolCreateInfo dpi = {0};
+        dpi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        dpi.maxSets = 1;
+        VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
+        dpi.poolSizeCount = 1;
+        dpi.pPoolSizes = &ps;
+        if (vkCreateDescriptorPool(vk_device, &dpi, NULL, &k->pool) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] pool create failed\n");
+            k->buffer = VK_NULL_HANDLE;
+            return 0;
+        }
+        VkDescriptorSetAllocateInfo dsai = {0};
+        dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        dsai.descriptorPool = (uint64_t)k->pool;
+        dsai.descriptorSetCount = 1;
+        dsai.pSetLayouts = &vk_desc_set_layout;
+        if (vkAllocateDescriptorSets(vk_device, &dsai, &k->desc_set) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] descriptor alloc failed\n");
+            vkDestroyDescriptorPool(vk_device, k->pool, NULL);
+            k->pool = VK_NULL_HANDLE;
+            k->buffer = VK_NULL_HANDLE;
+            return 0;
+        }
+        VkDescriptorBufferInfo bi = { (uint64_t)k->buffer, 0, proj_bytes };
+        VkWriteDescriptorSet wds = {0};
+        wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wds.dstSet = (uint64_t)k->desc_set;
+        wds.dstBinding = 0;
+        wds.descriptorCount = 1;
+        wds.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        wds.pBufferInfo = &bi;
+        vkUpdateDescriptorSets(vk_device, 1, &wds, 0, NULL);
     }
-    VkDescriptorSetAllocateInfo dsai = {0};
-    dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    dsai.descriptorPool = (uint64_t)pool;
-    dsai.descriptorSetCount = 1;
-    dsai.pSetLayouts = &vk_desc_set_layout;
-    VkDescriptorSet desc_set;
-    if (vkAllocateDescriptorSets(vk_device, &dsai, &desc_set) != VK_SUCCESS) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] descriptor alloc failed\n");
-        vkDestroyDescriptorPool(vk_device, pool, NULL);
-        vkUnmapMemory(vk_device, memory);
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
-        return 0;
-    }
-    VkDescriptorBufferInfo bi = { (uint64_t)buffer, 0, proj_bytes };
-    VkWriteDescriptorSet wds = {0};
-    wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    wds.dstSet = (uint64_t)desc_set;
-    wds.dstBinding = 0;
-    wds.descriptorCount = 1;
-    wds.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    wds.pBufferInfo = &bi;
-    vkUpdateDescriptorSets(vk_device, 1, &wds, 0, NULL);
+
+    memcpy(k->mapped, proj, proj_bytes);
 
     VkCommandBufferBeginInfo bbi = {0};
     // The buffer was submitted with ONE_TIME_SUBMIT last launch — reset it
@@ -565,15 +588,11 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
     bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (vkBeginCommandBuffer(vk_cmd_buf, &bbi) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] begin failed\n");
-        vkDestroyDescriptorPool(vk_device, pool, NULL);
-        vkUnmapMemory(vk_device, memory);
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
         return 0;
     }
     vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
-                            0, 1, &desc_set, 0, NULL);
+                            0, 1, &k->desc_set, 0, NULL);
     // The kernel declares LocalSize 64×1×1; dispatch ceil(n/64) workgroups
     // (the old n×1×1 launched one-thread workgroups — correct but 32× under).
     size_t groups = (global_n + local_n - 1) / local_n;
@@ -581,42 +600,32 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
     vkCmdDispatch(vk_cmd_buf, (uint32_t)groups, 1, 1);
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
-        vkDestroyDescriptorPool(vk_device, pool, NULL);
-        vkUnmapMemory(vk_device, memory);
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
         return 0;
     }
 
-    VkFenceCreateInfo fci = {0};
-    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence;
-    if (vkCreateFence(vk_device, &fci, NULL, &fence) != VK_SUCCESS) {
-        vkDestroyDescriptorPool(vk_device, pool, NULL);
-        vkUnmapMemory(vk_device, memory);
-        vkFreeMemory(vk_device, memory, NULL);
-        vkDestroyBuffer(vk_device, buffer, NULL);
-        return 0;
+    if (k->fence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fci = {0};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(vk_device, &fci, NULL, &k->fence) != VK_SUCCESS) {
+            return 0;
+        }
+    } else {
+        vkResetFences(vk_device, 1, &k->fence);
     }
     VkSubmitInfo si = {0};
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &vk_cmd_buf;
     int ok = 1;
-    if (vkQueueSubmit(vk_queue, 1, &si, fence) != VK_SUCCESS) {
+    if (vkQueueSubmit(vk_queue, 1, &si, k->fence) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] submit failed\n");
         ok = 0;
-    } else if (vkWaitForFences(vk_device, 1, &fence, 1, 30ULL * 1000 * 1000 * 1000) != VK_SUCCESS) {
+    } else if (vkWaitForFences(vk_device, 1, &k->fence, 1, 30ULL * 1000 * 1000 * 1000) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] fence wait timed out\n");
         ok = 0;
     } else {
-        memcpy(proj_out, host_ptr, proj_bytes);
+        memcpy(proj_out, k->mapped, proj_bytes);
     }
-    vkDestroyFence(vk_device, fence, NULL);
-    vkDestroyDescriptorPool(vk_device, pool, NULL);
-    vkUnmapMemory(vk_device, memory);
-    vkFreeMemory(vk_device, memory, NULL);
-    vkDestroyBuffer(vk_device, buffer, NULL);
     return ok;
 }
 
@@ -624,6 +633,15 @@ static void briev_dev_vulkan_destroy_kernel(void* handle) {
     BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
     if (!k) {
         return;
+    }
+    if (k->buffer != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(vk_device, k->pool, NULL);
+        vkUnmapMemory(vk_device, k->memory);
+        vkFreeMemory(vk_device, k->memory, NULL);
+        vkDestroyBuffer(vk_device, k->buffer, NULL);
+    }
+    if (k->fence != VK_NULL_HANDLE) {
+        vkDestroyFence(vk_device, k->fence, NULL);
     }
     vkDestroyPipeline(vk_device, k->pipeline, NULL);
     vkDestroyShaderModule(vk_device, k->module, NULL);

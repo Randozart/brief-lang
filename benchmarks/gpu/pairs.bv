@@ -1,0 +1,18 @@
+!> accel: force;
+
+// pairs.bv — compute-throughput GPU benchmark: NB² work items; item idx
+// computes a softened pairwise interaction between bodies (idx >> 12) and
+// (idx & 4095). NB = 4096 = 2^12 (shift/mask row-col split; 64-bit int
+// div/rem is not a shader op — plan: magic-number division lowering).
+const NB: Int = 4096;
+const N2: Int = 16777216;
+
+let i: Int = 0;
+let px: Float[4096];
+let fx: Float[16777216];
+
+async accel node pairs [i < N2][i == N2] {
+    fx[i] = px[i >> 12] - px[i & 4095];
+    i = i + 1;
+    term;
+};

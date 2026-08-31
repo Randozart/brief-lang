@@ -3963,9 +3963,11 @@ impl LlvmBackend {
     }
 
     /// The kernel's work-item count (the `[i < N]` bound) as an i64 register
-    /// or constant. State scalars are loaded; literals inline; anything else
-    /// resolves to 0 (the kernel dispatch then no-ops — callers should verify
-    /// the bound shape at analysis time).
+    /// or constant. State scalars are loaded; literals inline; CONST bounds
+    /// (2026-08-31, plan abv-gpu-by-default: `[i < N2]` with `const N2`) are
+    /// inlined from the module's constant table; anything else resolves to 0
+    /// (the kernel dispatch then no-ops — callers should verify the bound
+    /// shape at analysis time).
     fn emit_work_item_count(&mut self, out: &mut String, name: &str) -> String {
         let entry = &self.accel_entries[name];
         match &entry.shape.count_expr {
@@ -3975,7 +3977,22 @@ impl LlvmBackend {
                     let (reg, _) = self.emit_state_load_i64_by_idx(out, "  ", fidx);
                     return reg;
                 }
+                // 2026-08-31: a CONST bound is not a state field — inline its
+                // literal value so the dispatch isn't silently 0 workgroups.
+                if let Some((_, Expr::Decimal(n))) = self.ctx.constants.get(f) {
+                    return n.to_string();
+                }
                 "0".to_string()
+            }
+            Some(expr) => {
+                // 2026-08-31: a literal-valued const EXPRESSION (`const N:
+                // Int = 64 * 64;` folded by the typechecker to a Decimal)
+                // arrives here pre-folded; anything else is 0.
+                if let Expr::Decimal(n) = expr {
+                    n.to_string()
+                } else {
+                    "0".to_string()
+                }
             }
             _ => "0".to_string(),
         }

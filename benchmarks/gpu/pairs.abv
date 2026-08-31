@@ -1,0 +1,9 @@
+!> accel: try_all;
+let i: Int = 0;
+let px: Float[64];
+let fx: Float[4096];
+async node pairs [i < 4096][i == 4096] {
+    fx[i] = px[i] - 1.0;
+    i = i + 1;
+    term;
+};
