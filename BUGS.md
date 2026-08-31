@@ -4350,18 +4350,16 @@ ident:3.140000) passes again.
 ## String slicing returns the whole string (no substring semantics)
 
 **Date:** 2026-08-04
-**Status:** Open — blocks the needs_state pass EXECUTION (the pass type-checks
-and its string-scanning design is complete). Constant-bounds slices
-(`s[0:1]`) are narrowed to `Vector<String,1>` and `.^Len`/`==` on them read the
-WHOLE buffer (briev_char_len(%t0) for both a=whole and c=whole). Dynamic-bounds
-slices (`s[a:b]`) hit the emit_expr.rs:992 arm which only evaluates the bounds
-and RETURNS array_reg — no substring is created. Verified in a linked library:
-`let a = t[1:t .^Len]; a .^Len` returns the WHOLE string's length.
-**Impact:** any Briev code that slices a String (including every scanner in the
-pass: line_end, token_at, has_token, in_section, token_name) computes against
-the whole string. The pass currently panics at `line .^Len` when `line` is a
-`let` from a dynamic slice of a String PARAM (the boxed i64 param is passed to
-briev_char_len as a raw ptr).
+**Status:** Fixed (2026-08-28) — constant-bounds slices emit a real substring
+via `briev_str_substr`; the Slice arm's `is_semantic_string` detection catches
+boxed String params, and narrow_slice no longer narrows #String bases (a
+type-blind narrowing returned the whole string for non-identifier bases).
+Verified end-to-end: `"hello"[1:3]` → `.^Length` = 2; `mk()[1:3]` (non-
+identifier base) → 2; dynamic slices via a boxed param recover the handle
+before slicing.
+**Impact (historical):** before the fix, every scanner in the pass computed
+against the whole string (line_end, token_at, has_token, in_section,
+token_name).
 **Fix direction (two paths, pick per plan):**
   (a) emit a REAL substring for String-typed slices — a `[len][bytes]` copy of
       chars a..b via a runtime `briev_str_substr` + a `frgn __str_substr(s,
@@ -4376,22 +4374,24 @@ briev_char_len as a raw ptr).
 ## Imported-module frgn with String param + String return resolves to Int
 
 **Date:** 2026-08-04
-**Status:** Open — verified while wiring the substring frgn. `frgn briev_str_substr(handle: String, a: Int, b: Int) -> String` declared in `lib/glue/c.bv` and IMPORTED resolves its return type as `Int` (a `let x: String = ...` fails "found Int"). The SAME declaration placed in the importing file type-checks and runs correctly (1002/2003 via the boundary). `cstr_to_briev` (Int param + String return) and `str_to_c` (String param + Int return) — each alone — resolve fine when imported; only String-param AND String-return combined fails.
-**Impact:** the pass declares its substr frgn locally; a future cleanup should fix the imported-module frgn signature resolution (typechecker/mod.rs:1637 collects `success_output` per top-level item — the merge of imported ForeignBindings is likely missing the return type).
+**Status:** Fixed (verified 2026-08-28) — an imported module's `frgn` with a
+String param AND String return (`frgn briev_str_substr(handle: String, ...)
+-> String`) resolves its return type correctly. Verified: a module declaring
+the frgn, imported and called from a consumer, accepts `let x: String =
+briev_str_substr(...)` (type-checks OK). Resolved by the session-2 dedup /
+signature-resolution work; the same-declaration-in-file case already passed.
+**Historical:** `cstr_to_briev` (Int param + String return) and `str_to_c`
+(String param + Int return) each alone resolved fine; only the combined
+String-param AND String-return frgn failed.
 
 ## Frgn String-return heap corruption under many calls (blocks the pass)
 
 **Date:** 2026-08-04
-**Status:** Open — the compiler-in-Briev pass computes the CORRECT bitmask for
-the small boundary.bv projection (mask=0) but the linked library's memory is
-corrupted on longer projections (node_bridge: mask 0 instead of 31; a
-dbg_probe returns t .^Len = 60 / 5 / 3 across THREE runs of the SAME binary —
-nondeterministic heap corruption). The corruption is in the frgn String-return
-path: every `briev_str_substr` call allocates a fresh [len][bytes] String via
-the emit_direct_frgn_call String-return marshalling and it is never freed; the
-per-char substr scans (before the char_at frgn) made it far worse. The meld
-(`briev_cstr_to_briev`) result itself is sometimes read back with a corrupted
-length.
+**Status:** RESOLVED (false alarm — see the "RESOLVED — frgn String-return
+heap corruption was a test-harness arity bug" section below; the C main
+called a stateful export with ONE argument, so `%arg0` was garbage). The
+nondeterministic reads (60 / 5 / 3) were the C driver's missing `%state`
+argument, not compiler memory corruption.
 **Impact:** `needs_state_compute` is only reliable on short inputs; the pass
 cannot yet replace the Rust reference.
 **Fix direction:** (1) run the linked library under ASan/valgrind to find the
