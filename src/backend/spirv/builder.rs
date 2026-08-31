@@ -82,17 +82,6 @@ impl SpirvBuilder {
             }
             // SPIR-V §2.4 logical layout: annotations (OpDecorate) come in
             // their OWN section BEFORE types/constants/global-variables.
-            for d in &decors {
-                eprintln!("[bucket-dec] {:?} rid={:?} ops={:?}",
-                    d.class.opcode, d.result_id,
-                    d.operands.iter().map(|o| match o {
-                        rspirv::dr::Operand::IdRef(w) => format!("id{}", w),
-                        rspirv::dr::Operand::Decoration(x) => format!("{:?}", x),
-                        rspirv::dr::Operand::LiteralBit32(v) => format!("lit{}", v),
-                        rspirv::dr::Operand::BuiltIn(b) => format!("{:?}", b),
-                        other => format!("{:?}", other),
-                    }).collect::<Vec<_>>());
-            }
             tgv.extend(decors);
             tgv.extend(types_ct);
             tgv.extend(vars);
@@ -226,6 +215,95 @@ impl SpirvBuilder {
         let id = self.builder.constant_bit32(u32_ty, v);
         self.type_keys.insert(key, id);
         id
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): cached float constant. OpConstant
+    /// carries floats as literal BITS (f32/f64 payload word), so the value is
+    /// keyed by its bit pattern — 0.0 and -0.0 stay distinct constants.
+    pub fn float_const(&mut self, bits: u32, v: f64) -> Word {
+        let key = match bits {
+            64 => format!("fc_{}_{}", bits, v.to_bits()),
+            _ => format!("fc_{}_{}", bits, (v as f32).to_bits()),
+        };
+        if let Some(&id) = self.type_keys.get(&key) {
+            return id;
+        }
+        let float_ty = self.builder.type_float(bits);
+        let id = match bits {
+            64 => self.builder.constant_bit64(float_ty, v.to_bits()),
+            32 => self.builder.constant_bit32(float_ty, (v as f32).to_bits()),
+            other => unreachable!("float width {} is rejected at shape resolution", other),
+        };
+        self.type_keys.insert(key, id);
+        id
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): is this type FLOAT-shaped? Opcode
+    /// selection for arithmetic is driven by the operand's protocol category
+    /// (rule 19: never a type-name match) — Custom/Applied/hashword types
+    /// resolve through the casting graph; compiler constructs (Bits/Vector)
+    /// are integer/aggregate by construction.
+    pub fn is_float_type(&mut self, ty: &Type) -> Result<bool, String> {
+        match ty {
+            Type::Custom(_)
+            | Type::Applied(_, _)
+            | Type::HashWord(_)
+            | Type::HashWordVariant(_, _) => Ok(matches!(
+                self.casting_graph
+                    .resolve_spirv_shape(&self.universe, ty, self.int_bits)?,
+                SpirvShape::Float { .. }
+            )),
+            _ => Ok(false),
+        }
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): float BIT WIDTH of a type (32 or
+    /// 64) — errors when the type is not float-shaped, so callers only use it
+    /// after `is_float_type`.
+    pub fn float_bits_of(&mut self, ty: &Type) -> Result<u32, String> {
+        match ty {
+            Type::Custom(_)
+            | Type::Applied(_, _)
+            | Type::HashWord(_)
+            | Type::HashWordVariant(_, _) => match self
+                .casting_graph
+                .resolve_spirv_shape(&self.universe, ty, self.int_bits)?
+            {
+                SpirvShape::Float { bits } => Ok(bits),
+                _ => self.float_shape_err(ty),
+            },
+            _ => self.float_shape_err(ty),
+        }
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): the NUMERIC SHAPE of a type for
+    /// cast opcode selection — Int/Float/Bool with width and signedness,
+    /// resolved through the casting graph (rule 19). Mirrors lower_type's
+    /// per-construct mapping so shape and type id always agree.
+    pub fn shape_of(&mut self, ty: &Type) -> Result<SpirvShape, String> {
+        match ty {
+            Type::Bits(1) => Ok(SpirvShape::Bool),
+            Type::Bits(n) => Ok(SpirvShape::Int { bits: *n as u32, signed: false }),
+            Type::Custom(_)
+            | Type::Applied(_, _)
+            | Type::HashWord(_)
+            | Type::HashWordVariant(_, _) => {
+                self.casting_graph
+                    .resolve_spirv_shape(&self.universe, ty, self.int_bits)
+            }
+            other => Err(format!(
+                "SPIR-V: type {:?} has no scalar shape — casts need scalar operands",
+                other
+            )),
+        }
+    }
+
+    fn float_shape_err<T>(&self, ty: &Type) -> Result<T, String> {
+        Err(format!(
+            "SPIR-V: type {:?} is not float-shaped — float constants need a \
+             #Float-rooted type",
+            ty
+        ))
     }
 
     /// 2026-08-23: Decoration with EXPLICIT operand list. The typed

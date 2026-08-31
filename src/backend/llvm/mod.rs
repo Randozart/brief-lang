@@ -2241,6 +2241,36 @@ impl LlvmBackend {
         self.ctx.observable_names = analysis.observable_names.clone();
         self.ctx.coll_safe_txns = analysis.coll_safe_txns.clone();
         self.ctx.coll_pregrow = analysis.coll_pregrow.clone();
+        // 2026-08-31 (plan abv-gpu-by-default): pre-register the accel kernel
+        // index BEFORE host emission. The dispatch wrapper is decided at
+        // txn-emission time via accel_kernel_idx — with kernel collection at
+        // the END of generate() that map was always empty and NO GPU dispatch
+        // wrapper was ever emitted: programs silently ran CPU-only. Candidate
+        // order = sorted names = the deterministic descriptor order below.
+        // To undo: revert to registering accel_kernel_idx after collection
+        // (and accept that no wrapper is ever emitted).
+        self.accel_entries = analysis.accel.clone();
+        {
+            let mut candidates: Vec<&String> = self
+                .accel_entries
+                .iter()
+                .filter(|(_, e)| {
+                    e.shape.eligible
+                        && matches!(
+                            e.decision,
+                            crate::analysis::accel::AccelDecision::Gpu
+                                | crate::analysis::accel::AccelDecision::Probe
+                        )
+                })
+                .map(|(k, _)| k)
+                .collect();
+            candidates.sort();
+            self.accel_kernel_idx = candidates
+                .iter()
+                .enumerate()
+                .map(|(i, k)| ((*k).clone(), i as u32))
+                .collect();
+        }
         // 2026-08-26 (async Phase C): consume frontend segmentation — spawn
         // targets lower to segment continuations over the C task table.
         let defn_param_pairs: HashMap<String, Vec<(String, Type)>> = items
@@ -4573,8 +4603,12 @@ impl LlvmBackend {
         // 2026-08-06 (accel plan): emit + embed SPIR-V kernels for the
         // frontend's Gpu/Probe accel bodies (AnalysisResults.accel). Runs after
         // all host emission so the shared emitter's function state is free.
-        // Deterministic txn order; each blob is embedded as a private constant.
-        self.accel_entries = analysis.accel.clone();
+        // 2026-08-31 (plan abv-gpu-by-default): the candidate set + order were
+        // pre-registered at the TOP of generate() (the dispatch wrappers need
+        // the index during host emission). collect_accel_kernels preserves
+        // that order — a failed kernel keeps its slot with an EMPTY blob so
+        // wrapper launch indices stay valid (the runtime rejects empty blobs
+        // and falls back to CPU for that kernel).
         let kernel_blobs = self.collect_accel_kernels(&analysis.accel);
         self.has_accel_kernels = !kernel_blobs.is_empty();
         for blob in &kernel_blobs {

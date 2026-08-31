@@ -109,7 +109,13 @@ impl LlvmBackend {
             && dispatch.len() >= 2
             && crate::analysis::transition_graph::is_uniform_body_group(txns)
         {
-            self.emit_inline_txn_body(out, "  ", txns, &dispatch[0]);
+            // 2026-08-31 (plan abv-gpu-by-default): accel kernels dispatch
+            // through their wrapper — see the per-node branch below.
+            if self.accel_kernel_idx.contains_key(&dispatch[0]) {
+                writeln!(out, "  call void @txn_{}(ptr %state)", dispatch[0]).ok();
+            } else {
+                self.emit_inline_txn_body(out, "  ", txns, &dispatch[0]);
+            }
             writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
             self.emit_arena_fini(out, "  ");
             writeln!(out, "  ret void").ok();
@@ -138,7 +144,16 @@ impl LlvmBackend {
                 // Inline txn body instead of `call @txn_name` — shares the
                 // arena across all txns in the tick and avoids function-call
                 // overhead. The body inherits the arena allocated above.
-                self.emit_inline_txn_body(out, "  ", txns, txn_name);
+                // 2026-08-31 (plan abv-gpu-by-default): an ACCEL kernel node
+                // dispatches through its WRAPPER (@txn_<name>: lazy runtime
+                // init + device/verdict gate + launch + counter fast-forward),
+                // not an inlined body — inlining bypassed the GPU lane and
+                // every accel program silently ran CPU-only.
+                if self.accel_kernel_idx.contains_key(txn_name) {
+                    writeln!(out, "  call void @txn_{}(ptr %state)", txn_name).ok();
+                } else {
+                    self.emit_inline_txn_body(out, "  ", txns, txn_name);
+                }
                 writeln!(out, "  br label %{}", c).ok();
                 writeln!(out, "{}:", c).ok();
             }

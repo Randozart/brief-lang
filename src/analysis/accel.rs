@@ -187,6 +187,28 @@ fn is_flat_scalar(universe: &TypeUniverse, ty: &Type) -> bool {
     }
 }
 
+/// The work-item bound conjunct of a precondition (2026-08-31, plan
+/// abv-gpu-by-default): after stripping `beginprogram` markers, scan `&&`
+/// conjunctions left-to-right for the first `identifier < N` conjunct. Host
+/// predicates (`[phase == 1 && i < nb]`) gate the HOST firing and are not
+/// part of the kernel bound.
+fn work_item_bound(pre: &Expr) -> Option<(String, Expr)> {
+    match strip_beginprogram(pre) {
+        Expr::BinaryOp(BinaryOpKind::And, l, r) => {
+            work_item_bound(l.as_ref()).or_else(|| work_item_bound(r.as_ref()))
+        }
+        Expr::BinaryOp(BinaryOpKind::Lt, left, right)
+            if matches!(left.as_ref(), Expr::Identifier(_)) =>
+        {
+            match left.as_ref() {
+                Expr::Identifier(s) => Some((s.clone(), right.as_ref().clone())),
+                _ => unreachable!(),
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Remove `Expr::BeginProgram` conjuncts from a precondition, returning the
 /// remaining state expression (or `[true]` if only the marker is present).
 /// An `accel` entry-loop (`[beginprogram && i < N]`) reads its bound from the
@@ -446,22 +468,19 @@ fn prove_kernel(
         reasons: Vec::new(),
     };
 
-    // 1. Bound: the contract precondition must be `[i < N]` where `i` is a
-    //    REAL state counter that the body increments (Design A — no virtual
-    //    variables; the user declares `let i: Int = 0;` and writes `i = i + 1`).
-    //    A `beginprogram` entry marker (`[beginprogram && i < N]`) is stripped
-    //    before the bound is read.
-    let (index_var, count_expr) = match strip_beginprogram(&contract.pre_condition) {
-        Expr::BinaryOp(BinaryOpKind::Lt, left, right)
-            if matches!(left.as_ref(), Expr::Identifier(_)) =>
-        {
-            let i = match left.as_ref() {
-                Expr::Identifier(s) => s.clone(),
-                _ => unreachable!(),
-            };
-            (i, Some(right.as_ref().clone()))
-        }
-        _ => {
+    // 1. Bound: the contract precondition must CONTAIN an `[i < N]` conjunct
+    //    where `i` is a REAL state counter that the body increments (Design A
+    //    — no virtual variables; the user declares `let i: Int = 0;` and
+    //    writes `i = i + 1`). `beginprogram` entry markers are stripped, and
+    //    any other host predicate in a conjunction (`[phase == 1 && i < nb]`)
+    //    gates the HOST firing — it does not change the kernel bound, so the
+    //    first `identifier < N` conjunct is the work-item count.
+    //    2026-08-31 (plan abv-gpu-by-default): generalized from bare/`beginprogram`
+    //    forms to any conjunction — phase-gated kernels were rejected as
+    //    "requires a work-item bound precondition".
+    let (index_var, count_expr) = match work_item_bound(&contract.pre_condition) {
+        Some((i, n)) => (i, Some(n)),
+        None => {
             reasons.push(format!(
                 "accel '{}' requires a work-item bound precondition '[i < N]' over a real counter 'i'",
                 name

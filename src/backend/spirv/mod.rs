@@ -27,10 +27,11 @@ use crate::ast::TopLevel;
 use crate::backend::spirv::builder::SpirvBuilder;
 use crate::backend::spirv::kernel::emit_kernel;
 
-/// 2026-08-23 (Plan 0.2): SPIR-V's declared surface — v1 lowers the kernel
-/// loop skeleton plus integer scalar compute inside bodies. Floats, strings,
-/// collections and control flow beyond the induction loop are compile
-/// errors until their emission lands (plan 2026-08-23-spirv-kernel-emission).
+/// 2026-08-23 (Plan 0.2) / 2026-08-31 (plan abv-gpu-by-default): SPIR-V's
+/// declared surface — integer AND float scalar compute, indexed state
+/// access (SSBO AccessChain), Load#/Store# address forms, invocation-id
+/// builtins. Strings, collections, pointers and control flow beyond the
+/// kernel body's bounded shape are compile errors naming the fix.
 pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
     crate::backend::capabilities::BackendCapabilities {
         name: "SPIR-V (.spv GPU kernels)",
@@ -38,9 +39,12 @@ pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
                  flow over typed buffers",
         int_literals: true,
         bool_char_literals: true,
+        floats: true,
         int_ops: true,
         unary_ops: true,
         intrinsics: true,
+        index: true,
+        casts: true,
         if_expr: true,
         let_stmt: true,
         assign_stmt: true,
@@ -82,11 +86,13 @@ pub fn compile_spirv_builder(
     // resolution — (protocol, metadata), never type-name matches.
     let mut builder = SpirvBuilder::new().with_universe(universe, int_bits);
     let mut emitted: Vec<String> = Vec::new();
+    let mut rejected: Vec<(String, Vec<String>)> = Vec::new();
 
     for item in program {
         if let TopLevel::Transaction(txn) = item {
             if let Some(entry) = analysis.accel.get(&txn.name) {
                 if !entry.shape.eligible {
+                    rejected.push((txn.name.clone(), entry.shape.reasons.clone()));
                     continue;
                 }
                 emit_kernel(&mut builder, &txn.name.clone(), &entry.shape, program)?;
@@ -96,12 +102,22 @@ pub fn compile_spirv_builder(
     }
 
     if emitted.is_empty() {
-        return Err(
+        // 2026-08-31 (plan abv-gpu-by-default): name WHY each candidate was
+        // rejected — the eligibility proof's reasons are the user's fix path.
+        let detail = rejected
+            .iter()
+            .map(|(name, reasons)| format!("  '{}': {}", name, reasons.join("; ")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut msg = format!(
             "no GPU kernels: no transaction passed the accel eligibility proof \
-             (mark '!> accel:' on the module and bound the node with '[i < N]' \
-             over a real counter)"
-                .into(),
+             (bound the node with '[i < N]' over a real counter)"
         );
+        if !detail.is_empty() {
+            msg.push_str("\nrejected candidates:\n");
+            msg.push_str(&detail);
+        }
+        return Err(msg);
     }
     if entry_name != "main" && !emitted.iter().any(|n| n == entry_name) {
         return Err(format!(
@@ -411,6 +427,133 @@ mod tests {
         assert!(access_chains >= 3,
             "two reads + one write need >=3 access chains; got {}",
             access_chains);
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): float arithmetic lowers through
+    /// the F* opcode family (opcode chosen by the operands' protocol
+    /// category, never a type-name match), float literals become bit-pattern
+    /// constants, and the assembled binary passes spirv-val.
+    #[test]
+    fn test_float_kernel_fmul_fadd_passes_spirv_val() {
+        let has_val = std::process::Command::new("spirv-val").arg("--version").output().is_ok();
+        let float_state = |name: &str, n: i64| TopLevel::StateDecl(StateDecl {
+            name: name.into(),
+            ty: Type::Vector(Box::new(Type::float()), vec![Dimension::Anonymous(n as usize)]),
+            span: None,
+        });
+        let program = vec![
+            float_state("a", 128),
+            float_state("b", 128),
+            float_state("dst", 128),
+            TopLevel::Transaction(Transaction {
+                name: "fmad".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::BinaryOp(
+                        BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(128)),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                post_authority: false},
+                body: vec![
+                    // dst[i] = a[i] * 2.5 + b[i]
+                    Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("dst".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::BinaryOp(
+                                BinaryOpKind::Mul,
+                                Box::new(Expr::Index(
+                                    Box::new(Expr::Identifier("a".into())),
+                                    Box::new(Expr::Identifier("i".into())),
+                                )),
+                                Box::new(Expr::Float(2.5)),
+                            )),
+                            Box::new(Expr::Index(
+                                Box::new(Expr::Identifier("b".into())),
+                                Box::new(Expr::Identifier("i".into())),
+                            )),
+                        ),
+                    ),
+                    Statement::Assign(
+                        Expr::Identifier("i".into()),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("i".into())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                ],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        // Direct shape: locks the float LOWERING (the accel eligibility model
+        // for float buffers is the frontend's own surface).
+        let txn_stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let shape = crate::analysis::accel::KernelShape {
+            index_var: "i".into(),
+            count_expr: Some(Expr::Decimal(128)),
+            kernel_stmts: txn_stmts,
+            host_stmts: vec![],
+            read_buffers: vec!["a".into(), "b".into()],
+            write_buffers: vec!["dst".into()],
+            scalar_ins: vec![],
+            eligible: true,
+            reasons: vec![],
+        };
+
+        let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
+        emit_kernel(&mut builder, "fmad", &shape, &program)
+            .expect("float kernel must lower");
+        let ops = {
+            let m = builder.module_ref();
+            let mut ops: Vec<rspirv::spirv::Op> = Vec::new();
+            for f in &m.functions {
+                for b in &f.blocks {
+                    for i in &b.instructions {
+                        ops.push(i.class.opcode);
+                    }
+                }
+            }
+            ops
+        };
+        // FMul/FAdd presence is the discriminator: a missed float lane would
+        // lower the SAME math as IMul/IAdd. (IAdd may still appear for the
+        // integer counter increment — that is correct.)
+        assert!(ops.contains(&rspirv::spirv::Op::FMul), "FMul in {:?} (no F* opcodes emitted — float lane not taken)", ops);
+        assert!(ops.contains(&rspirv::spirv::Op::FAdd), "FAdd in {:?}", ops);
+
+        if !has_val {
+            eprintln!("spirv-val not found — binary checks only");
+            return;
+        }
+        let binary = builder.build().unwrap();
+        let dir = std::env::temp_dir().join(format!("briev_spv_f_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fmad.spv");
+        std::fs::write(&path, &binary).unwrap();
+        let out = std::process::Command::new("spirv-val").arg(&path).output().expect("spirv-val");
+        assert!(out.status.success(), "spirv-val rejected:\n{}",
+            String::from_utf8_lossy(&out.stderr));
     }
 
     /// §2.3: Load#/Store# address forms — Load#(field[i]), Store#(field[i], v),

@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use rspirv::dr::{Instruction, Operand};
 use rspirv::spirv::{self, StorageClass, Word};
 
-use crate::ast::{Expr, Statement, Type};
+use crate::ast::{Expr, Statement, Type, UnaryOpKind};
+use crate::casting::graph::SpirvShape;
 use crate::backend::spirv::builder::SpirvBuilder;
 
 /// One program-state field referenced by the kernel body. Collected before
@@ -40,6 +41,11 @@ pub struct FnLowerer<'a> {
     pub global_id_var: Option<Word>,
     /// BuiltIn LocalInvocationId input variable (pre-threaded or lazy).
     pub local_id_var: Option<Word>,
+    /// 2026-08-31 (plan abv-gpu-by-default): module consts materialized as
+    /// SPIR-V constants — name → (constant id, type). Kernel bodies read
+    /// `const dt: Float = 0.001;` etc. directly; non-literal initializers
+    /// error at materialization.
+    pub consts: HashMap<String, (Word, Type)>,
     /// Set when the body executed a term/endprogram — callers stop
     /// branching afterwards (a block can only have one terminator).
     pub terminated: bool,
@@ -54,8 +60,52 @@ impl<'a> FnLowerer<'a> {
             ssbo_var: None,
             global_id_var: None,
             local_id_var: None,
+            consts: HashMap::new(),
             terminated: false,
         }
+    }
+
+    /// 2026-08-31 (plan abv-gpu-by-default): materialize module consts as
+    /// SPIR-V constants for direct (no-load) reads in kernel bodies. Only
+    /// literal initializers (int/float/bool) are supported — anything else
+    /// errors naming the const, since kernels cannot evaluate host-side
+    /// expressions at module scope.
+    pub fn materialize_consts(&mut self, items: &[crate::ast::TopLevel]) -> Result<(), String> {
+        for item in items {
+            let crate::ast::TopLevel::Constant(c) = item else { continue };
+            let (id, ty) = match &c.expr {
+                Expr::Decimal(n) => {
+                    let id = self.builder.i64_const(*n as u64);
+                    (id, Type::int())
+                }
+                Expr::Float(v) => {
+                    let bits = self.builder.float_bits_of(&c.ty)?;
+                    let id = self.builder.float_const(bits, *v);
+                    (id, c.ty.clone())
+                }
+                Expr::Bool(b) => {
+                    let bool_ty = self.builder.lower_type(&Type::Bits(1))?;
+                    let op = if *b { spirv::Op::ConstantTrue } else { spirv::Op::ConstantFalse };
+                    let id = self.builder.gen_id();
+                    self.builder.emit_global(Instruction::new(
+                        op,
+                        Some(bool_ty),
+                        Some(id),
+                        vec![],
+                    ));
+                    (id, Type::Bits(1))
+                }
+                other => {
+                    return self.err(format!(
+                        "const '{}' has a non-literal initializer ({:?}) — kernels \
+                         read literal consts only; inline the expression",
+                        c.name, std::mem::discriminant(other)
+                    ));
+                }
+            };
+            self.consts.insert(c.name.clone(), (id, ty));
+        }
+        Ok(())
     }
 
     /// Force-create both invocation-id builtin variables as module globals.
@@ -156,6 +206,16 @@ impl<'a> FnLowerer<'a> {
                 let c = self.builder.i64_const(*n as u64);
                 Ok((c, Type::int()))
             }
+            // 2026-08-31 (plan abv-gpu-by-default): float literals lower to
+            // bit-pattern constants of the default float type (f32 unless the
+            // module's Float metadata widens it — resolved via the casting
+            // graph, never a name match).
+            Expr::Float(v) => {
+                let ty = Type::float();
+                let bits = self.builder.float_bits_of(&ty)?;
+                let c = self.builder.float_const(bits, *v);
+                Ok((c, ty))
+            }
             Expr::Identifier(name) => {
                 if let Some((var, ty)) = self.vars.get(name) {
                     let (var, ty) = (*var, ty.clone());
@@ -168,6 +228,11 @@ impl<'a> FnLowerer<'a> {
                         vec![Operand::IdRef(var)],
                     ));
                     return Ok((loaded, ty));
+                }
+                // 2026-08-31 (plan abv-gpu-by-default): module consts are
+                // SPIR-V constants — the id is used directly, no load.
+                if let Some((id, ty)) = self.consts.get(name) {
+                    return Ok((*id, ty.clone()));
                 }
                 self.err(format!("unknown identifier '{}' in kernel", name))
             }
@@ -187,6 +252,107 @@ impl<'a> FnLowerer<'a> {
                 Ok((loaded, ety))
             }
             Expr::BinaryOp(kind, l, r) => self.emit_binop(kind, l, r),
+            // 2026-08-31 (plan abv-gpu-by-default): `as` casts between scalar
+            // numeric kinds. Opcode + signedness derive from the operands'
+            // protocol shapes (rule 19); same-shape casts are a passthrough.
+            Expr::Cast(e, target) => {
+                let (val, src_ty) = self.emit_expr(e)?;
+                let src_shape = self.builder.shape_of(&src_ty)?;
+                let dst_shape = self.builder.shape_of(target)?;
+                let op = Self::cast_opcode(&src_shape, &dst_shape)?;;
+                match op {
+                    None => Ok((val, target.clone())),
+                    Some(op) => {
+                        let dst_ty_id = self.type_id(target)?;
+                        let res = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            op,
+                            Some(dst_ty_id),
+                            Some(res),
+                            vec![Operand::IdRef(val)],
+                        ));
+                        Ok((res, target.clone()))
+                    }
+                }
+            }
+            // 2026-08-31 (plan abv-gpu-by-default): unary ops over the same
+            // scalar surface — opcode follows the operand's shape (floats
+            // negate via 0 − x; SPIR-V has no OpFNegate in the core set
+            // without GLSL.std.450 extended instructions).
+            Expr::UnaryOp(kind, e) => {
+                let (val, ty) = self.emit_expr(e)?;
+                let shape = self.builder.shape_of(&ty)?;
+                let ty_id = self.type_id(&ty)?;
+                match (kind, &shape) {
+                    (UnaryOpKind::Neg, SpirvShape::Float { .. }) => {
+                        let zero = self.builder.float_const(
+                            match &shape { SpirvShape::Float { bits } => *bits, _ => 32 },
+                            0.0,
+                        );
+                        let res = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::FSub,
+                            Some(ty_id),
+                            Some(res),
+                            vec![Operand::IdRef(zero), Operand::IdRef(val)],
+                        ));
+                        Ok((res, ty))
+                    }
+                    (UnaryOpKind::Neg, SpirvShape::Int { signed: true, bits }) => {
+                        // Zero constant OF THE OPERAND'S type — ISub operands
+                        // must share the negated value's width.
+                        let zero = match bits {
+                            32 => self.builder.builder.constant_bit32(ty_id, 0),
+                            64 => self.builder.builder.constant_bit64(ty_id, 0),
+                            other => {
+                                return self.err(format!(
+                                    "negation of {}-bit int — kernels negate 32/64-bit \
+                                     values (cast the operand first)",
+                                    other
+                                ))
+                            }
+                        };
+                        let res = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::ISub,
+                            Some(ty_id),
+                            Some(res),
+                            vec![Operand::IdRef(zero), Operand::IdRef(val)],
+                        ));
+                        Ok((res, ty))
+                    }
+                    (UnaryOpKind::Neg, SpirvShape::Int { signed: false, .. }) => {
+                        self.err("negating an unsigned value — use a signed type")
+                    }
+                    (UnaryOpKind::Not, _) => {
+                        let bool_ty = self.builder.lower_type(&Type::Bits(1))?;
+                        let res = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::LogicalNot,
+                            Some(bool_ty),
+                            Some(res),
+                            vec![Operand::IdRef(val)],
+                        ));
+                        Ok((res, Type::Bits(1)))
+                    }
+                    (UnaryOpKind::BitNot, SpirvShape::Int { .. }) => {
+                        let res = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::Not,
+                            Some(ty_id),
+                            Some(res),
+                            vec![Operand::IdRef(val)],
+                        ));
+                        Ok((res, ty))
+                    }
+                    (UnaryOpKind::Neg, SpirvShape::Bool) => {
+                        self.err("negating a Bool — logic needs true/false, not arithmetic")
+                    }
+                    (UnaryOpKind::BitNot, _) => {
+                        self.err("bitwise-not on a non-integer kernel value")
+                    }
+                }
+            }
             Expr::Call(name, args, _) => self.emit_intrinsic_call(name, args),
             other => self.err(format!(
                 "unsupported expression in kernel ({:?}) — integer scalar \
@@ -295,6 +461,15 @@ impl<'a> FnLowerer<'a> {
         use crate::ast::BinaryOpKind::*;
         let (lid, lty) = self.emit_expr(l)?;
         let (rid, rty) = self.emit_expr(r)?;
+        // 2026-08-31 (plan abv-gpu-by-default): opcode selection is driven by
+        // the OPERANDS' protocol category — float-shaped operands get the F*
+        // opcode family and their own result type; everything else keeps the
+        // integer family. No type names are matched (rule 19).
+        let float_lane = self.builder.is_float_type(&lty)?
+            || self.builder.is_float_type(&rty)?;
+        if float_lane {
+            return self.emit_float_binop(kind, lid, lty.clone(), rid, rty.clone());
+        }
         let result_int = self.builder.lower_type(&Type::int())?;
         let op = match kind {
             Add => spirv::Op::IAdd,
@@ -350,6 +525,72 @@ impl<'a> FnLowerer<'a> {
         ))
     }
 
+    /// 2026-08-31 (plan abv-gpu-by-default): the float opcode family. Mixed
+    /// float/int operands error (cast at the source — same policy as Store#
+    /// width checks); bitwise ops on floats are not kernel operations.
+    fn emit_float_binop(
+        &mut self,
+        kind: &crate::ast::BinaryOpKind,
+        lid: Word,
+        lty: Type,
+        rid: Word,
+        rty: Type,
+    ) -> Result<(Word, Type), String> {
+        use crate::ast::BinaryOpKind::*;
+        if !self.builder.is_float_type(&rty)? {
+            return self.err(format!(
+                "mixed float/int arithmetic ({:?} on {:?} and {:?}) — cast the \
+                 integer operand to the float type at the source",
+                kind, lty, rty
+            ));
+        }
+        let op = match kind {
+            Add => spirv::Op::FAdd,
+            Sub => spirv::Op::FSub,
+            Mul => spirv::Op::FMul,
+            Div => spirv::Op::FDiv,
+            Mod => spirv::Op::FRem,
+            Lt => spirv::Op::FOrdLessThan,
+            Gt => spirv::Op::FOrdGreaterThan,
+            Le => spirv::Op::FOrdLessThanEqual,
+            Ge => spirv::Op::FOrdGreaterThanEqual,
+            Eq => spirv::Op::FOrdEqual,
+            Neq => spirv::Op::FOrdNotEqual,
+            BitAnd | BitOr | BitXor | Shl | Shr => {
+                return self.err("bitwise ops on floats are not kernel operations")
+            }
+            And | Or => return self.err("logical ops need Bool operands, not floats"),
+            Concat => return self.err("string concat is not a kernel operation"),
+        };
+        let is_cmp = matches!(kind, Lt | Gt | Le | Ge | Eq | Neq);
+        let res_ty = if is_cmp {
+            self.builder.lower_type(&Type::Bits(1))?
+        } else {
+            // coerce enforces both sides share the lowered type id first.
+            let lid = self.coerce(lid, &lty, &rty)?;
+            let rid = self.coerce(rid, &rty, &lty)?;
+            let ty_id = self.type_id(&lty)?;
+            let res = self.builder.gen_id();
+            self.builder.emit(Instruction::new(
+                op,
+                Some(ty_id),
+                Some(res),
+                vec![Operand::IdRef(lid), Operand::IdRef(rid)],
+            ));
+            return Ok((res, lty));
+        };
+        let lid = self.coerce(lid, &lty, &rty)?;
+        let rid = self.coerce(rid, &rty, &lty)?;
+        let res = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            op,
+            Some(res_ty),
+            Some(res),
+            vec![Operand::IdRef(lid), Operand::IdRef(rid)],
+        ));
+        Ok((res, Type::Bits(1)))
+    }
+
     /// Zero-width mismatches are a lowering bug; identical types pass through.
     fn coerce(&mut self, id: Word, ty: &Type, other: &Type) -> Result<Word, String> {
         if self.type_id(ty)? == self.type_id(other)? {
@@ -359,8 +600,46 @@ impl<'a> FnLowerer<'a> {
         }
     }
 
-    // ── State (SSBO) ────────────────────────────────────────────────────
+/// 2026-08-31 (plan abv-gpu-by-default): scalar cast opcode from the source
+/// and destination shapes. `None` = identity (same kind + width — the value
+/// passes through). The INT side's signedness picks the S/U conversion
+/// family; float width changes pick trunc/ext. Bool mixes have no direct
+/// scalar conversion and error naming the fix.
+fn cast_opcode(
+    src: &crate::casting::graph::SpirvShape,
+    dst: &crate::casting::graph::SpirvShape,
+) -> Result<Option<spirv::Op>, String> {
+    use crate::casting::graph::SpirvShape;
+    let same_kind = std::mem::discriminant(src) == std::mem::discriminant(dst);
+    Ok(match (src, dst) {
+        (SpirvShape::Int { bits: x, .. }, SpirvShape::Int { bits: y, .. }) if same_kind && x == y => None,
+        (SpirvShape::Int { signed, .. }, SpirvShape::Int { .. }) if same_kind => {
+            Some(if *signed { spirv::Op::SConvert } else { spirv::Op::UConvert })
+        }
+        (SpirvShape::Float { bits: x }, SpirvShape::Float { bits: y }) if same_kind && x == y => None,
+        (SpirvShape::Float { bits: x }, SpirvShape::Float { bits: y }) if same_kind => {
+            // SPIR-V has one OpFConvert for both float width directions.
+            let _ = (x, y);
+            Some(spirv::Op::FConvert)
+        }
+        (SpirvShape::Bool, SpirvShape::Bool) => None,
+        (SpirvShape::Int { signed, .. }, SpirvShape::Float { .. }) => {
+            Some(if *signed { spirv::Op::ConvertSToF } else { spirv::Op::ConvertUToF })
+        }
+        (SpirvShape::Float { .. }, SpirvShape::Int { signed, .. }) => {
+            Some(if *signed { spirv::Op::ConvertFToS } else { spirv::Op::ConvertFToU })
+        }
+        _ => {
+            return Err(format!(
+                "cast {:?} → {:?} is not a kernel scalar conversion — bool mixes \
+                 materialize explicitly (0/1 arithmetic)",
+                src, dst
+            ))
+        }
+    })
+}
 
+// ── State (SSBO) ────────────────────────────────────────────────────
     /// Declare the StorageBuffer struct over collected fields (sorted by
     /// name — determinism rule) and create its variable. Called BEFORE any
     /// body statement lowers.
@@ -616,11 +895,27 @@ mod __collect {
     pub fn collect_state_fields(items: &[crate::ast::TopLevel]) -> Vec<StateField> {
         let mut fields: Vec<StateField> = Vec::new();
         for item in items {
-            if let crate::ast::TopLevel::StateDecl(d) = item {
-                fields.push(StateField {
-                    name: d.name.clone(),
-                    ty: d.ty.clone(),
-                });
+            match item {
+                crate::ast::TopLevel::StateDecl(d) => {
+                    fields.push(StateField {
+                        name: d.name.clone(),
+                        ty: d.ty.clone(),
+                    });
+                }
+                // 2026-08-31 (plan abv-gpu-by-default): the real parser emits
+                // top-level `let` as Statement(Let) — the same dual form the
+                // accel analysis (ProgramInfo::build) and the typechecker
+                // consume. Without this arm every pipeline-compiled .abv
+                // failed with "no state fields were collected" while
+                // hand-built StateDecl fixtures passed. Untyped lets have no
+                // kernel storage type and are skipped (referencing one errors
+                // naming the field).
+                crate::ast::TopLevel::Statement(stmt) => {
+                    if let crate::ast::Statement::Let { name, ty: Some(ty), .. } = stmt.as_ref() {
+                        fields.push(StateField { name: name.clone(), ty: ty.clone() });
+                    }
+                }
+                _ => {}
             }
         }
         fields.sort_by(|a, b| a.name.cmp(&b.name));

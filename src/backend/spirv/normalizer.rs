@@ -35,12 +35,13 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse, int_bit
         return Err(format!("SPIR-V normalizer:\n  {}", errors.join("\n  ")));
     }
 
-    // Strip irrelevant metadata
-    let keep: HashSet<String> = ["is_kernel", "disamb"].iter().map(|s| s.to_string()).collect();
-    for rt in universe.types.values_mut() {
-        rt.properties.retain(|k, _| keep.contains(k) || k.starts_with("op."));
-    }
-
+    // 2026-08-31 (plan abv-gpu-by-default): the universe-property STRIP that
+    // lived here (keep-set {is_kernel, disamb, op.*}) is REMOVED — it deleted
+    // the `bits`/protocol-category keys the accel eligibility proof
+    // (protocol_category) and the casting graph's resolve_spirv_shape read,
+    // so every real-pipeline .abv failed flatness with "not a flat scalar
+    // type" while fresh-universe unit tests passed. Universe properties are
+    // shared frontend state, not backend-local metadata.
     Ok(())
 }
 

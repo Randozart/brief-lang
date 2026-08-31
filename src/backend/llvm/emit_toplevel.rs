@@ -4654,6 +4654,20 @@ fn probe_ok_checks(
             writeln!(out, "}}").ok();
             return;
         }
+        // 2026-08-31 (plan abv-gpu-by-default): an ACCEL kernel body must go
+        // through its dispatch wrapper (@txn_<name> — lazy runtime init +
+        // device/verdict gate + launch + counter fast-forward), NOT be
+        // inlined here. The async path (2026-08-26) postdates the accel work
+        // and silently bypassed the wrapper — programs ran CPU-only with the
+        // wrapper functions dead in the module.
+        if self.accel_kernel_idx.contains_key(name) {
+            writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+            writeln!(out, "  br label %{}_done", async_name).ok();
+            writeln!(out, "{}_done:", async_name).ok();
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            return;
+        }
         for s in &txn.body {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");

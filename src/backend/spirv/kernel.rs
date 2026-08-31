@@ -37,6 +37,7 @@ pub fn emit_kernel(
     let state_fields = collect_state_fields(items);
     let (ssbo_var, global_id_var, local_id_var) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
+        warm.materialize_consts(items)?;
         warm.warm_builtins()?;
         warm.setup_state_buffer()?;
         (warm.ssbo_var, warm.global_id_var, warm.local_id_var)
@@ -95,6 +96,7 @@ pub fn emit_kernel(
     lower.ssbo_var = ssbo_var;
     lower.global_id_var = global_id_var;
     lower.local_id_var = local_id_var;
+    lower.materialize_consts(items)?;
     lower
         .vars
         .insert(shape.index_var.clone(), (index_var, Type::int()));

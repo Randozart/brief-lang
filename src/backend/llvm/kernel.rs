@@ -30,34 +30,39 @@ pub(crate) struct AccelKernelBlob {
 
 impl super::LlvmBackend {
     /// Emit + compile a SPIR-V kernel for every `Gpu`/`Probe` accel body.
-    /// Emission order is deterministic (sorted txn names — HashMap iteration
-    /// order varies per process and would shuffle blob indices).
+    /// 2026-08-31 (plan abv-gpu-by-default): the candidate set AND order come
+    /// from the pre-registered `accel_kernel_idx` (wrappers need the index
+    /// during host emission) — this fn preserves it exactly: a kernel whose
+    /// emission or llc compile fails keeps its slot with an EMPTY blob (the
+    /// runtime rejects empty blobs → clean per-kernel CPU fallback) so later
+    /// wrappers' launch indices stay valid.
     pub(super) fn collect_accel_kernels(
         &mut self,
-        entries: &HashMap<String, AccelEntry>,
+        _entries: &HashMap<String, AccelEntry>,
     ) -> Vec<AccelKernelBlob> {
         let mut blobs = Vec::new();
-        let mut names: Vec<&String> = entries.keys().collect();
+        let mut names: Vec<String> = self.accel_kernel_idx.keys().cloned().collect();
         names.sort();
-        for name in names {
-            let entry = &entries[name];
-            if !entry.shape.eligible
-                || !matches!(entry.decision, AccelDecision::Gpu | AccelDecision::Probe)
-            {
-                continue;
-            }
+        for name in &names {
+            let entry = self.accel_entries[name].clone();
             match self.emit_kernel_module(name, &entry.shape) {
                 Ok(ir) => match compile_to_spirv(&ir) {
                     Ok(bytes) => blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes }),
-                    Err(e) => self.warnings.push(format!(
-                        "warning: accel '{}': SPIR-V compilation failed — {} (staying CPU)",
-                        name, e
-                    )),
+                    Err(e) => {
+                        self.warnings.push(format!(
+                            "warning: accel '{}': SPIR-V compilation failed — {} (staying CPU)",
+                            name, e
+                        ));
+                        blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes: Vec::new() });
+                    }
                 },
-                Err(e) => self.warnings.push(format!(
-                    "warning: accel '{}': kernel emission failed — {} (staying CPU)",
-                    name, e
-                )),
+                Err(e) => {
+                    self.warnings.push(format!(
+                        "warning: accel '{}': kernel emission failed — {} (staying CPU)",
+                        name, e
+                    ));
+                    blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes: Vec::new() });
+                }
             }
         }
         blobs
@@ -143,11 +148,14 @@ impl super::LlvmBackend {
             let lit = match cval {
                 Expr::Decimal(n) => n.to_string(),
                 Expr::Float(f) => {
-                    if f.is_finite() {
-                        format!("{:e}", f)
-                    } else {
-                        "0.000000e+00".to_string()
-                    }
+                    // 2026-08-31 (plan abv-gpu-by-default): LLVM 22's SPIR-V
+                    // backend rejects DECIMAL float literals ("integer
+                    // constant must have integer type"). LangRef hex form
+                    // encodes the DOUBLE bits, and for a float-typed
+                    // constant the value must round-trip f32 exactly — so
+                    // widen the f32 first.
+                    let widened = (*f as f32) as f64;
+                    format!("0x{:016X}", widened.to_bits())
                 }
                 _ => unreachable!(),
             };
@@ -265,6 +273,11 @@ fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTab
     let entry = &backend.accel_entries[txn];
     let shape = &entry.shape;
     let mut arrays: Vec<&String> = shape.read_buffers.iter().collect();
+    // 2026-08-31 (plan abv-gpu-by-default): read ∪ write with a dedup —
+    // read-write buffers (px[i] read AND written) appear in BOTH lists and
+    // previously produced a duplicated descriptor row (+ its string global).
+    arrays.sort();
+    arrays.dedup();
     let read_set: std::collections::HashSet<&String> = arrays.iter().copied().collect();
     for w in &shape.write_buffers {
         if !read_set.contains(w) {
@@ -274,6 +287,11 @@ fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTab
     arrays.sort();
     let mut scalars: Vec<&String> = shape.scalar_ins.iter().collect();
     scalars.sort();
+    scalars.dedup();
+    // A buffer in BOTH lists (read-write, e.g. px[i] = px[i] + ...) is a
+    // projection ARRAY once — drop the scalar duplicate.
+    let array_set: std::collections::HashSet<&String> = arrays.iter().copied().collect();
+    scalars.retain(|s| !array_set.contains(*s));
     let write_set: std::collections::HashSet<&str> =
         shape.write_buffers.iter().map(|s| s.as_str()).collect();
 
@@ -281,7 +299,13 @@ fn kernel_field_table(backend: &super::LlvmBackend, txn: &str) -> KernelFieldTab
     let mut fields = Vec::new();
     let mut names = Vec::new();
     for name in arrays.iter().chain(scalars.iter()) {
-        let fidx = backend.ctx.field_index_map[*name];
+        // 2026-08-31 (plan abv-gpu-by-default): consts referenced by the
+        // kernel materialize as inline module constants in the kernel IR —
+        // they are NOT projection fields, so they take no descriptor slot
+        // (mirrors emit_kernel_module's const branch).
+        let Some(&fidx) = backend.ctx.field_index_map.get(*name) else {
+            continue;
+        };
         fields.push(field_entry_ir(
             host_field_offset(field_types, fidx),
             &field_types[fidx],
@@ -378,16 +402,15 @@ pub(crate) fn emit_accel_descriptors(
     out.push_str("declare i32 @briev_accel_probe(ptr, ptr, ptr, i64, i64, double, double, ptr)\n");
     (out, idx_of)
 }
-///
-/// Runs `llc --mtriple=spirv64-unknown-unknown` on the kernel IR. Shelling out
 /// Compile kernel LLVM IR to SPIR-V binary via `llc`.
 ///
-/// Runs `llc --mtriple=spirv64-unknown-unknown` on the kernel IR. Shelling out
-/// is required because LLVM's SPIR-V backend (spirv64-unknown-unknown) is a
-/// separate target not enabled in the default LLVM build used by inkwell.
-/// Uses unique temp filenames (process + atomic counter) — a fixed path
-/// corrupted parallel test runs (TOCTOU, 2026-06-29).
-pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {    use std::io::Write;
+/// Runs `llc --mtriple=spirv64-unknown-unknown -filetype=obj` on the kernel
+/// IR. Shelling out is required because LLVM's SPIR-V backend
+/// (spirv64-unknown-unknown) is a separate target not enabled in the default
+/// LLVM build used by inkwell. Uses unique temp filenames (process + atomic
+/// counter) — a fixed path corrupted parallel test runs (TOCTOU, 2026-06-29).
+pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {
+    use std::io::Write;
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -405,6 +428,11 @@ pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {    use std
 
     let output = Command::new("llc")
         .arg("--mtriple=spirv64-unknown-unknown")
+        // 2026-08-31 (plan abv-gpu-by-default B1): the SPIR-V backend's
+        // default `-filetype=asm` emits SPIR-V *assembly text* on LLVM 22
+        // (older LLVM emitted binary there) — the embedded blob must be a
+        // binary, so the filetype is explicit. Undo: never remove this.
+        .arg("-filetype=obj")
         .arg(&ir_path)
         .arg("-o")
         .arg(&spv_path)
@@ -412,9 +440,14 @@ pub(crate) fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {    use std
         .map_err(|e| format!("failed to run llc: {}. Is llc installed?", e))?;
 
     if !output.status.success() {
+        // 2026-08-31 (plan abv-gpu-by-default): keep the failing IR beside the
+        // error — kernel-IR bugs are diagnosed from the exact file llc saw.
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let _ = std::fs::remove_file(&ir_path);
-        return Err(format!("llc failed: {}", stderr));
+        return Err(format!(
+            "llc failed: {} (kernel IR kept at {})",
+            stderr,
+            ir_path.display()
+        ));
     }
 
     let binary = std::fs::read(&spv_path)
@@ -433,10 +466,12 @@ pub(crate) fn embed_spirv_blob(spirv_binary: &[u8], kernel_name: &str) -> String
         kernel_name,
         spirv_binary.len()
     ));
-    for (i, byte) in spirv_binary.iter().enumerate() {
-        if i > 0 && i % 32 == 0 {
-            out.push_str("\"\"\n  \"");
-        }
+    // 2026-08-31 (plan abv-gpu-by-default B2): one single-line constant.
+    // The former 32-byte `""` + newline wrap produced juxtaposed string
+    // segments, which clang rejects ("constant expression type mismatch")
+    // for every blob > 32 bytes — i.e. every real kernel. LLVM has no line
+    // length limit; hex-escaped bytes are ASCII-safe either way.
+    for byte in spirv_binary.iter() {
         out.push_str(&format!("\\{:02X}", byte));
     }
     out.push_str("\", align 4\n");
@@ -453,6 +488,45 @@ mod tests {
         let out = embed_spirv_blob(&blob, "force");
         assert!(out.contains("@briev_kernel_force = private constant [4 x i8] c\""));
         assert!(out.contains("\\03\\02\\23\\07"));
+    }
+
+    /// 2026-08-31 (B2): blobs > 32 bytes must stay ONE `c"…"` token — the
+    /// former `""`+newline wrap made every real kernel unparseable by clang.
+    /// Round-trips the hex escapes back to the source bytes.
+    #[test]
+    fn embed_blob_over_32_bytes_is_single_token() {
+        let blob: Vec<u8> = (0..100u8).cycle().take(257).collect();
+        let out = embed_spirv_blob(&blob, "big");
+        assert!(out.contains("[257 x i8]"), "declared length must match: {out}");
+        assert!(!out.contains("\"\""), "no juxtaposed string segments allowed");
+        let hex_start = out.find("c\"").expect("constant string") + 2;
+        let hex_end = out.find("\", align").expect("constant end");
+        let hex = &out[hex_start..hex_end];
+        let decoded: Vec<u8> = (0..blob.len())
+            .map(|i| u8::from_str_radix(&hex[i * 3 + 1..i * 3 + 3], 16).expect("hex byte"))
+            .collect();
+        assert_eq!(decoded, blob, "escaped bytes must round-trip exactly");
+    }
+
+    /// 2026-08-31 (B1): llc must emit a SPIR-V BINARY (magic 0x07230203
+    /// little-endian), not the SPIR-V assembly text that LLVM 22's default
+    /// `-filetype=asm` produces. Probe-gated on llc presence.
+    #[test]
+    fn compile_to_spirv_emits_binary_magic() {
+        if std::process::Command::new("llc")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_err()
+        {
+            eprintln!("llc not found — skipping");
+            return;
+        }
+        let ir = "target triple = \"spirv64-unknown-unknown\"\ndefine i32 @main() { ret i32 0 }\n";
+        let bin = compile_to_spirv(ir).expect("minimal kernel must compile");
+        assert!(bin.len() >= 4, "SPIR-V binary has a header");
+        assert_eq!(&bin[..4], &[0x03, 0x02, 0x23, 0x07], "SPIR-V magic bytes");
     }
 
     #[test]

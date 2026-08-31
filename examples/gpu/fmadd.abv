@@ -1,0 +1,11 @@
+// fmadd.abv — float kernel, GPU by default (.abv), no annotations.
+let i: Int = 0;
+let a: Float[128];
+let b: Float[128];
+let dst: Float[128];
+
+async node fmadd [i < 128][i == 128] {
+    dst[i] = a[i] * 2.5 + b[i];
+    i = i + 1;
+    term;
+};

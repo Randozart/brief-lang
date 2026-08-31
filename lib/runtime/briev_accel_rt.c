@@ -114,11 +114,25 @@ static const BrievDeviceDriver* select_driver(void) {
 
 /// Register the kernel set. Call once from the emitted program's init.
 /// Returns 1 when a device is active and all kernels compiled, 0 for CPU.
+/// 2026-08-31 (plan abv-gpu-by-default): a failed device init or kernel
+/// compile now marks the chain DEAD (available()==0 → clean CPU fallback).
+/// Previously init()'s return was ignored and a failed create_kernel left
+/// available()==1 — the GPU lane was "chosen" and launches no-op'd, and
+/// there was no way to see why. BRIEV_ACCEL_VERBOSE=1 prints the reason.
 int briev_accel_init(const BrievKernelDesc* descs, uint32_t n) {
+    int verbose = getenv("BRIEV_ACCEL_VERBOSE") != NULL;
     if (!g_init_done) {
         g_driver = select_driver();
         if (g_driver != NULL) {
-            g_driver->init();
+            if (!g_driver->init()) {
+                if (verbose) {
+                    fprintf(stderr, "[briev_accel] driver '%s' init failed — CPU fallback\n",
+                            g_driver->name);
+                }
+                g_driver = NULL;
+            }
+        } else if (verbose) {
+            fprintf(stderr, "[briev_accel] no device driver available — CPU fallback\n");
         }
         g_init_done = 1;
     }
@@ -135,8 +149,26 @@ int briev_accel_init(const BrievKernelDesc* descs, uint32_t n) {
         return 0;
     }
     for (uint32_t i = 0; i < n; i++) {
+        // 2026-08-31: an EMPTY blob is a per-kernel CPU fallback slot (the
+        // compiler keeps descriptor indices stable) — skip, don't fail all.
+        if (descs[i].spirv_size == 0) {
+            if (verbose) {
+                fprintf(stderr, "[briev_accel] kernel '%s' has no binary — CPU lane\n",
+                        descs[i].txn_name);
+            }
+            g_kernels[i] = NULL;
+            continue;
+        }
         if (!g_driver->create_kernel(descs[i].spirv, descs[i].spirv_size, &g_kernels[i])) {
+            if (verbose) {
+                fprintf(stderr, "[briev_accel] kernel '%s' rejected by driver '%s' — CPU fallback\n",
+                        descs[i].txn_name, g_driver->name);
+            }
+            g_driver = NULL;
             return 0;
+        } else if (verbose) {
+            fprintf(stderr, "[briev_accel] kernel '%s' compiled on '%s'\n",
+                    descs[i].txn_name, g_driver->name);
         }
     }
     return 1;
@@ -179,7 +211,8 @@ static uint64_t proj_size(const BrievKernelDesc* k) {
 /// Pack the kernel's fields from the host %State into a flat projection
 /// (kernel field order), launch, then unpack written fields back.
 int briev_accel_launch(uint32_t idx, void* state, uint64_t work_n) {
-    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL) {
+    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+        || g_kernels[idx] == NULL) {
         return 0;
     }
     const BrievKernelDesc* k = &g_descs[idx];

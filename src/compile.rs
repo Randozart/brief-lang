@@ -126,6 +126,49 @@ pub fn copy_extern_companions(
     Ok(())
 }
 
+/// 2026-08-31 (plan abv-gpu-by-default B3): an Accelerator Briev Volume
+/// (`.abv`) assumes GPU by default — the extension IS the accel intent, so
+/// the module accel policy defaults to `try_all` with no `!> accel:`
+/// metadata and no per-node `accel` keyword required. An explicit
+/// `!> accel:` binding always wins (the default is only injected when no
+/// module sets the key). Eligibility proofs still gate: a non-kernel-shaped
+/// body is skipped with reasons, and a file with no eligible kernel errors
+/// helpfully in the SPIR-V backend. Non-`.abv` sources are untouched.
+/// To undo: delete this fn and its call site in compile_source.
+fn apply_abv_accel_default(items: &mut Vec<briev_compiler::ast::TopLevel>, file_path: &str) {
+    if get_extension(file_path) != ".abv"
+        || items.iter().any(
+            |i| matches!(i, briev_compiler::ast::TopLevel::ModuleMetadata(m) if m.contains_key("accel")),
+        )
+    {
+        return;
+    }
+    // Insert into the LAST metadata node (merge semantics: last binding
+    // wins), or append a new one when the module declares no metadata.
+    let injection = || {
+        let mut meta = std::collections::HashMap::new();
+        meta.insert(
+            "accel".into(),
+            briev_compiler::ast::PropertyValue::Identifier("try_all".into()),
+        );
+        briev_compiler::ast::TopLevel::ModuleMetadata(meta)
+    };
+    match items
+        .iter()
+        .rposition(|i| matches!(i, briev_compiler::ast::TopLevel::ModuleMetadata(_)))
+    {
+        Some(idx) => {
+            if let briev_compiler::ast::TopLevel::ModuleMetadata(m) = &mut items[idx] {
+                m.insert(
+                    "accel".into(),
+                    briev_compiler::ast::PropertyValue::Identifier("try_all".into()),
+                );
+            }
+        }
+        None => items.push(injection()),
+    }
+}
+
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
     // ── Macro lockfile handling ────────────────────────────────────
     // 2026-07-23: If --update-lockfile, regenerate macro-lock.toml from
@@ -161,6 +204,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // ── Parse ─────────────────────────────────────────────────────────
     let tokens = lex_for_path(file_path, &source)?;
     let mut items = parse(file_path, &tokens, &source)?;
+
+    // ── .abv assumes GPU (2026-08-31, plan abv-gpu-by-default B3) ────
+    // The extension IS the accel intent; see apply_abv_accel_default.
+    apply_abv_accel_default(&mut items, file_path);
 
     // Extract inline $(Stage) blocks from the AST — they are plugins,
     // not runtime code.
@@ -1144,7 +1191,35 @@ fn codegen(
             BackendKind::Spirv => briev_compiler::backend::spirv::CAPABILITIES,
             _ => briev_compiler::backend::vm::CAPABILITIES,
         };
-        let cap_errors = briev_compiler::backend::capabilities::validate_program(items, &caps);
+        // 2026-08-31 (plan abv-gpu-by-default): the SPIR-V gate is
+        // KERNEL-SCOPED — the .spv contains only the eligible accel bodies'
+        // proven kernel_stmts (plus state/metadata surface), so exactly
+        // those validate against the kernel capability table. The module's
+        // remaining items — stdlib defns the prelude injects, host-only
+        // transactions — never reach the backend and must not fail its
+        // surface gate. Other backends lower whole programs: full scope.
+        let cap_errors = if opts.backend == BackendKind::Spirv {
+            let kernel_items: Vec<briev_compiler::ast::TopLevel> = items
+                .iter()
+                .filter_map(|item| match item {
+                    briev_compiler::ast::TopLevel::StateDecl(_)
+                    | briev_compiler::ast::TopLevel::ModuleMetadata(_) => Some(item.clone()),
+                    briev_compiler::ast::TopLevel::Transaction(t) => {
+                        let entry = analysis.accel.get(&t.name)?;
+                        if !entry.shape.eligible {
+                            return None;
+                        }
+                        let mut kernel_txn = t.clone();
+                        kernel_txn.body = entry.shape.kernel_stmts.clone();
+                        Some(briev_compiler::ast::TopLevel::Transaction(kernel_txn))
+                    }
+                    _ => None,
+                })
+                .collect();
+            briev_compiler::backend::capabilities::validate_program(&kernel_items, &caps)
+        } else {
+            briev_compiler::backend::capabilities::validate_program(items, &caps)
+        };
         if !cap_errors.is_empty() {
             return Err(cap_errors.join("\n"));
         }
@@ -1796,6 +1871,56 @@ mod tests {
 
     use super::*;
     use briev_compiler::pipeline::PreprocessedSource;
+
+    /// 2026-08-31 (plan abv-gpu-by-default B3): `.abv` assumes GPU — the
+    /// module accel policy defaults to try_all with no annotations; an
+    /// explicit `!> accel:` wins; non-.abv sources are untouched.
+    #[test]
+    fn abv_default_injects_try_all_only_when_accel_absent() {
+        use briev_compiler::ast::{PropertyValue, TopLevel};
+        let accel_of = |items: &[TopLevel]| {
+            items
+                .iter()
+                .find_map(|i| match i {
+                    TopLevel::ModuleMetadata(m) => m.get("accel").cloned(),
+                    _ => None,
+                })
+        };
+
+        // No metadata at all → appended node with accel = try_all.
+        let mut items: Vec<TopLevel> = vec![];
+        apply_abv_accel_default(&mut items, "k.abv");
+        assert!(matches!(
+            accel_of(&items),
+            Some(PropertyValue::Identifier(v)) if v == "try_all"
+        ));
+
+        // Metadata without an accel key → default lands in it.
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("other".into(), PropertyValue::Identifier("x".into()));
+        let mut items = vec![TopLevel::ModuleMetadata(meta)];
+        apply_abv_accel_default(&mut items, "k.abv");
+        assert!(matches!(
+            accel_of(&items),
+            Some(PropertyValue::Identifier(v)) if v == "try_all"
+        ));
+
+        // Explicit policy wins — no injection.
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("accel".into(), PropertyValue::Identifier("force".into()));
+        let mut items = vec![TopLevel::ModuleMetadata(meta)];
+        apply_abv_accel_default(&mut items, "k.abv");
+        assert!(matches!(
+            accel_of(&items),
+            Some(PropertyValue::Identifier(v)) if v == "force"
+        ));
+
+        // Non-.abv sources are untouched (no metadata added).
+        let mut items: Vec<TopLevel> = vec![];
+        apply_abv_accel_default(&mut items, "k.bv");
+        assert!(accel_of(&items).is_none());
+        assert!(items.is_empty());
+    }
 
     /// 2026-08-18 (check/build divergence): `brievc check` on a program that
     /// imports `std/collections.bv` and calls the HashMap's generic scans

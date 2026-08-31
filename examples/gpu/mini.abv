@@ -1,0 +1,8 @@
+let i: Int = 0;
+let dst: Int[64];
+
+async node scale [i < 64][i == 64] {
+    dst[i] = i * 2;
+    i = i + 1;
+    term;
+};
