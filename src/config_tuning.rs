@@ -140,7 +140,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_k: 2,
     accel_probe_tolerance: 0.0001,
     accel_probe_margin: 0.05,
-    spirv_unroll: 4,
+    spirv_unroll: 16,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
