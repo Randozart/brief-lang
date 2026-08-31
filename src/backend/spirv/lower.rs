@@ -125,11 +125,26 @@ impl<'a> FnLowerer<'a> {
 
     pub fn emit_stmt(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
-            Statement::Let { name, expr: Some(e), .. } => {
+            Statement::Let { name, ty, expr: Some(e), .. } => {
                 // 2026-08-23: the VARIABLE itself was pre-declared in the
                 // entry block (SPIR-V requires every function-scope
                 // OpVariable in the FIRST block); here we only store.
-                let (val, _ty) = self.emit_expr(e)?;
+                // 2026-08-31 (VITRIOL GEMM comparison M1): a FLOAT let with a
+                // DECIMAL initializer (`let acc: Float = 0;`) needs the zero
+                // materialized as the float-typed constant - storing an i64
+                // zero into a float variable is an OpStore type mismatch.
+                let declared_float = ty
+                    .as_ref()
+                    .map(|t| self.builder.is_float_type(t).unwrap_or(false))
+                    .unwrap_or(false);
+                let (val, _ty) = match (declared_float, e) {
+                    (true, Expr::Decimal(n)) => {
+                        let bits = self.builder.float_bits_of(ty.as_ref().unwrap())?;
+                        let c = self.builder.float_const(bits, *n as f64);
+                        (c, ty.clone().unwrap())
+                    }
+                    _ => self.emit_expr(e)?,
+                };
                 let Some((var, _)) = self.vars.get(name.as_str()) else {
                     return self.err(format!("local '{}' was not pre-declared", name));
                 };
@@ -163,6 +178,132 @@ impl<'a> FnLowerer<'a> {
                 // 'open' in rspirv's state and the next begin_block panics.
                 self.builder.ret();
                 self.terminated = true;
+                Ok(())
+            }
+            // 2026-08-31 (VITRIOL GEMM comparison M1): a bounded foreach
+            // lowers to a STRUCTURED loop (OpLoopMerge) over a Function-scope
+            // loop variable. The loop var was pre-declared in the entry block
+            // by collect_locals; the body obeys the same scalar/array rules.
+            Statement::Foreach { item, list, body } => {
+                let Expr::Range { start, end, inclusive } = list.as_ref() else {
+                    return self.err(
+                        "foreach over a non-range collection - kernel loops iterate `start..end` ranges only",
+                    );
+                };
+                let (start_v, sty) = self.emit_expr(start)?;
+                let Some((var, _)) = self.vars.get(item) else {
+                    return self.err(format!("foreach item '{}' was not pre-declared", item));
+                };
+                let var = *var;
+                let _ = sty;
+                let int_ty = self.type_id(&Type::int())?;
+                let bool_ty = self.type_id(&Type::Bits(1))?;
+                let cmp_op = if *inclusive { spirv::Op::SLessThanEqual } else { spirv::Op::SLessThan };
+
+                let header = self.builder.gen_id();
+                let body_bb = self.builder.gen_id();
+                let continue_bb = self.builder.gen_id();
+                let merge = self.builder.gen_id();
+                let preheader_bb = self.builder.gen_id();
+                let cond0 = self.builder.gen_id();
+                let cond_next = self.builder.gen_id();
+
+                // Condition on the loop variable vs the range end. Emitted
+                // TWICE: once in the preheader (first test) and once at the
+                // end of the continue block (re-test) - the header itself
+                // only merges the two through a Phi, because OpLoopMerge must
+                // immediately precede its branch and a Phi must open a block.
+                let emit_cond = |lower: &mut Self, cond: u32| -> Result<(), String> {
+                    let v = lower.builder.gen_id();
+                    lower.builder.emit(Instruction::new(
+                        spirv::Op::Load,
+                        Some(int_ty),
+                        Some(v),
+                        vec![Operand::IdRef(var)],
+                    ));
+                    let (end_v, _ety) = lower.emit_expr(end)?;
+                    lower.builder.emit(Instruction::new(
+                        cmp_op,
+                        Some(bool_ty),
+                        Some(cond),
+                        vec![Operand::IdRef(v), Operand::IdRef(end_v)],
+                    ));
+                    Ok(())
+                };
+
+                // Preheader: seed the loop variable, first test, enter header.
+                self.builder.store(var, start_v);
+                // The current (guard) block must terminate by branching into
+                // the preheader - begin_block panics on an unterminated block.
+                self.builder.builder.branch(preheader_bb);
+                self.builder.begin_block(Some(preheader_bb));
+                emit_cond(self, cond0)?;
+                self.builder.builder.branch(header);
+
+                // Header: merge annotation + Phi + branch.
+                self.builder.begin_block(Some(header));
+                // Order inside the header: OpPhi first (phis open a block),
+                // then OpLoopMerge, which must immediately precede the
+                // OpBranchConditional (SPIR-V structured-loop rule).
+                let cond_hdr = self
+                    .builder
+                    .builder
+                    .phi(
+                        bool_ty,
+                        None,
+                        [(cond0, preheader_bb), (cond_next, continue_bb)],
+                    )
+                    .map_err(|e| format!("loop phi: {:?}", e))?;
+                self.builder
+                    .builder
+                    .loop_merge(merge, continue_bb, rspirv::spirv::LoopControl::NONE, [] as [rspirv::dr::Operand; 0]);
+                self.builder
+                    .builder
+                    .branch_conditional(cond_hdr, body_bb, merge, [] as [u32; 0]);
+
+                // Body: work-item statements, then fall into the continue.
+                self.builder.begin_block(Some(body_bb));
+                self.vars.insert(item.clone(), (var, Type::int()));
+                let prev_terminated = self.terminated;
+                self.terminated = false;
+                for s in body {
+                    if self.terminated {
+                        break;
+                    }
+                    self.emit_stmt(s)?;
+                }
+                self.builder.builder.branch(continue_bb);
+
+                // Continue: increment, re-test, loop back.
+                self.builder.begin_block(Some(continue_bb));
+                let step_ty = self.type_id(&Type::int())?;
+                let cur = self.builder.gen_id();
+                self.builder.emit(Instruction::new(
+                    spirv::Op::Load,
+                    Some(step_ty),
+                    Some(cur),
+                    vec![Operand::IdRef(var)],
+                ));
+                let one = self.builder.builder.constant_bit64(step_ty, 1);
+                let next = self.builder.gen_id();
+                self.builder.emit(Instruction::new(
+                    spirv::Op::IAdd,
+                    Some(step_ty),
+                    Some(next),
+                    vec![Operand::IdRef(cur), Operand::IdRef(one)],
+                ));
+                self.builder.emit(Instruction::new(
+                    spirv::Op::Store,
+                    None,
+                    None,
+                    vec![Operand::IdRef(var), Operand::IdRef(next)],
+                ));
+                emit_cond(self, cond_next)?;
+                self.builder.builder.branch(header);
+
+                // Merge: execution resumes after the loop.
+                self.builder.begin_block(Some(merge));
+                self.terminated = prev_terminated;
                 Ok(())
             }
             other => self.err(format!(
@@ -1006,6 +1147,14 @@ pub fn collect_locals(body: &[Statement], out: &mut Vec<(String, Type)>) {
                 out.push((name.clone(), ty.clone()));
             }
             Statement::Guarded(_, inner) | Statement::Block(inner) => {
+                collect_locals(inner, out);
+            }
+            // 2026-08-31 (VITRIOL GEMM comparison M1): the foreach loop
+            // variable is a Function-scope long - declared in the entry block
+            // like every other local (SPIR-V layout rule); body lets are
+            // collected by the recursive call.
+            Statement::Foreach { item, body: inner, .. } => {
+                out.push((item.clone(), Type::int()));
                 collect_locals(inner, out);
             }
             _ => {}

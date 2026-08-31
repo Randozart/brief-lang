@@ -391,6 +391,31 @@ fn stmt_is_kernel(
         Statement::Block(b) => {
             !b.is_empty() && b.iter().all(|s| stmt_is_kernel(s, ctx, locals))
         }
+        // 2026-08-31 (VITRIOL GEMM comparison, M1): a bounded `foreach k in
+        // start..end` is a loop-private reduction — the loop variable is a
+        // PRIVATE scalar (added to locals: the body's assignments to it and
+        // to outer local accumulators obey the same purity rules), the range
+        // bounds are pure, and the body obeys every existing rule. The loop
+        // itself adds no cross-work-item state: each invocation runs its own
+        // copy. Non-range collections (heaps) stay host-side.
+        Statement::Foreach { item, list, body } => {
+            let Expr::Range { start, end, .. } = list.as_ref() else {
+                ctx.reasons.push(format!(
+                    "foreach over a non-range collection — kernel loops \
+                     iterate `start..end` ranges only"
+                ));
+                return false;
+            };
+            if !expr_is_pure(start) || !expr_is_pure(end) {
+                return false;
+            }
+            let inserted = locals.insert(item.clone());
+            let ok = !body.is_empty() && body.iter().all(|s| stmt_is_kernel(s, ctx, locals));
+            if inserted {
+                locals.remove(item);
+            }
+            ok
+        }
         _ => false,
     }
 }

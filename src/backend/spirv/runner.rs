@@ -70,8 +70,8 @@ pub fn ssbo_layout(
                     })
                     .product::<u64>()
                     .max(1);
-                let e = sb.scalar_storage_bytes(inner)?;
-                let flt = sb.is_float_type(inner)?;
+                let e = sb.scalar_storage_bytes(inner.as_ref())?;
+                let flt = sb.is_float_type(inner.as_ref())?;
                 (e, elems, true, flt)
             }
             other => {
@@ -105,7 +105,12 @@ fn field_by_name<'a>(fields: &'a [RunnerField], name: &str) -> Option<&'a Runner
 
 /// Generate a C expression reading scalars / constant-indexed array
 /// elements. Err names the unsupported construct (v1 surface).
-fn emit_scalar_read(e: &Expr, fields: &[RunnerField], out: &mut String) -> Result<(), String> {
+fn emit_scalar_read(
+    e: &Expr,
+    fields: &[RunnerField],
+    consts: &std::collections::HashMap<String, Expr>,
+    out: &mut String,
+) -> Result<(), String> {
     match e {
         Expr::Decimal(n) => {
             out.push_str(&format!("(long long){}", n));
@@ -130,7 +135,10 @@ fn emit_scalar_read(e: &Expr, fields: &[RunnerField], out: &mut String) -> Resul
                  read scalar state only",
                 f.name
             )),
-            None => Err(format!("unknown state field '{}'", name)),
+            None => match consts.get(name) {
+                Some(ce) => emit_scalar_read(ce, fields, consts, out),
+                None => Err(format!("unknown state field or const '{}'", name)),
+            },
         },
         Expr::BinaryOp(kind, l, r) => {
             let op = match kind {
@@ -155,9 +163,9 @@ fn emit_scalar_read(e: &Expr, fields: &[RunnerField], out: &mut String) -> Resul
                 BinaryOpKind::Concat => return Err("string concat in a scalar condition".into()),
             };
             out.push('(');
-            emit_scalar_read(l, fields, out)?;
+            emit_scalar_read(l, fields, consts, out)?;
             out.push_str(op);
-            emit_scalar_read(r, fields, out)?;
+            emit_scalar_read(r, fields, consts, out)?;
             out.push(')');
             Ok(())
         }
@@ -168,7 +176,7 @@ fn emit_scalar_read(e: &Expr, fields: &[RunnerField], out: &mut String) -> Resul
                 UnaryOpKind::BitNot => "(~",
             };
             out.push_str(op);
-            emit_scalar_read(e, fields, out)?;
+            emit_scalar_read(e, fields, consts, out)?;
             out.push(')');
             Ok(())
         }
@@ -217,6 +225,7 @@ fn field_name_of_expr(e: &Expr) -> Option<&str> {
 fn emit_host_stmt(
     s: &Statement,
     fields: &[RunnerField],
+    consts: &std::collections::HashMap<String, Expr>,
     out: &mut String,
     exited: &mut bool,
 ) -> Result<(), String> {
@@ -237,7 +246,7 @@ fn emit_host_stmt(
             }
             let t = if fd.type_is_float { "double" } else { "long long" };
             out.push_str(&format!("      *({}*)(state + {}) = ", t, fd.offset));
-            emit_scalar_read(rhs, fields, out)?;
+            emit_scalar_read(rhs, fields, consts, out)?;
             out.push_str(";\n");
             Ok(())
         }
@@ -262,6 +271,15 @@ pub fn emit_runner(
     kernels: &[RunnerKernel],
 ) -> Result<String, String> {
     let fields = ssbo_layout(program, universe, int_bits)?;
+    // Module consts (literals only) usable in conditions, counts and bodies.
+    let mut consts: std::collections::HashMap<String, Expr> = Default::default();
+    for item in program {
+        if let TopLevel::Constant(c) = item {
+            if matches!(c.expr, Expr::Decimal(_) | Expr::Float(_)) {
+                consts.insert(c.name.clone(), c.expr.clone());
+            }
+        }
+    }
     let total: u64 = fields.iter().map(|f| f.elem_bytes as u64 * f.count).sum();
     let mut out = String::new();
 
@@ -383,13 +401,13 @@ pub fn emit_runner(
         };
         let name = &t.name;
         let mut pre = String::new();
-        emit_scalar_read(&t.contract.pre_condition, &fields, &mut pre)?;
+        emit_scalar_read(&t.contract.pre_condition, &fields, &consts, &mut pre)?;
         let kidx = kernels.iter().position(|k| k.name == *name);
         if let Some(k) = kidx.map(|i| &kernels[i]) {
             // KERNEL node: dispatch + counter fast-forward (the pass covers
             // every work item, so `i = N` makes the pre false next pass).
             let mut count_c = String::new();
-            emit_scalar_read(&k.count_expr, &fields, &mut count_c)?;
+            emit_scalar_read(&k.count_expr, &fields, &consts, &mut count_c)?;
             let ci = c_ident(name);
             out.push_str(&format!("    // kernel node '{}'\n", name));
             out.push_str(&format!("    if ({}) {{\n", pre));
@@ -409,7 +427,7 @@ pub fn emit_runner(
         let mut body = String::new();
         let mut exited = false;
         for s in &t.body {
-            emit_host_stmt(s, &fields, &mut body, &mut exited)?;
+            emit_host_stmt(s, &fields, &consts, &mut body, &mut exited)?;
             if exited {
                 break;
             }

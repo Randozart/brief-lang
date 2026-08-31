@@ -48,6 +48,11 @@ pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
         intrinsics: true,
         index: true,
         casts: true,
+        // 2026-08-31 (VITRIOL GEMM comparison M1): bounded foreach over a
+        // range lowers to a structured loop - the reduction primitive GEMV
+        // needs.
+        foreach: true,
+        slices_ranges: true,
         if_expr: true,
         let_stmt: true,
         assign_stmt: true,

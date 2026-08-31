@@ -1,0 +1,19 @@
+// gemv.abv - matrix-vector product: y[i] = sum_k A[i*K + k] * x[k].
+// M = K = 4096 (16.7M multiply-adds). Pure GPU: .abv native, no host script.
+const M: Int = 4096;
+const K: Int = 4096;
+
+let i: Int = 0;
+let a: Float[16777216];
+let x: Float[4096];
+let y: Float[4096];
+
+async node gemv [i < M][i == M] {
+    let acc: Float = 0;
+    foreach k in 0..K {
+        acc = acc + a[i * K + k] * x[k];
+    }
+    y[i] = acc;
+    i = i + 1;
+    term;
+};
