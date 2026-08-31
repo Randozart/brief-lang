@@ -35,6 +35,19 @@ speed**. The FFI is:
 calling a super-efficient version of itself. The zero-friction gate (§7) proves
 this per host.
 
+**Ownership inference:** every export/frgn parameter and return is classified
+as `Borrowed` / `Owned` / `ZeroCopy` / `Value` / `ZeroCost` by the frontend
+pass `src/analysis/boundary_ownership.rs` (plan
+`docs/plans/2026-08-31-boundary-ownership-inference.md`). The compiler derives
+it deterministically from three signals it already holds — protocol variant,
+direction (export vs frgn), and calling convention — then propagates it
+transitively through the call graph. This makes the boundary's copy-vs-zero-copy
+story explicit and checkable, and is the basis for eliminating provably
+unnecessary copies (a follow-up wiring phase). Explicit `borrow`/`consume`/
+`owned`/`borrowed<source>` annotations (Phase 9 ownership algebra) override the
+inference where it cannot see (custom pointer types, opaque C returns, host-GC
+bridges).
+
 ---
 
 ## 2. How to link

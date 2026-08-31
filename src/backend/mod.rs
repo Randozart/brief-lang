@@ -102,6 +102,14 @@ pub struct AnalysisResults {
     /// emission. Keyed by defn name; parameters carry across boundaries,
     /// locals do not (reference-probed rule, SPEC §12.2).
     pub task_segments: HashMap<String, Vec<Vec<Statement>>>,
+    /// 2026-08-31 (boundary ownership plan): per-export and per-frgn boundary
+    /// ownership — Borrowed / Owned / ZeroCopy / Value / ZeroCost. Computed
+    /// once in the frontend from protocol variant + direction (+ calling
+    /// convention, defaulted to c_abi here since the glue config is not
+    /// available in analyze_program; the GLUE wiring refines lto/wasm). See
+    /// docs/plans/2026-08-31-boundary-ownership-inference.md.
+    pub boundary_ownership:
+        crate::analysis::boundary_ownership::BoundaryOwnershipResult,
 }
 
 /// Intent: Run shared program analysis for backend code generation.
@@ -196,6 +204,16 @@ pub fn analyze_program(
         .collect();
     let module_metadata = collect_module_metadata(items);
     let accel = crate::analysis::accel::analyze(items, &module_metadata, type_universe);
+    // 2026-08-31 (boundary ownership plan): classify every export/frgn
+    // parameter and return. The calling convention is defaulted to c_abi here
+    // (the glue config lives in compile.rs); the GLUE wiring refines
+    // lto/wasm_import when it consumes the result.
+    let boundary_ownership =
+        crate::analysis::boundary_ownership::compute_boundary_ownership(
+            items,
+            type_universe,
+            &|_| None,
+        );
     AnalysisResults {
         call_graph: CallGraph::new(),
         param_ranges: ParameterRanges::new(),
@@ -222,6 +240,7 @@ pub fn analyze_program(
         dependent_pools,
         spawn_storage,
         task_segments,
+        boundary_ownership,
     }
 }
 
