@@ -103,7 +103,14 @@ pub fn compile_spirv_builder(
                     rejected.push((txn.name.clone(), entry.shape.reasons.clone()));
                     continue;
                 }
-                emit_kernel(&mut builder, &txn.name.clone(), &entry.shape, program)?;
+                // Entry point is ALWAYS "main": the runtime drivers hardcode
+                // pName "main" (briev_dev_vulkan.c), and build_kernels (the
+                // runner blob path) emits "main" too. The old per-node entry
+                // name made every standalone .spv file fail pipeline
+                // creation ("compute pipeline failed") while the same
+                // kernel embedded in the runner worked — the two paths must
+                // never disagree again.
+                emit_kernel(&mut builder, "main", &entry.shape, program)?;
                 emitted.push(txn.name.clone());
             }
         }
@@ -1119,8 +1126,17 @@ mod tests {
         let program = scale_kernel_program();
         let analysis = analyze(&program);
         // Eligible + `!> accel:` metadata → "main" accepts any kernel.
-        compile_spirv(&program, "main", &analysis, &test_universe(), 64)
+        let binary = compile_spirv(&program, "main", &analysis, &test_universe(), 64)
             .expect("eligible fixture must build under wildcard entry");
+        // The entry point must be named "main" in the emitted module too —
+        // the runtime drivers hardcode pName "main" (regression: standalone
+        // .spv files once carried the node name and failed pipeline
+        // creation while the runner blobs worked).
+        let needle = b"main\0";
+        assert!(
+            binary.windows(needle.len()).any(|w| w == needle),
+            "emitted module must contain a 'main' entry point"
+        );
 
         // A specific entry name must EXIST among eligible kernels.
         let err = compile_spirv_builder(&program, "nope", &analysis, &test_universe(), 64)

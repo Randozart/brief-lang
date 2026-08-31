@@ -95,6 +95,7 @@ number in this ledger (VERDICTS.md rules: losses are recorded, not hidden).
 | date | milestone | GPU (3060) | CPU ref | verdict |
 |------|-----------|-----------|---------|---------|
 | 2026-08-31 | pairs elementwise 16M | 70ms (PCIe-bound single launch) | 36ms (in-cache) | workload memory-bound; residency required — see first-gpu-dispatch results |
+| 2026-08-31 | **M1 GEMV M=K=4096 baseline** (`gemv_bench`, pre-O2) | avg 17.9ms, min 15.2ms, **1.88 GFLOP/s** (resident launch, 5 warmup + 20 iters, max_rel_err 0.0) | 30.0ms single-thread, 1.12 GFLOP/s | **GPU 1.67× single-thread CPU.** Both far from roofline — the kernel is scalar, no FMA, no vectorized loads (that is the point: this is the pre-optimization baseline). Harness: `benchmarks/gpu/gemv_bench.c` (reads a .spv, self-contained; correctness gate vs double-accumulate CPU ref before timing). llama.cpp same-shape number: NOT yet on the ledger — build pending. |
 
 ## Optimization doctrine (locked, 2026-08-31 — user)
 
