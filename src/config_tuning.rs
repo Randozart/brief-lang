@@ -60,6 +60,9 @@ pub struct IrLoweringSettings {
     pub accel_probe_tolerance: f64,
     /// Accel probe commit margin: GPU must beat CPU by 1 + margin.
     pub accel_probe_margin: f64,
+    /// 2026-08-31 (VITRIOL GEMM comparison O1): SPIR-V kernel foreach
+    /// unroll factor for constant trip counts (0 disables unrolling).
+    pub spirv_unroll: u32,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -137,6 +140,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_k: 2,
     accel_probe_tolerance: 0.0001,
     accel_probe_margin: 0.05,
+    spirv_unroll: 4,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -268,6 +272,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
         accel_probe_margin: db
             .field_float("accel_probe_margin", 0)
             .unwrap_or(DEFAULT_IR_LOWERING.accel_probe_margin),
+        spirv_unroll: db
+            .field_int("spirv_unroll", 0)
+            .map(|v| v.max(0) as u32)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_unroll),
     }
 }
 

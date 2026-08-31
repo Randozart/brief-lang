@@ -95,3 +95,36 @@ number in this ledger (VERDICTS.md rules: losses are recorded, not hidden).
 | date | milestone | GPU (3060) | CPU ref | verdict |
 |------|-----------|-----------|---------|---------|
 | 2026-08-31 | pairs elementwise 16M | 70ms (PCIe-bound single launch) | 36ms (in-cache) | workload memory-bound; residency required — see first-gpu-dispatch results |
+
+## Optimization doctrine (locked, 2026-08-31 — user)
+
+> Regular Briev is optimised for native code through LLVM. Whatever we must
+> do to optimise the SPIR-V backend for GPU, we will.
+
+The SPIR-V backend is a first-class optimization target, not a
+correctness-only emitter. The ladder mirrors what LLVM does for native
+code, translated to GPU reality — and follows the house rules:
+frontend-driven (analysis computes, backend consumes), config-tuned
+(`config/targets.dbvl` per-GPU entries like `[target.spirv64]`), measured
+before built.
+
+| # | optimization | GPU effect | prerequisite |
+|---|--------------|-----------|--------------|
+| O1 | constant-trip-count loop unrolling (config factor) | fewer branches, ILP | foreach lowering ✓ |
+| O2 | FMA fusion (mul+add chains) | math throughput | verify driver fusion |
+| O3 | vectorized loads/stores (float4 via OpTypeVector) | memory throughput | alignment proof |
+| O4 | shared-memory staging for tiled reuse (GEMM tiles) | DRAM traffic cut | tiling analysis |
+| O5 | occupancy shaping (LocalSize search) | latency hiding | certified shapes |
+| O6 | tree reductions in shared memory | GEMV/GEMM epilogue | O4 |
+
+Every rung: before/after numbers on the same box in this ledger. A rung
+that loses is a VERDICT entry, not a silent revert.
+
+### O1 spec (first rung, implemented now)
+
+Unroll a foreach whose trip count is a compile-time constant (`0..K`, K
+literal const) by a config factor, emitting the unrolled groups plus a
+remainder loop. Implementation site: the foreach lowering in
+src/backend/spirv/lower.rs (the body is re-emitted per group with the loop
+variable's loads pointing at per-group constants). Budget: a code-size cap
+clamps the factor. Config: `spirv_unroll` in the tuning table, default 4.

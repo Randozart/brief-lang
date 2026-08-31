@@ -46,6 +46,12 @@ pub struct FnLowerer<'a> {
     /// `const dt: Float = 0.001;` etc. directly; non-literal initializers
     /// error at materialization.
     pub consts: HashMap<String, (Word, Type)>,
+    /// 2026-08-31 (O1): literal const VALUES for unrolling decisions.
+    pub const_int_values: HashMap<String, i64>,
+    /// 2026-08-31 (O1): loop variables bound to CONSTANTS by unrolling -
+    /// reads return the constant id directly (no OpLoad; a load from a
+    /// constant id is not a logical pointer).
+    pub const_vars: HashMap<String, (Word, Type)>,
     /// Set when the body executed a term/endprogram — callers stop
     /// branching afterwards (a block can only have one terminator).
     pub terminated: bool,
@@ -61,6 +67,8 @@ impl<'a> FnLowerer<'a> {
             global_id_var: None,
             local_id_var: None,
             consts: HashMap::new(),
+            const_int_values: HashMap::new(),
+            const_vars: HashMap::new(),
             terminated: false,
         }
     }
@@ -76,6 +84,8 @@ impl<'a> FnLowerer<'a> {
             let (id, ty) = match &c.expr {
                 Expr::Decimal(n) => {
                     let id = self.builder.i64_const(*n as u64);
+                    // O1 unrolling reads the VALUE, not just the constant id.
+                    self.const_int_values.insert(c.name.clone(), *n);
                     (id, Type::int())
                 }
                 Expr::Float(v) => {
@@ -190,15 +200,151 @@ impl<'a> FnLowerer<'a> {
                         "foreach over a non-range collection - kernel loops iterate `start..end` ranges only",
                     );
                 };
-                let (start_v, sty) = self.emit_expr(start)?;
                 let Some((var, _)) = self.vars.get(item) else {
                     return self.err(format!("foreach item '{}' was not pre-declared", item));
                 };
                 let var = *var;
-                let _ = sty;
                 let int_ty = self.type_id(&Type::int())?;
                 let bool_ty = self.type_id(&Type::Bits(1))?;
                 let cmp_op = if *inclusive { spirv::Op::SLessThanEqual } else { spirv::Op::SLessThan };
+
+                // O1 (plan VITRIOL GEMM comparison): constant-trip-count
+                // unrolling. `0..K` with K a literal const emits all trip
+                // iterations inlined (loop-var reads bound to per-iteration
+                // constants) - no loop instructions at all.
+                let start_n = match start.as_ref() {
+                    Expr::Decimal(n) if *n >= 0 => Some(*n as u64),
+                    _ => None,
+                };
+                let end_n = match end.as_ref() {
+                    Expr::Decimal(n) if *n >= 0 => Some(*n as u64),
+                    Expr::Identifier(f) => {
+                        self.const_int_values.get(f).copied().map(|v| v as u64)
+                    }
+                    _ => None,
+                };
+
+                if let (Some(s0), Some(e0)) = (start_n, end_n) {
+                    let factor = crate::config_tuning::ir_lowering().spirv_unroll;
+                    let body_cost = body.len().max(1) as u32;
+                    // Code-size budget: at most `budget` inlined body copies
+                    // total; a large trip keeps a structured loop for the
+                    // rest (K=4096 fully inlined produced megabyte modules
+                    // and second-long compiles).
+                    let budget: u32 = 64;
+                    let factor = if body_cost > 0 { factor.clamp(1, budget / body_cost).max(1) } else { factor };
+                    let trip = e0.saturating_sub(s0);
+                    let unrolled = trip.min(factor as u64);
+                    let mut k = s0;
+
+                    // Unrolled prefix: `unrolled` inlined copies.
+                    for _ in 0..unrolled {
+                        let ck = self.builder.builder.constant_bit64(int_ty, k);
+                        self.const_vars.insert(item.clone(), (ck, Type::int()));
+                        for s in body {
+                            if self.terminated {
+                                break;
+                            }
+                            self.emit_stmt(s)?;
+                        }
+                        k += 1;
+                    }
+
+                    // Structured remainder loop: k in [k, e0).
+                    let step_ty = self.type_id(&Type::int())?;
+                    if k < e0 {
+                        let header = self.builder.gen_id();
+                        let body_bb = self.builder.gen_id();
+                        let continue_bb = self.builder.gen_id();
+                        let merge = self.builder.gen_id();
+                        let preheader_bb = self.builder.gen_id();
+                        let cond0 = self.builder.gen_id();
+                        let cond_next = self.builder.gen_id();
+
+                        let start_c = self.builder.builder.constant_bit64(int_ty, k);
+                        let end_c = self.builder.builder.constant_bit64(int_ty, e0);
+                        self.builder.store(var, start_c);
+                        let emit_cond = |lower: &mut Self, cond: u32| -> Result<(), String> {
+                            let v = lower.builder.gen_id();
+                            lower.builder.emit(Instruction::new(
+                                spirv::Op::Load,
+                                Some(int_ty),
+                                Some(v),
+                                vec![Operand::IdRef(var)],
+                            ));
+                            lower.builder.emit(Instruction::new(
+                                cmp_op,
+                                Some(bool_ty),
+                                Some(cond),
+                                vec![Operand::IdRef(v), Operand::IdRef(end_c)],
+                            ));
+                            Ok(())
+                        };
+                        self.builder.builder.branch(preheader_bb);
+                        self.builder.begin_block(Some(preheader_bb));
+                        emit_cond(self, cond0)?;
+                        self.builder.builder.branch(header);
+                        self.builder.begin_block(Some(header));
+                        let cond_hdr = self
+                            .builder
+                            .builder
+                            .phi(
+                                bool_ty,
+                                None,
+                                [(cond0, preheader_bb), (cond_next, continue_bb)],
+                            )
+                            .map_err(|e| format!("loop phi: {:?}", e))?;
+                        self.builder
+                            .builder
+                            .loop_merge(merge, continue_bb, rspirv::spirv::LoopControl::NONE, [] as [rspirv::dr::Operand; 0]);
+                        self.builder
+                            .builder
+                            .branch_conditional(cond_hdr, body_bb, merge, [] as [u32; 0]);
+                        self.builder.begin_block(Some(body_bb));
+                        self.const_vars.remove(item);
+                        self.vars.insert(item.clone(), (var, Type::int()));
+                        let prev_terminated = self.terminated;
+                        self.terminated = false;
+                        for s in body {
+                            if self.terminated {
+                                break;
+                            }
+                            self.emit_stmt(s)?;
+                        }
+                        self.builder.builder.branch(continue_bb);
+                        self.builder.begin_block(Some(continue_bb));
+                        let cur = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::Load,
+                            Some(step_ty),
+                            Some(cur),
+                            vec![Operand::IdRef(var)],
+                        ));
+                        let one = self.builder.builder.constant_bit64(step_ty, 1);
+                        let next = self.builder.gen_id();
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::IAdd,
+                            Some(step_ty),
+                            Some(next),
+                            vec![Operand::IdRef(cur), Operand::IdRef(one)],
+                        ));
+                        self.builder.emit(Instruction::new(
+                            spirv::Op::Store,
+                            None,
+                            None,
+                            vec![Operand::IdRef(var), Operand::IdRef(next)],
+                        ));
+                        emit_cond(self, cond_next)?;
+                        self.builder.builder.branch(header);
+                        self.builder.begin_block(Some(merge));
+                        self.terminated = prev_terminated;
+                    }
+                    return Ok(());
+                }
+
+                // General path: runtime bounds - structured loop.
+                let (start_v, _sty) = self.emit_expr(start)?;
+                self.builder.store(var, start_v);
 
                 let header = self.builder.gen_id();
                 let body_bb = self.builder.gen_id();
@@ -208,11 +354,6 @@ impl<'a> FnLowerer<'a> {
                 let cond0 = self.builder.gen_id();
                 let cond_next = self.builder.gen_id();
 
-                // Condition on the loop variable vs the range end. Emitted
-                // TWICE: once in the preheader (first test) and once at the
-                // end of the continue block (re-test) - the header itself
-                // only merges the two through a Phi, because OpLoopMerge must
-                // immediately precede its branch and a Phi must open a block.
                 let emit_cond = |lower: &mut Self, cond: u32| -> Result<(), String> {
                     let v = lower.builder.gen_id();
                     lower.builder.emit(Instruction::new(
@@ -231,20 +372,13 @@ impl<'a> FnLowerer<'a> {
                     Ok(())
                 };
 
-                // Preheader: seed the loop variable, first test, enter header.
-                self.builder.store(var, start_v);
-                // The current (guard) block must terminate by branching into
-                // the preheader - begin_block panics on an unterminated block.
                 self.builder.builder.branch(preheader_bb);
                 self.builder.begin_block(Some(preheader_bb));
                 emit_cond(self, cond0)?;
                 self.builder.builder.branch(header);
-
-                // Header: merge annotation + Phi + branch.
                 self.builder.begin_block(Some(header));
-                // Order inside the header: OpPhi first (phis open a block),
-                // then OpLoopMerge, which must immediately precede the
-                // OpBranchConditional (SPIR-V structured-loop rule).
+                // OpPhi opens the header; OpLoopMerge must immediately
+                // precede the OpBranchConditional after it.
                 let cond_hdr = self
                     .builder
                     .builder
@@ -260,8 +394,6 @@ impl<'a> FnLowerer<'a> {
                 self.builder
                     .builder
                     .branch_conditional(cond_hdr, body_bb, merge, [] as [u32; 0]);
-
-                // Body: work-item statements, then fall into the continue.
                 self.builder.begin_block(Some(body_bb));
                 self.vars.insert(item.clone(), (var, Type::int()));
                 let prev_terminated = self.terminated;
@@ -273,8 +405,6 @@ impl<'a> FnLowerer<'a> {
                     self.emit_stmt(s)?;
                 }
                 self.builder.builder.branch(continue_bb);
-
-                // Continue: increment, re-test, loop back.
                 self.builder.begin_block(Some(continue_bb));
                 let step_ty = self.type_id(&Type::int())?;
                 let cur = self.builder.gen_id();
@@ -300,8 +430,6 @@ impl<'a> FnLowerer<'a> {
                 ));
                 emit_cond(self, cond_next)?;
                 self.builder.builder.branch(header);
-
-                // Merge: execution resumes after the loop.
                 self.builder.begin_block(Some(merge));
                 self.terminated = prev_terminated;
                 Ok(())
@@ -358,6 +486,13 @@ impl<'a> FnLowerer<'a> {
                 Ok((c, ty))
             }
             Expr::Identifier(name) => {
+                // 2026-08-31 (O1 unrolling): unrolled loop variables are
+                // CONSTANTS — checked before the variable shadow, so an
+                // unrolled body reads the per-iteration constant instead of
+                // the stale (never-stored) loop variable.
+                if let Some((id, ty)) = self.const_vars.get(name) {
+                    return Ok((*id, ty.clone()));
+                }
                 if let Some((var, ty)) = self.vars.get(name) {
                     let (var, ty) = (*var, ty.clone());
                     let result_ty = self.type_id(&ty)?;
