@@ -37,7 +37,8 @@ doctrine sections still accurate).
 | + O2 FMA fusion | 15.5ms | 2.2 |
 | + device-local working set + LocalSize 256 | **0.89ms best-run** | **~38** |
 | + O3 float4 + cooperative scalar | 0.93ms | ~36 |
-| + **vec4 inside the cooperative loop** (current HEAD, knob ON) | **0.25ms min / 0.28ms avg** | **~120** |
+| + vec4 inside the cooperative loop | 0.25ms min / 0.28ms avg | ~120 |
+| + vec4 projection layout + vector-Fma accumulator (current HEAD) | 0.26ms min / 0.29ms avg | ~115-128 |
 | **ggml-cuda (the bar)** | **0.213ms** | **157.8** (~83% of VRAM roofline) |
 | ggml-cpu 1T | 4.4ms | 7.7 |
 
