@@ -54,3 +54,8 @@ circt.firmem_max_ports: 4;
 // ('within 10ms') to cycle counts; 0 = unset, such watchdogs are
 // capability errors naming this knob.
 circt.clock_hz: 0;
+
+// SPIR-V cooperative row kernels (plan 2026-09-01-cooperative-row-kernels):
+// when enabled, dot-product reductions use subgroup ops with vec4 loads
+// (32-lane workgroup, stride-128, OpGroupNonUniformFAdd).
+spirv_row_cooperative: 1;

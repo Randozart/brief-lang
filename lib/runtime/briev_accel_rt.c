@@ -356,6 +356,13 @@ int briev_accel_download(uint32_t idx, void* state) {    if (!briev_accel_availa
     if (mapped == NULL) {
         return 0;
     }
+    // 2026-09-01: with the device-local working set, the resident launch's
+    // results land in the VRAM buffer — pull them into the staging window
+    // before the host-side copy (the mapped read is stale otherwise). A 0
+    // return means the all-host fallback, where staging is already current.
+    if (g_driver->download_dev != NULL) {
+        g_driver->download_dev(g_kernels[idx]);
+    }
     const BrievKernelDesc* k = &g_descs[idx];
     for (uint32_t i = 0; i < k->n_fields; i++) {
         const BrievField* f = &k->fields[i];

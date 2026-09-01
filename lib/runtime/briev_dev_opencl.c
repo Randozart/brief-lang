@@ -121,6 +121,9 @@ static int briev_dev_opencl_init(void) {
 typedef struct {
     cl_program program;
     cl_kernel kernel;
+    // 2026-09-01: the module's OpExecutionMode LocalSize X (256 flat, 32
+    // cooperative row kernels). The NDRange local size must match it.
+    size_t local_x;
 } BrievOpenClKernel;
 
 static int briev_dev_opencl_create_kernel(const uint8_t* spirv, size_t size, void** out) {
@@ -148,6 +151,25 @@ static int briev_dev_opencl_create_kernel(const uint8_t* spirv, size_t size, voi
     }
     k->program = program;
     k->kernel = kernel;
+    // Parse the module's OpExecutionMode LocalSize (SPIR-V: opcode 16, mode
+    // literal 17, followed by W/H/D) — same parse as the Vulkan driver.
+    k->local_x = 256;
+    {
+        const uint32_t* w = (const uint32_t*)spirv;
+        size_t nw = size / 4;
+        if (nw > 5 && w[0] == 0x07230203u) {
+            size_t i = 5;
+            while (i < nw) {
+                uint32_t wc = w[i] >> 16, op = w[i] & 0xFFFFu;
+                if (wc == 0) { break; }
+                if (op == 16 && wc >= 4 && i + wc <= nw && w[i + 2] == 17) {
+                    k->local_x = w[i + 3];
+                    break;
+                }
+                i += wc;
+            }
+        }
+    }
     *out = k;
     return 1;
 }
@@ -167,7 +189,7 @@ static int briev_dev_opencl_launch(void* handle, const void* proj, size_t proj_b
     int64_t n = (int64_t)global_n;
     p_clSetKernelArg(k->kernel, 1, sizeof(int64_t), &n);
     size_t global_size = global_n;
-    size_t local_size = 64;
+    size_t local_size = k->local_x ? k->local_x : 64;
     err = p_clEnqueueNDRangeKernel(cl_queue, k->kernel, 1, NULL, &global_size, &local_size, 0, NULL, NULL);
     if (err != 0) {
         p_clReleaseMemObject(buf);

@@ -594,19 +594,24 @@ fn emit_kernel_node(
 /// of the work-item id differs.
 fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
     if k.cooperative {
-        // One 32-lane workgroup per row.
+        // One 32-lane workgroup per row. The driver's 2D launch takes
+        // (nx = x work items, ny = workgroup rows) and dispatches
+        // ceil(nx/local_x) * ny workgroups — with the kernel's LocalSize 32
+        // and nx = 32 that is exactly ny = n one-per-row workgroups.
+        // 2026-09-01: was `(n + 31) / 32` rows, which launched 32x too few
+        // workgroups under the local_x-divided geometry (128 of 4096 rows).
         return format!(
-            "      long long rows_{ci} = (n_{ci} + 31) / 32;\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, 32, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\n\"); return 1; }}\n",
+            "      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, 32, n_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
             kidx
         );
     }
     if let Some(cols) = k.work_cols {
         return format!(
-            "      long long rows_{ci} = (n_{ci} + {cols} - 1) / {cols};\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, {cols}, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\n\"); return 1; }}\n",
+            "      long long rows_{ci} = (n_{ci} + {cols} - 1) / {cols};\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, {cols}, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
             kidx
         );
     }
     format!(
-        "      if (n_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, n_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\n\"); return 1; }}\n"
+        "      if (n_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, n_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
     )
 }

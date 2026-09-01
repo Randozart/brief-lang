@@ -72,6 +72,14 @@ pub struct FnLowerer<'a> {
     /// scalar access goes through AccessChain(idx >> 2, idx & 3); aligned
     /// groups in the unrolled prefix emit wide loads.
     pub vec4_fields: HashMap<String, Vec4Field>,
+    /// Cooperative vec4: maps (field_name, loop_var_substituted_index) to
+    /// the 4 component SSA value ids. Populated before the body is emitted;
+    /// emit_expr intercepts Index lookups for these fields.
+    pub vec4_coop_components: HashMap<String, [Word; 4]>,
+    /// Cooperative vec4: synthetic variable names for pre-loaded vec4
+    /// components. Maps "__vec4_{field}_{j}" → (SSA id, elem type).
+    /// Populated before body emission; emit_expr resolves these directly.
+    pub vec4_component_vars: HashMap<String, (Word, Type)>,
 }
 
 impl<'a> FnLowerer<'a> {
@@ -88,6 +96,8 @@ impl<'a> FnLowerer<'a> {
             const_vars: HashMap::new(),
             terminated: false,
             vec4_fields: HashMap::new(),
+            vec4_coop_components: HashMap::new(),
+            vec4_component_vars: HashMap::new(),
         }
     }
 
@@ -617,6 +627,11 @@ impl<'a> FnLowerer<'a> {
                 Ok((c, ty))
             }
             Expr::Identifier(name) => {
+                // 2026-09-01 (cooperative vec4): pre-loaded vec4 components
+                // are synthetic variables — resolved directly without a load.
+                if let Some((id, ty)) = self.vec4_component_vars.get(name) {
+                    return Ok((*id, ty.clone()));
+                }
                 // 2026-08-31 (O1 unrolling): unrolled loop variables are
                 // CONSTANTS — checked before the variable shadow, so an
                 // unrolled body reads the per-iteration constant instead of
@@ -1891,7 +1906,7 @@ fn aligned_div4(
 /// Replace const identifiers with their literal values (the unroll alignment
 /// proof needs coefficients as literals; emit-time const resolution happens
 /// later).
-fn fold_consts(e: &Expr, consts: &std::collections::HashMap<String, i64>) -> Expr {
+pub(crate) fn fold_consts(e: &Expr, consts: &std::collections::HashMap<String, i64>) -> Expr {
     match e {
         Expr::Identifier(n) => match consts.get(n) {
             Some(v) => Expr::Decimal(*v),
@@ -1906,7 +1921,7 @@ fn fold_consts(e: &Expr, consts: &std::collections::HashMap<String, i64>) -> Exp
     }
 }
 
-fn div4(e: &Expr) -> Option<Expr> {
+pub(crate) fn div4(e: &Expr) -> Option<Expr> {
     match e {
         Expr::Decimal(d) => {
             if d % 4 == 0 {
@@ -1953,6 +1968,87 @@ pub(crate) fn subst_stmt_var(stmt: &Statement, name: &str, repl: &Expr) -> State
         Statement::Assign(lhs, rhs) => Statement::Assign(
             subst_var_expr(lhs, name, repl),
             subst_var_expr(rhs, name, repl),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Substitute ALL occurrences of `name` with `repl` in an expression (deep).
+pub(crate) fn subst_var_deep(e: &Expr, name: &str, repl: &Expr) -> Expr {
+    subst_var_expr(e, name, repl)
+}
+
+/// Check if an expression references a given identifier.
+pub(crate) fn expr_references(e: &Expr, name: &str) -> bool {
+    match e {
+        Expr::Identifier(n) => n == name,
+        Expr::BinaryOp(_, l, r) => expr_references(l, name) || expr_references(r, name),
+        Expr::Index(o, i) => expr_references(o, name) || expr_references(i, name),
+        Expr::Call(_, args, _) => args.iter().any(|a| expr_references(a, name)),
+        _ => false,
+    }
+}
+
+/// Collect Index expressions in an expression tree that reference a vec4-eligible field.
+pub(crate) fn collect_vec4_indices(e: &Expr, vec4_fields: &HashMap<String, Vec4Field>, item: &str, indices: &mut Vec<(String, Expr)>) {
+    match e {
+        Expr::Index(obj, idx) => {
+            if let Some(fname) = field_name_of_index(obj) {
+                if vec4_fields.contains_key(fname) && expr_references(idx, item) {
+                    indices.push((fname.to_string(), (**idx).clone()));
+                }
+            }
+        }
+        Expr::BinaryOp(_, l, r) => {
+            collect_vec4_indices(l, vec4_fields, item, indices);
+            collect_vec4_indices(r, vec4_fields, item, indices);
+        }
+        Expr::Call(_, args, _) => {
+            for a in args {
+                collect_vec4_indices(a, vec4_fields, item, indices);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Replace an Index expression `field[idx]` with a replacement expression
+/// deep inside another expression.
+pub(crate) fn replace_index_in_expr(e: &Expr, fname: &str, orig_idx: &Expr, repl: &Expr) -> Expr {
+    match e {
+        Expr::Index(obj, idx) => {
+            if let Some(n) = field_name_of_index(obj) {
+                if n == fname && idx.as_ref() == orig_idx {
+                    return repl.clone();
+                }
+            }
+            Expr::Index(
+                Box::new(replace_index_in_expr(obj, fname, orig_idx, repl)),
+                Box::new(replace_index_in_expr(idx, fname, orig_idx, repl)),
+            )
+        }
+        Expr::BinaryOp(k, l, r) => Expr::BinaryOp(
+            *k,
+            Box::new(replace_index_in_expr(l, fname, orig_idx, repl)),
+            Box::new(replace_index_in_expr(r, fname, orig_idx, repl)),
+        ),
+        Expr::Call(n, args, ty) => Expr::Call(
+            n.clone(),
+            args.iter()
+                .map(|a| replace_index_in_expr(a, fname, orig_idx, repl))
+                .collect(),
+            ty.clone(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Replace an Index expression in a Statement.
+pub(crate) fn replace_index_in_stmt(stmt: &Statement, fname: &str, orig_idx: &Expr, repl: &Expr) -> Statement {
+    match stmt {
+        Statement::Assign(lhs, rhs) => Statement::Assign(
+            replace_index_in_expr(lhs, fname, orig_idx, repl),
+            replace_index_in_expr(rhs, fname, orig_idx, repl),
         ),
         other => other.clone(),
     }

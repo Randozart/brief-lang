@@ -111,3 +111,72 @@ Landed behind `spirv_row_cooperative: false` (ir-lowering tuning table):
   iteration → 512B coalesced per warp-load) — the successor rung. The
   knob stays OFF until that lands.
 - M1 UNREGRESSED: 0.93ms, exact gate, 2012 tests, spirv-val clean.
+
+## Rung 2 — vec4 loads inside the cooperative strided loop (2026-09-01, same session)
+
+**Result: M1 = 0.25ms min / 0.28ms avg (~120 GFLOP/s), max_rel_err = 0.000e+00.
+1.75× over the scalar cooperative rung (0.44ms), 3.4× over serial (0.93ms);
+ggml-cuda gap closed from 4.2× to ~1.2×.**
+
+### Kernel changes (src/backend/spirv/kernel.rs)
+
+- `emit_cooperative_reduce` detects vec4-eligible fields (offset%16==0,
+  count%4==0, Float element) via `collect_vec4_indices`; when ALL body fields
+  qualify, stride becomes 128 (4 elems × 32 lanes) and `repl = lane*4 + t*128`.
+- The vec4 path emits a HAND-BUILT structured loop (`begin_structured_loop` /
+  `end_structured_loop` helpers) — the Foreach machinery cannot interleave the
+  per-iteration vec4 loads. Each iteration: one `v4float` SSBO load per field
+  at `row*(K/4) + lane + t*(stride/4)`, 4 `CompositeExtract`s into synthetic
+  `__vec4_<field>_<j>` vars (`FnLowerer.vec4_component_vars`, resolved by
+  `emit_expr` without an OpLoad), then the body unrolled 4× with the loop var
+  substituted by `repl + j` on the scalar side.
+- x[] (Float[4096] at offset 8 mod 16) is NOT vec4-eligible — scalar loads
+  stay; the pairing a[4k+j]·x[4k+j] is exact by construction.
+- CRITICAL fix found on device: the `acc = 0` initialization was emitted in
+  the loop MERGE block (after the loop), wiping the accumulator before the
+  subgroup reduce → rel_err exactly 1.0. `split_at_foreach` now splits
+  kernel_stmts at the Foreach; pre-statements emit before the loop, post
+  statements (reduce + store) after.
+
+### Runtime fixes (lib/runtime/) — three pre-existing bugs that made ANY
+cooperative kernel unusable end-to-end
+
+1. **`briev_accel_download` never pulled VRAM→staging** (`briev_accel_rt.c`):
+   with the device-local working set, resident launches write the `dev_buffer`
+   in VRAM, but the download memcpy'd the STAGING window — stale data. The
+   driver comment even said the pull belongs in "briev_accel_download's tail".
+   Now calls `g_driver->download_dev` before the copy (0 = all-host fallback,
+   not an error).
+2. **Dispatch divided by a hardcoded local size** (`briev_dev_vulkan.c`,
+   `briev_dev_opencl.c`): both launches divided work items by
+   `VK_LOCAL_SIZE_X 256`, but cooperative kernels declare LocalSize 32 → 8×
+   too few workgroups. Both drivers now parse `OpExecutionMode LocalSize`
+   (opcode 16, mode 17) from the SPIR-V at create_kernel and dispatch by the
+   module's actual local size.
+3. **Runner cooperative geometry** (`runner.rs` `dispatch_geometry_stmt`):
+   emitted `(32, (n+31)/32)` — under the local_x-divided 2D semantics that is
+   32× too few workgroups (128 of 4096 rows). Now `(32, n)`: one 32-lane
+   workgroup per row. Also fixed the literal-newline-inside-C-string bug in
+   the flat path's fprintf.
+
+### Evidence protocol
+
+- Baseline A/B on device (RTX 3060, Vulkan, M=K=4096, WARMUP=5 ITERS=20,
+  interleaved runs, all runs max_rel_err = 0.000e+00):
+  | variant        | min (ms) | avg (ms) | GFLOP/s |
+  |----------------|----------|----------|---------|
+  | scalar coop    | 0.437    | 0.494    | ~68     |
+  | vec4 coop      | 0.245    | 0.281    | ~120    |
+  | ggml-cuda ref  | 0.213    | —        | ~157    |
+- spirv-val clean (vulkan1.3); 2012 lib tests green; runner runs standalone.
+- Bench dispatch note: `gemv_bench <spv> M K 1` (coop=1 → `(32, M)`) is the
+  correct harness geometry for cooperative kernels; `coop=0` dispatches
+  `(M, 1)` → `ceil(M/32)` workgroups → only M/32 rows by design.
+
+### Remaining gap to ggml (0.213ms)
+
+~1.2×. Candidates, in order: (a) x[] vec4-eligibility (align x to 16B in the
+state projection so both sides load vec4), (b) multiple K-elements per lane
+per iteration (ILP), (c) Split-K for small M. The M1 rung knob
+(`spirv_row_cooperative`) stays ON — the default path now picks vec4
+automatically when fields qualify (MAXIMUM EFFICIENT DEFAULT: no keyword).
