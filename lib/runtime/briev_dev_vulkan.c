@@ -840,8 +840,14 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
     size_t groups_x = (nx + local_n - 1) / local_n;
     if (groups_x == 0) { groups_x = 1; }
     if (ny == 0) { ny = 1; }
-                        if (verbose) fprintf(stderr, "[briev_accel/vulkan] dispatch gx=%u gy=%u (nx=%zu ny=%zu local=%zu)",                         (uint32_t)groups_x, (uint32_t)ny, nx, ny, local_n);
-    vkCmdDispatch(vk_cmd_buf, (uint32_t)groups_x, (uint32_t)ny, 1);
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] dispatch gx=%u gy=%u (nx=%zu ny=%zu local=%zu)\n", (uint32_t)groups_x, (uint32_t)ny, nx, ny, local_n);
+    // 2026-09-01 (DIAGNOSED): the Y dimension of vkCmdDispatch never took
+    // effect on this driver — dispatch (1, 64) ran only WIy=0 (verified with
+    // a gid.y probe kernel). Flatten the grid into X until root-caused.
+    {
+        size_t total_groups = groups_x * ny;
+        vkCmdDispatch(vk_cmd_buf, (uint32_t)total_groups, 1, 1);
+    }
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
         return 0;
