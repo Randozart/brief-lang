@@ -387,7 +387,6 @@ fn emit_vec4_load(
     lower: &mut FnLowerer,
     ctx: &Vec4LoopCtx,
     fname: &str,
-    loop_var: Word,
     int_ty: Word,
     ssbo: Word,
 ) -> Result<(Word, crate::backend::spirv::lower::Vec4Field), String> {
@@ -434,12 +433,11 @@ fn emit_vec4_load(
 fn emit_vec4_field_loads(
     lower: &mut FnLowerer,
     ctx: &Vec4LoopCtx,
-    loop_var: Word,
     int_ty: Word,
     ssbo: Word,
 ) -> Result<(), String> {
     for (fname, vf, _member_pos) in ctx.field_data {
-        let (v4_val, vf) = emit_vec4_load(lower, ctx, fname, loop_var, int_ty, ssbo)?;
+        let (v4_val, vf) = emit_vec4_load(lower, ctx, fname, int_ty, ssbo)?;
         let elem_ty_id = lower.builder.lower_type(&vf.elem)?;
         for jj in 0u32..4 {
             let comp = lower.builder.gen_id();
@@ -497,10 +495,10 @@ struct CoopLoopBBs {
     merge_bb: Word,
 }
 
-/// Shared operands of the structured-loop begin/end helpers: the loop
-/// variable's storage, the lowered int/bool type ids, and the trip count.
+/// Shared operands of the structured-loop begin/end helpers: the lowered
+/// int/bool type ids and the trip count. The induction variable is SSA
+/// (a header phi returned by `begin_structured_loop`), not storage.
 struct CoopLoopSig {
-    loop_var: Word,
     int_ty: Word,
     bool_ty: Word,
     groups: i64,
@@ -516,8 +514,8 @@ fn begin_structured_loop(
     // (type, init id, pre-reserved back-edge id) per loop-carried
     // accumulator; the body defines the back-edge value into that id.
     acc_phis: &[(Word, Word, Word)],
-) -> Result<(CoopLoopBBs, Vec<Word>, Word, Word), String> {
-    let CoopLoopSig { loop_var, int_ty, bool_ty, groups } = *sig;
+) -> Result<(CoopLoopBBs, Vec<Word>, Word, Word, Word, Word), String> {
+    let CoopLoopSig { int_ty, bool_ty, groups, .. } = *sig;
     let header_bb = lower.builder.gen_id();
     let body_bb = lower.builder.gen_id();
     let continue_bb = lower.builder.gen_id();
@@ -525,31 +523,32 @@ fn begin_structured_loop(
     let preheader_bb = lower.builder.gen_id();
     let cond0 = lower.builder.gen_id();
     let cond_next = lower.builder.gen_id();
+    // 2026-09-01 (P3): the induction variable is SSA — a header phi, not
+    // Function storage. Removes the per-iteration OpLoad/OpStore pair in
+    // the continue block AND every body-side load of the loop variable.
+    let loop_backedge = lower.builder.gen_id();
+    let zero = lower.builder.builder.constant_bit64(int_ty, 0);
 
-    // Loop var starts at 0.
-    let start_c = lower.builder.builder.constant_bit64(int_ty, 0);
-    lower.builder.store(loop_var, start_c);
-
-    let emit_cond = |lower: &mut FnLowerer, cond_id: Word| -> Result<(), String> {
-        let v = lower.builder.gen_id();
-        lower.builder.emit(Instruction::new(
-            spirv::Op::Load, Some(int_ty), Some(v),
-            vec![Operand::IdRef(loop_var)],
-        ));
+    let emit_cond = |lower: &mut FnLowerer, cond_id: Word, cur: Word| -> Result<(), String> {
         let end_c = lower.builder.builder.constant_bit64(int_ty, groups as u64);
         lower.builder.emit(Instruction::new(
             spirv::Op::SLessThan, Some(bool_ty), Some(cond_id),
-            vec![Operand::IdRef(v), Operand::IdRef(end_c)],
+            vec![Operand::IdRef(cur), Operand::IdRef(end_c)],
         ));
         Ok(())
     };
 
     lower.builder.builder.branch(preheader_bb);
     lower.builder.begin_block(Some(preheader_bb));
-    emit_cond(lower, cond0)?;
+    emit_cond(lower, cond0, zero)?;
     lower.builder.builder.branch(header_bb);
 
     lower.builder.begin_block(Some(header_bb));
+    let loop_phi = lower.builder.builder.phi(
+        int_ty,
+        None,
+        [(zero, preheader_bb), (loop_backedge, continue_bb)],
+    ).map_err(|e| format!("loop induction phi: {:?}", e))?;
     let cond_hdr = lower.builder.builder.phi(
         bool_ty,
         None,
@@ -577,7 +576,7 @@ fn begin_structured_loop(
     );
     lower.builder.builder.branch_conditional(cond_hdr, body_bb, merge_bb, [] as [u32; 0]);
     lower.builder.begin_block(Some(body_bb));
-    Ok((CoopLoopBBs { header_bb, continue_bb, merge_bb }, acc_ids, cond_next, cond0))
+    Ok((CoopLoopBBs { header_bb, continue_bb, merge_bb }, acc_ids, cond_next, cond0, loop_phi, loop_backedge))
 }
 
 /// Close the structured loop: continue block (increment + re-check), branch
@@ -586,38 +585,27 @@ fn end_structured_loop(
     lower: &mut FnLowerer,
     sig: &CoopLoopSig,
     bbs: &CoopLoopBBs,
+    loop_phi: Word,
+    loop_backedge: Word,
     cond_next: Word,
 ) -> Result<(), String> {
-    let CoopLoopSig { loop_var, int_ty, groups, .. } = *sig;
+    let CoopLoopSig { int_ty, groups, .. } = *sig;
     lower.builder.builder.branch(bbs.continue_bb);
     lower.builder.begin_block(Some(bbs.continue_bb));
-    let cur = lower.builder.gen_id();
-    lower.builder.emit(Instruction::new(
-        spirv::Op::Load, Some(int_ty), Some(cur),
-        vec![Operand::IdRef(loop_var)],
-    ));
+    // next = cur + 1, defined INTO the induction phi's pre-reserved
+    // back-edge id; then the next iteration's condition.
     let one = lower.builder.builder.constant_bit64(int_ty, 1);
-    let next = lower.builder.gen_id();
     lower.builder.emit(Instruction::new(
-        spirv::Op::IAdd, Some(int_ty), Some(next),
-        vec![Operand::IdRef(cur), Operand::IdRef(one)],
+        spirv::Op::IAdd, Some(int_ty), Some(loop_backedge),
+        vec![Operand::IdRef(loop_phi), Operand::IdRef(one)],
     ));
-    lower.builder.emit(Instruction::new(
-        spirv::Op::Store, None, None,
-        vec![Operand::IdRef(loop_var), Operand::IdRef(next)],
-    ));
-    let v = lower.builder.gen_id();
-    lower.builder.emit(Instruction::new(
-        spirv::Op::Load, Some(int_ty), Some(v),
-        vec![Operand::IdRef(loop_var)],
-    ));
-    let end_c = lower.builder.builder.constant_bit64(int_ty, groups as u64);
     let bool_ty = lower.builder.lower_type(&crate::ast::Type::Bits(1))?;
+    let end_c = lower.builder.builder.constant_bit64(int_ty, groups as u64);
     lower.builder.emit(Instruction::new(
         spirv::Op::SLessThan,
         Some(bool_ty),
         Some(cond_next),
-        vec![Operand::IdRef(v), Operand::IdRef(end_c)],
+        vec![Operand::IdRef(loop_backedge), Operand::IdRef(end_c)],
     ));
     lower.builder.builder.branch(bbs.header_bb);
     lower.builder.begin_block(Some(bbs.merge_bb));
@@ -650,8 +638,6 @@ fn emit_cooperative_vec4(
     shape: &KernelShape,
     item: &str,
     inner_len: u64,
-    stride: u64,
-    repl: &Expr,
 ) -> Result<(), String> {
     let ssbo = lower.ssbo_var.ok_or("cooperative vec4 without SSBO")?;
     let fbody = match shape.kernel_stmts.iter().find_map(|s| match s {
@@ -669,9 +655,35 @@ fn emit_cooperative_vec4(
         lower.emit_stmt(stmt)?;
     }
 
+    // MEASURED (plan 2026-09-01-warp-mlp-ilp): multi-vec4 ILP per lane was
+    // REFUTED at M1 occupancy — 4096 independent warps already hide latency;
+    // stride stays 128 (one vec4 pair per lane-iteration). Do not re-add
+    // per-lane ILP without a measurement at a latency-bound shape.
+    let stride: u64 = 128;
+    // lane's element set per iteration: [lane*4 + t*stride, +4).
+    // 4-aligned by construction → vec4 bases exact under >>2.
+    let lane: Expr = Expr::BinaryOp(
+        crate::ast::BinaryOpKind::BitAnd,
+        Box::new(Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None)),
+        Box::new(Expr::Decimal(31)),
+    );
+    let repl = Expr::BinaryOp(
+        crate::ast::BinaryOpKind::Add,
+        Box::new(Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Mul,
+            Box::new(lane),
+            Box::new(Expr::Decimal(4)),
+        )),
+        Box::new(Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Mul,
+            Box::new(Expr::Identifier(item.to_string())),
+            Box::new(Expr::Decimal(stride as i64)),
+        )),
+    );
+
     let ctx = Vec4LoopCtx {
         item,
-        repl,
+        repl: &repl,
         fbody: &fbody,
         field_data: &field_data,
         all_indices: &all_indices,
@@ -685,27 +697,26 @@ fn emit_cooperative_vec4(
     }
 
     let sig = CoopLoopSig {
-        loop_var: lower.vars.get(item).map(|(v, _)| *v)
-            .ok_or_else(|| format!("loop var '{}' not pre-declared", item))?,
         int_ty: lower.builder.lower_type(&crate::ast::Type::int())?,
         bool_ty: lower.builder.lower_type(&crate::ast::Type::Bits(1))?,
         groups: (inner_len / stride) as i64,
     };
 
-    let (bbs, _acc_ids, cond_next, _cond0) =
+    let (bbs, _acc_ids, cond_next, _cond0, loop_phi, loop_backedge) =
         begin_structured_loop(lower, &sig, &[])?;
 
     lower.const_vars.remove(item);
-    lower.vars.insert(item.to_string(), (sig.loop_var, crate::ast::Type::int()));
+    lower.value_vars.insert(item.to_string(), (loop_phi, crate::ast::Type::int()));
     let prev_terminated = lower.terminated;
     lower.terminated = false;
 
-    emit_vec4_field_loads(lower, &ctx, sig.loop_var, sig.int_ty, ssbo)?;
+    emit_vec4_field_loads(lower, &ctx, sig.int_ty, ssbo)?;
     for j in 0..4u32 {
         emit_vec4_unrolled_body(lower, &ctx, j)?;
     }
 
-    end_structured_loop(lower, &sig, &bbs, cond_next)?;
+    end_structured_loop(lower, &sig, &bbs, loop_phi, loop_backedge, cond_next)?;
+    lower.value_vars.remove(item);
     lower.terminated = prev_terminated;
 
     emit_coop_reduce_store(lower, &post_loop, shape)
@@ -713,7 +724,10 @@ fn emit_cooperative_vec4(
 
 /// Both-sides-vec4 FMA detection: a single `acc = acc + F1[i1] * F2[i2]`
 /// where BOTH indexed fields are vec4-loaded. Returns (acc, lhs, rhs).
-fn match_vec4_vector_fma(fbody: &[Statement], ctx: &Vec4LoopCtx) -> Option<(String, String, String)> {
+fn match_vec4_vector_fma(
+    fbody: &[Statement],
+    field_data: &[(String, crate::backend::spirv::lower::Vec4Field, usize)],
+) -> Option<(String, String, String)> {
     use crate::ast::BinaryOpKind::{Add, Mul};
     if fbody.len() != 1 {
         return None;
@@ -745,7 +759,7 @@ fn match_vec4_vector_fma(fbody: &[Statement], ctx: &Vec4LoopCtx) -> Option<(Stri
     let field_of = |e: &Expr| -> Option<String> {
         let Expr::Index(of, _) = e else { return None };
         let Expr::Identifier(n) = of.as_ref() else { return None };
-        ctx.field_data.iter().find(|(f, _, _)| f == n).map(|(f, _, _)| f.clone())
+        field_data.iter().find(|(f, _, _)| f == n).map(|(f, _, _)| f.clone())
     };
     let lhs_field = field_of(left)?;
     let rhs_field = field_of(right)?;
@@ -764,13 +778,13 @@ fn emit_cooperative_vec4_fma(
     shape: &KernelShape,
     post_loop: &[&Statement],
 ) -> Result<bool, String> {
-    let Some((acc, lhs_field, rhs_field)) = match_vec4_vector_fma(ctx.fbody, ctx) else {
+    let Some((acc, lhs_field, rhs_field)) =
+        match_vec4_vector_fma(ctx.fbody, ctx.field_data)
+    else {
         return Ok(false);
     };
     let ssbo = lower.ssbo_var.ok_or("cooperative vec4 without SSBO")?;
     let sig = CoopLoopSig {
-        loop_var: lower.vars.get(ctx.item).map(|(v, _)| *v)
-            .ok_or_else(|| format!("loop var '{}' not pre-declared", ctx.item))?,
         int_ty: lower.builder.lower_type(&crate::ast::Type::int())?,
         bool_ty: lower.builder.lower_type(&crate::ast::Type::Bits(1))?,
         groups: (ctx.inner_len / ctx.stride) as i64,
@@ -782,20 +796,20 @@ fn emit_cooperative_vec4_fma(
     // on the back edge. No per-iteration accumulator load/store.
     let acc_backedge = lower.builder.gen_id();
     let acc_zero = lower.builder.builder.constant_null(v4_ty);
-    let (bbs, acc_ids, cond_next, _cond0) = begin_structured_loop(
-        lower, &sig, &[(v4_ty, acc_zero, acc_backedge)],
-    )?;
+    let (bbs, acc_ids, cond_next, _cond0, loop_phi, loop_backedge) =
+        begin_structured_loop(lower, &sig, &[(v4_ty, acc_zero, acc_backedge)])?;
     let acc_phi = *acc_ids.first().ok_or("accumulator phi lost")?;
     lower.const_vars.remove(ctx.item);
-    lower.vars.insert(ctx.item.to_string(), (sig.loop_var, crate::ast::Type::int()));
+    lower.value_vars.insert(ctx.item.to_string(), (loop_phi, crate::ast::Type::int()));
     let prev_terminated = lower.terminated;
     lower.terminated = false;
 
-    let (lhs_val, _) = emit_vec4_load(lower, ctx, &lhs_field, sig.loop_var, sig.int_ty, ssbo)?;
-    let (rhs_val, _) = emit_vec4_load(lower, ctx, &rhs_field, sig.loop_var, sig.int_ty, ssbo)?;
+    let (lhs_val, _) = emit_vec4_load(lower, ctx, &lhs_field, sig.int_ty, ssbo)?;
+    let (rhs_val, _) = emit_vec4_load(lower, ctx, &rhs_field, sig.int_ty, ssbo)?;
     lower.builder.glsl_fma_with_id(acc_backedge, v4_ty, lhs_val, rhs_val, acc_phi);
 
-    end_structured_loop(lower, &sig, &bbs, cond_next)?;
+    end_structured_loop(lower, &sig, &bbs, loop_phi, loop_backedge, cond_next)?;
+    lower.value_vars.remove(ctx.item);
     lower.terminated = prev_terminated;
 
     // Fold the vector accumulator into the scalar accumulator the store
@@ -890,39 +904,28 @@ fn emit_cooperative_reduce(
         && vec4_indices.iter().all(|(fname, _)| {
             lower.vec4_fields.get(fname).map(|vf| vf.elem_float).unwrap_or(false)
         });
-    let stride: u64 = if use_vec4 { 128 } else { 32 };
 
-    // The strided loop REUSES the original loop-var name (it is the one
-    // pre-declared local collect_locals saw); the replacement inserts the
-    // same name as the group index — subst inserts the replacement without
-    // re-processing it, so this is safe.
+    if use_vec4 {
+        return emit_cooperative_vec4(lower, shape, &item, inner_len);
+    }
+
+    // Scalar stride (32): lane + t*32. The strided loop REUSES the original
+    // loop-var name (it is the one pre-declared local collect_locals saw);
+    // the replacement inserts the same name as the group index — subst
+    // inserts the replacement without re-processing it, so this is safe.
     let lane: Expr = Expr::BinaryOp(
         crate::ast::BinaryOpKind::BitAnd,
         Box::new(Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None)),
         Box::new(Expr::Decimal(31)),
     );
-    let lane_term = if use_vec4 {
-        Expr::BinaryOp(
-            crate::ast::BinaryOpKind::Mul,
-            Box::new(lane),
-            Box::new(Expr::Decimal(4)),
-        )
-    } else {
-        lane
-    };
     let repl = Expr::BinaryOp(
         crate::ast::BinaryOpKind::Add,
-        Box::new(lane_term),
+        Box::new(lane),
         Box::new(Expr::BinaryOp(
             crate::ast::BinaryOpKind::Mul,
             Box::new(Expr::Identifier(item.clone())),
-            Box::new(Expr::Decimal(stride as i64)),
+            Box::new(Expr::Decimal(32)),
         )),
     );
-
-    if use_vec4 {
-        emit_cooperative_vec4(lower, shape, &item, inner_len, stride, &repl)
-    } else {
-        emit_cooperative_scalar(lower, shape, &item, &fbody, inner_len, &repl)
-    }
+    emit_cooperative_scalar(lower, shape, &item, &fbody, inner_len, &repl)
 }

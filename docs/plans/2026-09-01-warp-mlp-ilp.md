@@ -62,3 +62,38 @@ Full CPU suite untouched by this leg (SPIR-V kernel emission + runtime only);
 
 - Handoff ladder row + verdict per phase; trap list if phi machinery adds
   one; plan verdict appended here.
+
+## Verdict (2026-09-01, same session — hypotheses MEASURED, both REFUTED at M1)
+
+Interleaved A/B ×4-5 (quiet runs; the box shows 2-3ms interference outliers
+on BOTH binaries — min-of-many is the metric):
+
+| variant | min (ms) | rel err |
+|---|---|---|
+| HEAD (layout leg) | 0.243 - 0.257 | 0.000e+00 |
+| ILP=2 | 0.240 - 0.247 | 0.000e+00 |
+| ILP=2 + loop-var phi | 0.242 - 0.253 | 0.000e+00 |
+| phi only (final) | 0.244 - 0.268 | 0.000e+00 |
+
+- **Warp-MLP hypothesis (P1/P2): REFUTED at M1 occupancy.** With M=4096
+  rows the dispatch is 4096 independent 32-lane warps; latency is already
+  hidden by warp parallelism, and DRAM streaming (~73-77% of practical
+  roofline) is the wall. Per-lane ILP adds nothing where warps abound.
+  The ILP machinery was REVERTED (Rule 20: a refuted hypothesis blocks the
+  fix). Do not re-add per-lane ILP without a measurement at a LATENCY-BOUND
+  shape (small M — the Split-K rung's domain, where it must be re-derived
+  on that rung's own analysis).
+- **Loop-overhead hypothesis (P3): REFUTED as a perf lever, KEPT as the
+  better shape.** The induction variable is now a header OpPhi read
+  through `lower.value_vars` (SSA value bindings resolved without a
+  storage load); the continue block computes next+condition directly into
+  the pre-reserved back-edge id. Equal time, strictly fewer instructions,
+  no Function-storage round-trips — and the machinery (pre-reserved
+  back-edge ids + `glsl_fma_with_id`) is what the vector accumulator
+  already needed.
+
+Remaining gap to ggml (~1.15×) is NOT addressable by this kernel's shape at
+M=4096. Next candidates, in order: Split-K / small-M shapes (new benchmark
+program — the current .abv bakes M=K=4096), a[] access granularity
+(aligned 128B per warp-load is already optimal), or accepting parity-band
+(~87% of ggml's rate at min).

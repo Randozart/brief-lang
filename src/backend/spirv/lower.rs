@@ -64,6 +64,10 @@ pub struct FnLowerer<'a> {
     /// reads return the constant id directly (no OpLoad; a load from a
     /// constant id is not a logical pointer).
     pub const_vars: HashMap<String, (Word, Type)>,
+    /// 2026-09-01 (warp-mlp-ilp P3): SSA VALUE bindings — a name resolved to
+    /// a definition id (loop induction phis), read without a storage load.
+    /// Checked first: the live loop-carried value beats every other binding.
+    pub value_vars: HashMap<String, (Word, Type)>,
     /// Set when the body executed a term/endprogram — callers stop
     /// branching afterwards (a block can only have one terminator).
     pub terminated: bool,
@@ -94,6 +98,7 @@ impl<'a> FnLowerer<'a> {
             consts: HashMap::new(),
             const_int_values: HashMap::new(),
             const_vars: HashMap::new(),
+            value_vars: HashMap::new(),
             terminated: false,
             vec4_fields: HashMap::new(),
             vec4_coop_components: HashMap::new(),
@@ -627,6 +632,11 @@ impl<'a> FnLowerer<'a> {
                 Ok((c, ty))
             }
             Expr::Identifier(name) => {
+                // 2026-09-01 (warp-mlp P3): SSA value bindings (induction
+                // phis) resolve without a storage round-trip.
+                if let Some((id, ty)) = self.value_vars.get(name) {
+                    return Ok((*id, ty.clone()));
+                }
                 // 2026-09-01 (cooperative vec4): pre-loaded vec4 components
                 // are synthetic variables — resolved directly without a load.
                 if let Some((id, ty)) = self.vec4_component_vars.get(name) {
