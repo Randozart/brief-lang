@@ -221,6 +221,7 @@ static void (*vkCmdPipelineBarrier)(VkCommandBuffer, uint32_t, uint32_t, uint32_
 static int (*vkEndCommandBuffer)(VkCommandBuffer) = NULL;
 static int (*vkQueueSubmit)(VkQueue, uint32_t, const void*, VkFence) = NULL;
 static int (*vkWaitForFences)(VkDevice, uint32_t, const VkFence*, uint32_t, uint64_t) = NULL;
+static int (*vkGetFenceStatus)(VkDevice, VkFence) = NULL;
 static int (*vkResetFences)(VkDevice, uint32_t, const VkFence*) = NULL;
 static int (*vkCreateFence)(VkDevice, const void*, const void*, VkFence*) = NULL;
 static void (*vkDestroyFence)(VkDevice, VkFence, const void*) = NULL;
@@ -271,6 +272,7 @@ static int load_vulkan_symbols(void) {
     LOAD(vkEndCommandBuffer);
     LOAD(vkQueueSubmit);
     LOAD(vkWaitForFences);
+    LOAD(vkGetFenceStatus);
     LOAD(vkResetFences);
     LOAD(vkCreateFence);
     LOAD(vkDestroyFence);
@@ -907,6 +909,18 @@ static int briev_dev_vulkan_launch_core(void* handle, size_t nx, size_t ny,
     if (vkQueueSubmit(vk_queue, 1, &si, k->fence) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] submit failed\n");
         return 0;
+    }
+    // 2026-09-01 (smallm-splitk P2): hybrid fence wait — spin on
+    // vkGetFenceStatus for ~50us (covers the common submit-to-execute
+    // window without a syscall wake), then fall back to the blocking wait
+    // (long kernels, contention). BRIEV_ACCEL_BLOCKING_WAIT=1 restores the
+    // pure blocking wait for A/B.
+    if (getenv("BRIEV_ACCEL_BLOCKING_WAIT") == NULL) {
+        for (int spin = 0; spin < 4000; spin++) {
+            if (vkGetFenceStatus(vk_device, k->fence) == VK_SUCCESS) {
+                return 1;
+            }
+        }
     }
     if (vkWaitForFences(vk_device, 1, &k->fence, 1, 30ULL * 1000 * 1000 * 1000) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] fence wait timed out\n");

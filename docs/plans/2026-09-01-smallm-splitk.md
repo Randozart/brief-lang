@@ -119,3 +119,21 @@ LAST member — zero-fill keeps OpenCL's table valid); the batched path
 shares `launch_core` with the sync path (`times` dispatch loop inside one
 begin/end). Bench 5th arg `batch=1`. Praetor clean, 2012 tests, RT
 self-test passed, probe scaffolding removed.
+
+## P2 — hybrid spin fence wait (2026-09-01, same session)
+
+The ~33µs fence wake is now attacked directly: `vkGetFenceStatus` spin
+(~60µs window) → blocking `vkWaitForFences` fallback
+(`BRIEV_ACCEL_BLOCKING_WAIT=1` restores pure blocking for A/B). Measured
+per-call sync, quiet runs, interleaved:
+
+| shape | blocking | **spin hybrid** |
+|---|---|---|
+| M=64 | 0.052-0.089ms | **0.022-0.025ms** |
+| M=4096 | 0.248-0.294ms | **0.227-0.230ms** |
+
+Per-call sync M=64 is now 23µs vs ggml-cuda's 16µs avg (their GPU) — the
+sync row is no longer embarrassing; the batch row (0.004ms, now 149
+GFLOP/s — the batch's single wait also spins) remains the loop-deployment
+number. CPU burn is bounded by the spin window (~60µs) before the blocking
+fallback takes over for long kernels.
