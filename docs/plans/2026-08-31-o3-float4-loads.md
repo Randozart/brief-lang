@@ -84,3 +84,46 @@ recorded. Expected effect: GEMV's a[] read is 64MB streaming — vec4
 halves the load-instruction count AND exposes 4× fewer latency slots;
 llama.cpp-class GEMV kernels live or die on exactly this. If avg does not
 improve ≥ 20%, the rung is a VERDICT entry (complexity cost not justified).
+
+---
+
+## 6. Outcome (2026-09-01, same session)
+
+Stages 1–3 landed. Ledger verdict: **~5% on GEMV (0.98 → 0.93ms) — below
+the 20% threshold.** GEMV is bandwidth-bound and its scalar loads were
+already fully coalesced; float4 cuts instruction count, not DRAM traffic.
+Kept as infrastructure (compute-bound M2 benefits; poorly-coalesced
+patterns benefit).
+
+## 7. Successor rung: subgroup-cooperative row kernels (split-K done right)
+
+The llama.cpp anchor (157.8 GFLOP/s, 83% of roofline vs our 38) settles
+the design question: their warp-per-row kernel runs ~32× more threads.
+Our one-thread-per-row serial K-chain exposes ~500-cycle memory latency
+per iteration with only 128 warps in flight.
+
+Design (frontend-driven, per the doctrine):
+
+1. **Recognition (analysis):** the foreach-reduction pattern
+   `acc = acc + f[i*K + k] * x[k]` over `k in 0..K` is a DOT-PRODUCT
+   REDUCTION — a distinct kernel shape, not a general loop. The shape
+   gains `reduction: Option<{ acc, row_index: K, inner_var }>`.
+2. **Cooperative lowering (backend):** dispatch `(lane, row)` 2D
+   (LocalSize 256 → 8 lanes-groups × 32). Each lane accumulates
+   K/256 elements with stride 256 (coalesced), then
+   `OpGroupNonUniformFAdd(Subgroup)` reduces the 32 lanes; lane 0 stores
+   y[row]. Latency hiding rises ~32×; DRAM traffic unchanged.
+3. **Determinism:** the subgroup reduction is a fixed-shape tree —
+   bit-exact across runs (unlike atomics). The two-level (subgroup +
+   workgroup) case for LocalSize > 128 needs an explicit barrier tree.
+4. **Capability gate:** OpGroupNonUniformFAdd requires Vulkan 1.1+
+   subgroups — already our floor (vulkan1.3). Subgroup size is
+   queried at runtime (NVIDIA: 32); the lowering uses the queried value
+   via a pipeline-creation constant or gl_SubgroupSize.
+
+Language surface: NONE — `.abv` programs are unchanged. The analysis
+recognizes the reduction; the backend chooses cooperative emission.
+Config knob `spirv_row_cooperative: bool` (default on once proven).
+
+Measure first: ggml-cuda's 0.213ms is the bar; success = within 2× on
+the first cut, parity as the follow-up tuning target.
