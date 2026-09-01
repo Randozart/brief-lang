@@ -186,6 +186,10 @@ static void (*vkGetPhysicalDeviceQueueFamilyProperties)(VkPhysicalDevice, uint32
 static void (*vkGetPhysicalDeviceFeatures)(VkPhysicalDevice, void*) = NULL;
 static void (*vkGetPhysicalDeviceMemoryProperties)(VkPhysicalDevice, void*) = NULL;
 static int (*vkCreateDevice)(VkPhysicalDevice, const void*, const void*, VkDevice*) = NULL;
+static int (*vkEnumerateDeviceExtensionProperties)(VkPhysicalDevice, const char*, uint32_t*, void*) = NULL;
+// 2026-09-01 (M2.2): VK_KHR_cooperative_matrix available AND enabled at
+// device creation — the tensor-core rung's driver-side gate.
+static int vk_coopmat_enabled = 0;
 static void (*vkGetDeviceQueue)(VkDevice, uint32_t, uint32_t, VkQueue*) = NULL;
 static void (*vkDestroyDevice)(VkDevice, const void*) = NULL;
 static int (*vkCreateBuffer)(VkDevice, const void*, const void*, VkBuffer*) = NULL;
@@ -237,6 +241,7 @@ static int load_vulkan_symbols(void) {
     LOAD(vkGetPhysicalDeviceFeatures);
     LOAD(vkGetPhysicalDeviceMemoryProperties);
     LOAD(vkCreateDevice);
+    LOAD(vkEnumerateDeviceExtensionProperties);
     LOAD(vkGetDeviceQueue);
     LOAD(vkDestroyDevice);
     LOAD(vkCreateBuffer);
@@ -401,15 +406,58 @@ static int briev_dev_vulkan_init(void) {
     // fails with no message). Features the device lacks stay off.
     struct { uint32_t robustBufferAccess; uint32_t f[54]; } features = {0};
     vkGetPhysicalDeviceFeatures(vk_physical_device, &features);
+    // 2026-09-01 (M2.2): enable VK_KHR_cooperative_matrix when the device
+    // exposes it — the tensor-core mma path. Probe-gated: boxes without the
+    // extension keep the exact M2.1 tiled path (the emitter's config knob
+    // decides which blob is BUILT; the device decides which blob RUNS).
+    const char* dev_extensions[2] = {0};
+    uint32_t dev_ext_count = 0;
+    {
+        uint32_t n = 0;
+        // VkExtensionProperties { char name[256]; uint32_t specVersion; }
+        static char props[64][264];
+        if (vkEnumerateDeviceExtensionProperties(vk_physical_device, NULL, &n, NULL) == 0 && n > 0) {
+            if (n > 64) { n = 64; }
+            if (vkEnumerateDeviceExtensionProperties(vk_physical_device, NULL, &n, props) == 0) {
+                for (uint32_t i = 0; i < n; i++) {
+                    if (strncmp(props[i], "VK_KHR_cooperative_matrix", 256) == 0) {
+                        dev_extensions[dev_ext_count++] = "VK_KHR_cooperative_matrix";
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // VkPhysicalDeviceVulkanMemoryModelFeatures { sType=1000211000 } — the
+    // cooperative-matrix capability requires the Vulkan memory model.
+    struct { uint32_t sType; void* pNext; uint32_t vulkanMemoryModel;
+             uint32_t vulkanMemoryModelDeviceScope;
+             uint32_t vulkanMemoryModelAvailabilityVisibilityChains; }
+        vmm_features = {0};
+    vmm_features.sType = 1000211000u;
+    vmm_features.vulkanMemoryModel = 1u;
+    vmm_features.vulkanMemoryModelDeviceScope = 1u;
+    // VkPhysicalDeviceCooperativeMatrixFeaturesKHR { sType=1000246000,
+    // pNext, cooperativeMatrix } — chained via pNext.
+    struct { uint32_t sType; void* pNext; uint32_t cooperativeMatrix; } coop_features = {0};
+    if (dev_ext_count > 0) {
+        coop_features.sType = 1000246000u;
+        coop_features.cooperativeMatrix = 1u;
+        vmm_features.pNext = &coop_features;
+    }
     VkDeviceCreateInfo dci = {0};
     dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
     dci.pEnabledFeatures = &features;
+    dci.pNext = &vmm_features;
+    dci.enabledExtensionCount = dev_ext_count;
+    dci.ppEnabledExtensionNames = dev_extensions;
     if (vkCreateDevice(vk_physical_device, &dci, NULL, &vk_device) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] vkCreateDevice failed\n");
         goto fail;
     }
+    vk_coopmat_enabled = dev_ext_count > 0;
     vkGetDeviceQueue(vk_device, vk_queue_family_index, 0, &vk_queue);
 
     VkDescriptorSetLayoutBinding binding = {0};

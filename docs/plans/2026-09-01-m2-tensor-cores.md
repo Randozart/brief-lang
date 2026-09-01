@@ -49,3 +49,34 @@ variant of the tiled kernel:
 Exact correctness at 64³ and 4096³ (sampled + identity), spirv-val with
 the extension target-env, 2012 lib tests, fallback intact when the
 extension is absent.
+
+## P0/P1 findings (2026-09-01, same session)
+
+- Driver enablement LANDED: `VK_KHR_cooperative_matrix` extension enabled at
+  device creation (probe-gated), chained
+  `VkPhysicalDeviceVulkanMemoryModelFeatures` (the coopmat capability
+  REQUIRES the Vulkan memory model) + `VkPhysicalDeviceCooperativeMatrixFeaturesKHR`.
+- SPIR-V grammar fully mapped (hand-written smoke kernel in
+  `/tmp/coop_smoke.spvasm`, spirv-val CLEAN at vulkan1.3):
+  `OpCooperativeMatrixLoadKHR <cm> <scalar-elem-ptr> <layout-const>
+  <stride-const>` — the Pointer is a SCALAR element pointer (no bitcast),
+  MemoryLayout and Stride are CONSTANT INSTRUCTIONS, optional memory
+  operand literal LAST; accumulator lives in Function storage; decorations
+  section comes BEFORE types/constants in the binary layout; block
+  dominators must appear first in block order.
+- **The blocker that reframes the rung**: `vkGetPhysicalDeviceCooperative
+  MatrixPropertiesKHR` on the 3060 lists 11 shapes — f16×f16→f16, f16×f16→f32,
+  int8→int32, fp8 — and **NO f32×f32→f32**. The smoke kernel's f32 mma is
+  rejected by the NVIDIA pipeline compiler ("NVVM compilation failed").
+- **The reframe**: tensor cores require Float16 operands (f32 accumulate).
+  That is a NUMERICS decision, and in Briev it belongs to the TYPE SYSTEM:
+  a .abv author declaring `a: Float16[K*M]` gets tensor cores automatically
+  (the typed state field is the metadata that both PERMITS the mma lowering
+  and COMMUNICATES the precision contract). The F32-typed GEMM keeps the
+  M2.1 tiled kernel (5.25 TFLOP/s, full precision). M2.2's emitter work:
+  recognize Float16-operand GEMMs → coopmat lowering (fp16-in/fp32-acc),
+  gate on the runtime's `vk_coopmat_enabled` probe (config at build time,
+  graceful CPU fallback otherwise).
+- ggml's 12.6 TFLOP/s on this card for "F32" GEMM is consistent with an
+  internal fp16/tf32 tensor-core path — i.e. the same trade we can now
+  make EXPLICIT and USER-CHOSEN through types instead of hidden.
