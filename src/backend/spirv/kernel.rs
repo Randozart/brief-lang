@@ -281,10 +281,13 @@ fn bind_work_item_index(
 /// the work-item index to `GetGlobalId#(1)` — the ROW. The lane is
 /// `GetGlobalId#(0)`, referenced inside the synthesized body.
 fn bind_work_item_row(lower: &mut FnLowerer, index_var: spirv::Word) -> Result<(), String> {
-    let (gid64, _t) = lower.emit_expr(&Expr::Call(
-        "GetGlobalId#".into(),
-        vec![Expr::Decimal(1)],
-        None,
+    // The grid is FLATTENED into X (the driver dispatches rows workgroups of
+    // 32 lanes along X only — the Y dimension proved inert on this driver),
+    // so the row is gid.x >> 5 and the lane is gid.x & 31.
+    let (gid64, _t) = lower.emit_expr(&Expr::BinaryOp(
+        crate::ast::BinaryOpKind::Shr,
+        Box::new(Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None)),
+        Box::new(Expr::Decimal(5)),
     ))?;
     lower.builder.store(index_var, gid64);
     Ok(())
@@ -314,7 +317,11 @@ fn emit_cooperative_reduce(
     // pre-declared local collect_locals saw); the replacement inserts the
     // same name as the group index — subst inserts the replacement without
     // re-processing it, so this is safe.
-    let lane: Expr = Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None);
+    let lane: Expr = Expr::BinaryOp(
+        crate::ast::BinaryOpKind::BitAnd,
+        Box::new(Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None)),
+        Box::new(Expr::Decimal(31)),
+    );
     let repl = Expr::BinaryOp(
         crate::ast::BinaryOpKind::Add,
         Box::new(lane),

@@ -1,0 +1,7 @@
+let i: Int = 0;
+let y: Float[64];
+async node d [i < 64][i == 64] {
+    y[i] = GetGlobalId#(1) as Float * 1000.0 + GetGlobalId#(0) as Float + 0.5;
+    i = i + 1;
+    term;
+};

@@ -346,8 +346,13 @@ fn expr_is_pure(expr: &Expr) -> bool {
         Expr::List(items) => items.iter().all(expr_is_pure),
         // 2026-09-01 (plan 2026-09-01-cooperative-row-kernels): the subgroup
         // reduction is a pure fixed-shape tree over the subgroup — no
-        // observable side effects, deterministic per run.
-        Expr::Call(name, args, _) if name == "SubgroupFAdd#" => {
+        // observable side effects, deterministic per run. The invocation-id
+        // builtins are pure reads too.
+        Expr::Call(name, args, _)
+            if name == "SubgroupFAdd#"
+                || name == "GetGlobalId#"
+                || name == "GetLocalId#" =>
+        {
             args.iter().all(expr_is_pure)
         }
         _ => false,

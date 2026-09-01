@@ -412,41 +412,7 @@ pub fn emit_runner(
         if let Some(k) = kidx.map(|i| &kernels[i]) {
             // KERNEL node: dispatch + counter fast-forward (the pass covers
             // every work item, so `i = N` makes the pre false next pass).
-            let mut count_c = String::new();
-            emit_scalar_read(&k.count_expr, &fields, &consts, &mut count_c)?;
-            let ci = c_ident(name);
-            out.push_str(&format!("    // kernel node '{}'\n", name));
-            out.push_str(&format!("    if ({}) {{\n", pre));
-            out.push_str(&format!("      fired = 1;\n      long long n_{} = {};\n", ci, count_c));
-            if k.cooperative {
-                // One 32-lane workgroup per row (plan 2026-09-01-
-                // cooperative-row-kernels): nx = lanes, ny = rows.
-                out.push_str(&format!(
-                    "      long long rows_{ci} = (n_{ci} + 31) / 32;\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, 32, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
-                    kidx.unwrap()
-                ));
-            } else if let Some(cols) = k.work_cols {
-                // 2D geometry (plan 2026-08-31-gpu-next §2b): cols columns ×
-                // ceil(count/cols) rows. Coverage is identical to the flat
-                // launch; the hardware routes (x, y) directly.
-                out.push_str(&format!(
-                    "      long long rows_{ci} = (n_{ci} + {cols} - 1) / {cols};\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, {cols}, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
-                    kidx.unwrap()
-                ));
-            } else {
-                out.push_str(&format!(
-                    "      if (n_{} > 0 && !briev_accel_launch_resident({}, state, n_{})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
-                    kidx.unwrap(),
-                    ci,
-                    ci
-                ));
-            }
-            out.push_str(&format!(
-                "      S_{} = n_{};\n",
-                c_ident(&k.index_var),
-                ci
-            ));
-            out.push_str("    }\n");
+            emit_kernel_node(&mut out, t, k, kidx.unwrap(), &fields, &consts);
             continue;
         }
         // HOST node: scalar body.
@@ -517,10 +483,9 @@ pub fn build_kernels(
     for name in names {
         let e = &entries[name];
         let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
-        eprintln!("DBG coop={} stmts={} red={:?}", e.shape.reduction.is_some(), e.shape.kernel_stmts.len(), e.shape.reduction.is_some());
-            let cooperative = e.shape.reduction.is_some()
-                    && crate::config_tuning::ir_lowering().spirv_row_cooperative;
-                crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
+        let cooperative = e.shape.reduction.is_some()
+            && crate::config_tuning::ir_lowering().spirv_row_cooperative;
+        crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
         out.push(RunnerKernel {
             name: name.clone(),
             spirv: sb.build()?,
@@ -589,4 +554,59 @@ mod runner_tests {
             .expect_err("unknown const must error");
         assert!(err.contains("N2"), "error must name the const: {err}");
     }
+}
+
+/// Emit one KERNEL scheduler node: the pre-condition gate, the geometry
+/// dispatch (see `dispatch_geometry_stmt`), and the counter fast-forward
+/// (the pass covers every work item, so `i = N` makes the pre false next
+/// pass).
+fn emit_kernel_node(
+    out: &mut String,
+    t: &crate::ast::top::Transaction,
+    k: &RunnerKernel,
+    kidx: usize,
+    fields: &[RunnerField],
+    consts: &std::collections::HashMap<String, Expr>,
+) {
+    let name = &t.name;
+    let mut pre = String::new();
+    emit_scalar_read(&t.contract.pre_condition, fields, consts, &mut pre)
+        .expect("kernel pre-condition lowers");
+    let mut count_c = String::new();
+    emit_scalar_read(&k.count_expr, fields, consts, &mut count_c)
+        .expect("kernel count lowers");
+    let ci = c_ident(name);
+    out.push_str(&format!("    // kernel node '{}'\n", name));
+    out.push_str(&format!("    if ({}) {{\n", pre));
+    out.push_str(&format!(
+        "      fired = 1;\n      long long n_{} = {};\n",
+        ci, count_c
+    ));
+    out.push_str(&dispatch_geometry_stmt(k, kidx, &ci));
+    out.push_str(&format!("      S_{} = n_{};\n", c_ident(&k.index_var), ci));
+    out.push_str("    }\n");
+}
+
+/// The C dispatch statement for one kernel node, by blob geometry
+/// (plan 2026-08-31-gpu-next §2b + 2026-09-01-cooperative-row-kernels):
+/// cooperative rows (32 lanes × rows), 2D cols×rows, or the flat 1D
+/// fallback. Coverage is identical in all three; only the hardware routing
+/// of the work-item id differs.
+fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
+    if k.cooperative {
+        // One 32-lane workgroup per row.
+        return format!(
+            "      long long rows_{ci} = (n_{ci} + 31) / 32;\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, 32, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\n\"); return 1; }}\n",
+            kidx
+        );
+    }
+    if let Some(cols) = k.work_cols {
+        return format!(
+            "      long long rows_{ci} = (n_{ci} + {cols} - 1) / {cols};\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, {cols}, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\n\"); return 1; }}\n",
+            kidx
+        );
+    }
+    format!(
+        "      if (n_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, n_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\n\"); return 1; }}\n"
+    )
 }

@@ -93,8 +93,21 @@ Landed behind `spirv_row_cooperative: false` (ir-lowering tuning table):
   correctly. So: recognition, synthesis, subgroup op, and dispatch each
   work in isolation; the integration of (synthesized strided foreach +
   subgroup reduce + multi-workgroup 2D) does not.
-- Next session: bisect with `_sg6`-style minimal kernels (single Fma per
-  lane, 2 workgroups) — first suspects: an id-space collision between the
-  synthesized AST emission and the O1 unroller's const rebinding, or the
-  bounds-guard selection merge interacting with the strided loop.
-- M1 is UNREGRESSED with the knob off (0.93ms, exact gate, 2012 tests).
+- **ROOT-CAUSED (same session, follow-up)**: the Y workgroup dimension of
+  vkCmdDispatch never took effect on this driver — a gid.y probe kernel
+  returned 0 for every workgroup under a (1, 64) dispatch. Every "2D"
+  launch to date had been silently running only its X workgroups (the
+  pairs 2D verification checked only the fast-forwarded counter, so this
+  went unnoticed). Workaround shipped: the cooperative grid is FLATTENED
+  into X — the kernel derives `row = gid.x >> 5`, `lane = gid.x & 31`
+  (LocalSize 32), and the runner dispatches `rows` workgroups along X.
+  The cooperative GEMV now verifies correct end-to-end (max_rel 7.3e-4,
+  within tolerance; the reduction tree changes accumulation order vs the
+  double reference).
+- **Perf verdict**: cooperative = PARITY with the serial kernel (~0.9ms),
+  not the hoped 4×. Both are latency/MLP-bound at ~75GB/s effective; the
+  remaining gap to ggml-cuda (0.213ms) needs vec4 loads INSIDE the
+  cooperative strided loop (lane handles 4 consecutive floats per
+  iteration → 512B coalesced per warp-load) — the successor rung. The
+  knob stays OFF until that lands.
+- M1 UNREGRESSED: 0.93ms, exact gate, 2012 tests, spirv-val clean.
