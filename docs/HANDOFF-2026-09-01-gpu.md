@@ -36,7 +36,8 @@ doctrine sections still accurate).
 | M1 baseline (session start) | 17.9ms | 1.9 |
 | + O2 FMA fusion | 15.5ms | 2.2 |
 | + device-local working set + LocalSize 256 | **0.89ms best-run** | **~38** |
-| + O3 float4 + cooperative (current HEAD, knob off) | 0.93ms | ~36 |
+| + O3 float4 + cooperative scalar | 0.93ms | ~36 |
+| + **vec4 inside the cooperative loop** (current HEAD, knob ON) | **0.25ms min / 0.28ms avg** | **~120** |
 | **ggml-cuda (the bar)** | **0.213ms** | **157.8** (~83% of VRAM roofline) |
 | ggml-cpu 1T | 4.4ms | 7.7 |
 
@@ -88,14 +89,12 @@ handles 4 consecutive floats per iteration), which the O3 machinery
 
 ## 5. Next steps, in order
 
-1. **Vec4 inside the cooperative strided loop** (the perf rung): the
-   lane's element set is `lane*4 + t*128 .. +3` — 4 consecutive floats per
-   lane per iteration = one vec4 load. Needs the group-load matcher to
-   accept the cooperative form (lane-call breaks the current alignment
-   proof — restructure as `base = row*K/128*...` + lane*4 so all literals
-   divide). Bar: within 2× of 0.213ms; then flip
-   `spirv_row_cooperative: true` and make it the default.
-2. **Split-K for small M** (after vec4): partition K across workgroups +
+1. **DONE (this session)**: vec4 inside the cooperative strided loop —
+   0.93ms → 0.25ms. Bar (within 2×) met and beaten; knob flipped ON by
+   default; the vec4 path is picked automatically when fields qualify.
+   Next squeeze: x[] vec4-eligibility (16B-align x in the state projection
+   so BOTH sides load vec4; x at offset 8 mod 16 stays scalar today).
+2. **Split-K for small M**: partition K across workgroups +
    reduction kernel; needs a partials surface in `.abv` (language gap —
    design before building).
 3. **`.bv` resident-launch wrapper gate** (handoff 08-31 §5.4): the
@@ -127,6 +126,22 @@ handles 4 consecutive floats per iteration), which the O3 machinery
    (3ms vs 0.9ms runs). Keep the hot path print-free.
 8. spirv-dis + a value probe beats theory: every session-level "why is it
    slow/wrong" question was answered by measurement, never by reading.
+9. **First resident launch always falls back to full-copy** — the staging
+   buffer is lazily allocated by that first full-copy launch. The fallback
+   divides work_n by the module local size now (parsed), so coverage is
+   correct for any local size; but a single-launch program still runs the
+   full-copy path (correct, PCIe-bound).
+10. **Download must pull VRAM→staging** (`briev_accel_download` →
+   `download_dev`) — with the device-local working set, results land in
+   VRAM and the host-visible staging window is STALE until pulled. Symptom
+   before the fix: rows written by the fallback launch visible, rows written
+   by resident launches zero.
+11. **Dispatch must divide by the module's LocalSize**, not a global
+   constant — cooperative kernels declare 32, flat kernels 256. Both drivers
+   parse OpExecutionMode LocalSize (opcode 16, mode 17) at create_kernel.
+12. **Bench harness geometry**: `gemv_bench <spv> M K 1` for cooperative
+   blobs — (32, M) → one 32-lane workgroup per row. (M, 1) dispatches
+   ceil(M/32) workgroups → only M/32 rows, by design.
 
 ## 7. Session-start checklist
 
