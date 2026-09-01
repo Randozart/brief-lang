@@ -21,7 +21,7 @@
 
 use super::kernel::{begin_structured_loop, end_structured_loop, CoopLoopSig};
 use super::lower::fold_consts;
-use crate::ast::{Expr, Statement, TopLevel};
+use crate::ast::{Expr, Statement, TopLevel, Type};
 use rspirv::dr::{Instruction, Operand};
 use rspirv::spirv::{self, StorageClass, Word};
 use std::collections::HashMap;
@@ -35,6 +35,7 @@ pub(crate) const REG: u64 = 4;
 
 /// The recognized naive-GEMM shape, with every literal the tiled synthesis
 /// needs. Field names stay opaque (no Briev-type knowledge).
+#[derive(Clone)]
 pub(crate) struct GemmPlan {
     pub m: i64,
     pub n: i64,
@@ -982,4 +983,253 @@ mod tests {
         );
         assert!(GemmPlan::match_stmts(&shape, &items).is_some());
     }
+}
+
+/// Tensor-operand detection: all three GEMM fields are 16-bit float arrays
+/// (the .abv author's `Float16[...]` declarations). Checked through the
+/// casting graph — never by type-name matching (rule 19).
+pub(crate) fn fields_are_f16(
+    builder: &mut super::SpirvBuilder,
+    a_elem: &Type,
+    b_elem: &Type,
+    y_elem: &Type,
+) -> bool {
+    fn is_f16(builder: &mut super::SpirvBuilder, ty: &Type) -> bool {
+        matches!(
+            builder.shape_of(ty),
+            Ok(crate::casting::graph::SpirvShape::Float { bits: 16 })
+        )
+    }
+    is_f16(builder, a_elem) && is_f16(builder, b_elem) && is_f16(builder, y_elem)
+}
+
+/// Cooperative-matrix GEMM (M2.2, plan 2026-09-01-m2-tensor-cores): one
+/// 16×16 output tile per WORKGROUP (LocalSize 32 — a single warp owns the
+/// fragment). A/B load as f16 fragments straight from the SSBO (the
+/// pointer's pointee type may mismatch the component type; the stride is
+/// in pointee units), the mma accumulates in an f32 fragment, the store
+/// converts back through OpFConvert. Grid: (M/16)*(N/16) X-flattened.
+///
+/// SPIR-V contract (mapped via the hand-written smoke kernel, spirv-val
+/// clean): Capability CooperativeMatrixKHR + VulkanMemoryModel, extension
+/// SPV_KHR_cooperative_matrix, Vulkan memory model, load/store take
+/// CONSTANT-INSTRUCTION layout + stride operands, accumulator in Function
+/// storage.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_coopmat(
+    builder: &mut super::SpirvBuilder,
+    plan: &GemmPlan,
+    ssbo: Word,
+    wgid: Word,
+    exit_bb: Word,
+    a_member: u32,
+    b_member: u32,
+    y_member: u32,
+) -> Result<(), String> {
+    use rspirv::spirv::Capability;
+
+    // Module preamble: capabilities, extensions, Vulkan memory model.
+    // (Shader is already declared by SpirvBuilder::new.)
+    builder.builder.capability(Capability::CooperativeMatrixKHR);
+    builder.builder.capability(Capability::VulkanMemoryModel);
+    builder.builder.capability(Capability::StorageBuffer16BitAccess);
+    builder.builder.extension("SPV_KHR_cooperative_matrix");
+    builder.builder.extension("SPV_KHR_vulkan_memory_model");
+    builder.builder.extension("SPV_KHR_16bit_storage");
+    builder.builder.module_mut().memory_model = Some(rspirv::dr::Instruction::new(
+        spirv::Op::MemoryModel,
+        None,
+        None,
+        vec![
+            Operand::LiteralBit32(spirv::AddressingModel::Logical as u32),
+            Operand::LiteralBit32(spirv::MemoryModel::Vulkan as u32),
+        ],
+    ));
+
+    let int_ty = builder.lower_type(&crate::ast::Type::int())?;
+    let bool_ty = builder.lower_type(&crate::ast::Type::Bits(1))?;
+    let f32_ty = builder.builder.type_float(32);
+    let f16_ty = builder.builder.type_float(16);
+    let u32_ty = builder.u32_type();
+
+    // Cooperative matrix fragment types: A(f16) B(f16) C(f32), subgroup
+    // scope, 16×16 — a supported shape on coopmat-capable NVIDIA GPUs
+    // (vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, M2.2 plan).
+    // Rows/Columns/Use/Scope must be CONSTANT-INSTRUCTION ids.
+    let scope_sub = u32_const(builder, 3); // ScopeSubgroup
+    let use_a = u32_const(builder, 0);
+    let use_b = u32_const(builder, 1);
+    let use_c = u32_const(builder, 2);
+    let cm_a16 = builder
+        .builder
+        .type_cooperative_matrix_khr(f16_ty, scope_sub, u32_ty, u32_ty, u32_ty);
+    let cm_b16 = builder
+        .builder
+        .type_cooperative_matrix_khr(f16_ty, scope_sub, u32_ty, u32_ty, u32_ty);
+    let cm_c32 = builder
+        .builder
+        .type_cooperative_matrix_khr(f32_ty, scope_sub, u32_ty, u32_ty, u32_ty);
+    let cm_c16 = builder
+        .builder
+        .type_cooperative_matrix_khr(f16_ty, scope_sub, u32_ty, u32_ty, u32_ty);
+    let _ = (use_a, use_b, use_c);
+
+    // Memory layout constant: RowMajorKHR = 0.
+    let layout_row = builder.u32_const(0);
+
+    // Grid decode: identical tier-2 pattern, 16-wide tiles.
+    let tiles_x = (plan.n / 16) as u32;
+    let wgx = builtin_comp_u(builder, wgid, 0);
+    let tiles_x_c = u32_const(builder, tiles_x);
+    let tile_n = u32_binop(builder, spirv::Op::UDiv, wgx, tiles_x_c);
+    let tile_m = u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c);
+    let s16 = u32_const(builder, 16);
+    let tm16 = u32_binop(builder, spirv::Op::IMul, tile_m, s16);
+    let tn16 = u32_binop(builder, spirv::Op::IMul, tile_n, s16);
+    let nk = u32_const(builder, plan.k as u32);
+    let a_row_elems = u32_binop(builder, spirv::Op::IMul, tm16, nk);
+
+    // f32 accumulator fragment, zero-initialized (OpConstantComposite with
+    // one scalar constituent fills the whole matrix).
+    let zero_f = builder.float_const(32, 0.0);
+    let acc_zero = builder.builder.constant_composite(cm_c32, vec![zero_f]);
+
+    // Accumulator lives in Function storage (coopmat types allocate only
+    // in Function/Private).
+    let acc_ptr_ty = builder.ptr_class(StorageClass::Function, cm_c32);
+    let acc_ptr = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::Variable,
+        Some(acc_ptr_ty),
+        Some(acc_ptr),
+        vec![Operand::StorageClass(StorageClass::Function)],
+    ));
+    builder.store(acc_ptr, acc_zero);
+
+    // kt loop: 0..K/16, accumulator carried as a loop phi.
+    let acc_backedge = builder.gen_id();
+    let sig = CoopLoopSig {
+        int_ty,
+        bool_ty,
+        groups: (plan.k / 16) as i64,
+    };
+    let (bbs, acc_ids, cond_next, _cond0, kt_phi, kt_backedge) =
+        begin_structured_loop(builder, &sig, &[(cm_c32, acc_zero, acc_backedge)])?;
+    let acc_phi = *acc_ids.first().ok_or("coopmat accumulator phi lost")?;
+
+    // A fragment: A[tm*16 + (0..15)][kt*16 + (0..15)] — pointer to the
+    // first element (half storage), stride K (in half elements), row-major.
+    let a_member_c = u32_const(builder, a_member);
+    let b_member_c = u32_const(builder, b_member);
+    let y_member_c = u32_const(builder, y_member);
+    let k_stride = u32_const(builder, plan.k as u32);
+    let n_stride = u32_const(builder, plan.n as u32);
+    let a_off = u32_binop(builder, spirv::Op::IAdd, a_row_elems, kt_phi);
+    let a_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+    let a_ptr = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::AccessChain,
+        Some(a_elem_ptr),
+        Some(a_ptr),
+        vec![
+            Operand::IdRef(ssbo),
+            Operand::IdRef(a_member_c),
+            Operand::IdRef(a_off),
+        ],
+    ));
+    let frag_a = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::CooperativeMatrixLoadKHR,
+        Some(cm_a16),
+        Some(frag_a),
+        vec![
+            Operand::IdRef(a_ptr),
+            Operand::IdRef(layout_row),
+            Operand::IdRef(k_stride),
+        ],
+    ));
+
+    // B fragment: B[kt*16 + (0..15)][tn*16 + (0..15)], stride N.
+    let b_row = u32_binop(builder, spirv::Op::IMul, kt_phi, n_stride);
+    let b_off = u32_binop(builder, spirv::Op::IAdd, b_row, tn16);
+    let b_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+    let b_ptr = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::AccessChain,
+        Some(b_elem_ptr),
+        Some(b_ptr),
+        vec![
+            Operand::IdRef(ssbo),
+            Operand::IdRef(b_member_c),
+            Operand::IdRef(b_off),
+        ],
+    ));
+    let frag_b = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::CooperativeMatrixLoadKHR,
+        Some(cm_b16),
+        Some(frag_b),
+        vec![
+            Operand::IdRef(b_ptr),
+            Operand::IdRef(layout_row),
+            Operand::IdRef(n_stride),
+        ],
+    ));
+
+    // mma: acc = A × B + acc (f32 accumulate).
+    let acc_v = builder.load(cm_c32, acc_ptr);
+    let fused = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::CooperativeMatrixMulAddKHR,
+        Some(cm_c32),
+        Some(fused),
+        vec![
+            Operand::IdRef(frag_a),
+            Operand::IdRef(frag_b),
+            Operand::IdRef(acc_v),
+        ],
+    ));
+    builder.store(acc_ptr, fused);
+
+    end_structured_loop(builder, &sig, &bbs, kt_phi, kt_backedge, cond_next)?;
+
+    // Store: convert the f32 fragment to the field's f16 component
+    // (OpFConvert is defined on cooperative matrices) and write with
+    // stride N at the tile corner.
+    let acc_final = builder.load(cm_c32, acc_ptr);
+    let frag_out = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::FConvert,
+        Some(cm_c16),
+        Some(frag_out),
+        vec![Operand::IdRef(acc_final)],
+    ));
+    let c_row = u32_binop(builder, spirv::Op::IMul, tm16, n_stride);
+    let c_off = u32_binop(builder, spirv::Op::IAdd, c_row, tn16);
+    let y_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+    let y_ptr = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::AccessChain,
+        Some(y_elem_ptr),
+        Some(y_ptr),
+        vec![
+            Operand::IdRef(ssbo),
+            Operand::IdRef(y_member_c),
+            Operand::IdRef(c_off),
+        ],
+    ));
+    builder.emit(Instruction::new(
+        spirv::Op::CooperativeMatrixStoreKHR,
+        None,
+        None,
+        vec![
+            Operand::IdRef(y_ptr),
+            Operand::IdRef(frag_out),
+            Operand::IdRef(layout_row),
+            Operand::IdRef(n_stride),
+        ],
+    ));
+
+    builder.builder.branch(exit_bb);
+    Ok(())
 }

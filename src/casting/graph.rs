@@ -1148,13 +1148,16 @@ impl CastingGraph {
             }
             SpirvTypeResolver::FloatWidth => {
                 let bits = bits_of(&["bits", "maxbits", "minbits"]).unwrap_or(32);
-                // 16-bit floats need the Float16 capability plus the
-                // shader-float16 extension surface; not part of the kernel
-                // surface today. Name it rather than silently widening.
+                // 2026-09-01 (M2.2, plan 2026-09-01-m2-tensor-cores): 16-bit
+                // floats joined the kernel surface — SSBO storage via
+                // StorageBuffer16BitAccess, tensor fragments via
+                // VK_KHR_cooperative_matrix (fp16 operands, fp32
+                // accumulate). No f16 ARITHMETIC is emitted: kernels use f16
+                // only for storage and fragments, so shaderFloat16 stays off.
                 match bits {
-                    32 | 64 => SpirvShape::Float { bits: bits as u32 },
+                    16 | 32 | 64 => SpirvShape::Float { bits: bits as u32 },
                     other => return Err(format!(
-                        "float width {} is not part of the kernel surface                          (32/64 only today) — declare the state field as                          #Float {{ !> bits: 32 }} or #Float {{ !> bits: 64 }}",
+                        "float width {} is not a kernel float width                          (16/32/64) — declare the state field as                          #Float {{ !> bits: 32 }} or #Float {{ !> bits: 64 }}",
                         other
                     )),
                 }

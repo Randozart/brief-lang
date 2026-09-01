@@ -410,7 +410,7 @@ static int briev_dev_vulkan_init(void) {
     // exposes it — the tensor-core mma path. Probe-gated: boxes without the
     // extension keep the exact M2.1 tiled path (the emitter's config knob
     // decides which blob is BUILT; the device decides which blob RUNS).
-    const char* dev_extensions[2] = {0};
+    const char* dev_extensions[4] = {0};
     uint32_t dev_ext_count = 0;
     {
         uint32_t n = 0;
@@ -437,13 +437,25 @@ static int briev_dev_vulkan_init(void) {
     vmm_features.sType = 1000211000u;
     vmm_features.vulkanMemoryModel = 1u;
     vmm_features.vulkanMemoryModelDeviceScope = 1u;
+    // VkPhysicalDevice16BitStorageAccessFeatures { sType=1000146000 } —
+    // Float16 state arrays live in the SSBO (M2.2 tensor operands).
+    struct { uint32_t sType; void* pNext; uint32_t storageBuffer16BitAccess;
+             uint32_t uniformAndStorageBuffer16BitAccess;
+             uint32_t storagePushConstant16;
+             uint32_t storageInputOutput16; } f16_features = {0};
+    f16_features.sType = 1000146000u;
+    f16_features.storageBuffer16BitAccess = 1u;
+    f16_features.uniformAndStorageBuffer16BitAccess = 1u;
+    vmm_features.pNext = &f16_features;
     // VkPhysicalDeviceCooperativeMatrixFeaturesKHR { sType=1000246000,
     // pNext, cooperativeMatrix } — chained via pNext.
     struct { uint32_t sType; void* pNext; uint32_t cooperativeMatrix; } coop_features = {0};
     if (dev_ext_count > 0) {
         coop_features.sType = 1000246000u;
         coop_features.cooperativeMatrix = 1u;
-        vmm_features.pNext = &coop_features;
+        f16_features.pNext = &coop_features;
+        dev_extensions[dev_ext_count++] = "SPV_KHR_16bit_storage";
+        dev_extensions[dev_ext_count++] = "SPV_KHR_vulkan_memory_model";
     }
     VkDeviceCreateInfo dci = {0};
     dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

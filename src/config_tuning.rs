@@ -70,6 +70,12 @@ pub struct IrLoweringSettings {
     /// wrong rows on the RTX 3060 — re-enable after the integration bug is
     /// root-caused (see the plan's outcome section).
     pub spirv_row_cooperative: bool,
+    /// 2026-09-01 (plan 2026-09-01-m2-tensor-cores): lower Float16-operand
+    /// GEMMs to VK_KHR_cooperative_matrix tensor-core fragments (fp16 in,
+    /// fp32 accumulate). Build-time choice: the TARGET device must expose
+    /// the extension, else the runtime falls back to CPU for that blob —
+    /// the exact tiled kernel stays available with the knob off.
+    pub spirv_coopmat: bool,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -149,6 +155,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_margin: 0.05,
     spirv_unroll: 16,
     spirv_row_cooperative: false,
+    spirv_coopmat: false,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -288,6 +295,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_row_cooperative", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_row_cooperative),
+        spirv_coopmat: db
+            .field_int("spirv_coopmat", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat),
     }
 }
 

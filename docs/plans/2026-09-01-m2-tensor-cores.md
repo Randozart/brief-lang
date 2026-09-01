@@ -80,3 +80,64 @@ extension is absent.
 - ggml's 12.6 TFLOP/s on this card for "F32" GEMM is consistent with an
   internal fp16/tf32 tensor-core path — i.e. the same trade we can now
   make EXPLICIT and USER-CHOSEN through types instead of hidden.
+
+## P2 findings (2026-09-01, same session) — emitter built; front door gated on a typechecker design decision
+
+**Built and unit-gated (2024 lib tests green):**
+- `spirv_coopmat` config knob (default off; `config/ir-lowering.dbvl`).
+- Driver: `VkPhysicalDevice16BitStorageAccessFeatures` chained
+  (storageBuffer16BitAccess) + the 16bit/vulkan-memory-model device
+  extensions alongside coopmat.
+- Builder: `enable_cooperative_matrix()` — capabilities (CooperativeMatrixKHR,
+  VulkanMemoryModel, StorageBuffer16BitAccess), the three extension strings,
+  and the memory-model swap GLSL450 → Vulkan (dr::Module's memory_model is
+  an Option<Instruction>; assembler writes sections by kind, so post-type
+  pushes stay in valid layout).
+- `gemm::emit_coopmat`: fragment types via
+  `type_cooperative_matrix_khr` (f16 A/B, f32 C, Subgroup scope, 16×16),
+  zero accumulator as OpConstantComposite (single scalar constituent),
+  Function-storage accumulator, kt loop with a loop-carried coopmat phi,
+  fragment loads straight from the SSBO (scalar element pointer — the
+  pointee may mismatch the component type; stride is in pointee units),
+  `OpCooperativeMatrixMulAddKHR`, `OpFConvert` to the f16 output fragment,
+  store. LocalSize 32, grid (M/16)×(N/16) X-flattened.
+- Kernel routing: GemmPlan match → field-type check (casting-graph shape
+  f16, never a name match) + knob → tensor tier; else vec4-eligible →
+  tiled; else flat. GemmPlan gained Clone.
+
+**The front door is blocked on a typechecker design decision (OPEN):**
+`Float16` state fields don't typecheck an arithmetic body —
+`resolve_binary_op_binding` finds no binding: the colon-form `op Mul:
+FMul16(#Lh, #Rh)` is documentation/authorization only; coverage comes from
+the CATEGORY's protocol binding, and Float16's category (via its `Bits`
+parent) carries no arithmetic protocol. The example program
+(`gemm_h.abv`, content preserved here) fails with "invalid operation '*'
+on type Float16".
+
+The design question for the next leg: **how do Bit-rooted numeric
+typedefs join a numeric protocol category?** Candidate: a declared
+annotation (`!> proto: "#Float";`) or inference from the declared op
+intrinsic family (FAdd16/FMul16 ⇒ #Float). Whichever is chosen must also
+seed the literal-coercion gap (`let acc: Float16 = 0.0;` → "expected
+Float16, found Float"). Example program content, ready to revive:
+
+```briev
+const M: Int = 4096;
+const N: Int = 4096;
+const K: Int = 4096;
+let i: Int = 0;
+let a: Float16[16777216];
+let b: Float16[16777216];
+let y: Float16[16777216];
+async node gemm [i < M * N][i == M * N] {
+    let acc: Float16 = 0.0;          // needs literal coercion
+    let m: Int = i / N;
+    let n: Int = i % N;
+    foreach k in 0..K {
+        acc = acc + a[m * K + k] * b[k * N + n];   // needs f16 protocol join
+    }
+    y[i] = acc;
+    i = i + 1;
+    term;
+};
+```

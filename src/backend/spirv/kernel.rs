@@ -59,13 +59,44 @@ pub fn emit_kernel(
     // Workgroup-class variables are MODULE-GLOBAL in SPIR-V (glslang emits
     // them before the function; the validator rejects them inside it —
     // found on device, plan 2026-09-01-m2-gemm).
+    // The GEMM shape match is type-agnostic; the FIELD TYPES decide the
+    // tier: Float16 operands (16-bit float shape through the casting
+    // graph) + the coopmat knob → tensor fragment kernel; Float32
+    // vec4-eligible operands → the shared-memory tiled kernel; anything
+    // else → the flat naive kernel. (Plan 2026-09-01-m2-tensor-cores.)
+    let gemm_plan = gemm::GemmPlan::match_stmts(shape, items);
+    let field_elem = |name: &str| -> Option<Type> {
+        state_fields.iter().find(|f| f.name == name)
+            .and_then(|f| match &f.ty {
+                Type::Vector(inner, _) => Some((**inner).clone()),
+                other => Some(other.clone()),
+            })
+    };
+    let gemm_tensor = gemm_plan.as_ref().map_or(false, |plan| {
+        crate::config_tuning::ir_lowering().spirv_coopmat && {
+            let (ae, be, ye) = (
+                field_elem(&plan.a_field),
+                field_elem(&plan.b_field),
+                field_elem(&plan.y_field),
+            );
+            match (ae, be, ye) {
+                (Some(ae), Some(be), Some(ye)) => {
+                    super::gemm::fields_are_f16(builder, &ae, &be, &ye)
+                }
+                _ => false,
+            }
+        }
+    });
+    // Tiled needs vec4-eligible fields (wide shared-memory staging).
     let gemm_tiled: Option<(gemm::GemmPlan, super::lower::Vec4Field, super::lower::Vec4Field, super::lower::Vec4Field)> =
-        gemm::GemmPlan::match_stmts(shape, items).and_then(|plan| {
+        if gemm_tensor { None } else {
+        gemm_plan.clone().and_then(|plan| {
             let a_v4 = vec4_fields.get(&plan.a_field)?.clone();
             let b_v4 = vec4_fields.get(&plan.b_field)?.clone();
             let y_v4 = vec4_fields.get(&plan.y_field)?.clone();
             Some((plan, a_v4, b_v4, y_v4))
-        });
+        })
+        };
     let (shared_a, shared_b) = if gemm_tiled.is_some() {
         let f32_ty = builder.lower_type(&gemm_tiled.as_ref().unwrap().1.elem)?;
         let len_c = builder.u32_const((gemm::TILE * gemm::TILE) as u32);
@@ -136,6 +167,53 @@ pub fn emit_kernel(
             Some(*var),
             vec![Operand::StorageClass(StorageClass::Function)],
         );
+    }
+
+    if let Some(plan) = &gemm_plan {
+        if gemm_tensor {
+            // Tensor tier: cooperative-matrix fragments, one 16×16 tile per
+            // warp-sized workgroup. No shared memory, no vec4 machinery.
+            let member_of = |name: &str| -> Option<usize> {
+                state_fields_sorted
+                    .iter()
+                    .position(|f| f.name == name)
+            };
+            let exit_bb = builder.gen_id();
+            let coopmat_args = (
+                ssbo_var.ok_or("gemm without SSBO")?,
+                workgroup_id_var.ok_or("gemm without WorkGroupId")?,
+                member_of(&plan.a_field).ok_or("gemm a field not in state")? as u32,
+                member_of(&plan.b_field).ok_or("gemm b field not in state")? as u32,
+                member_of(&plan.y_field).ok_or("gemm y field not in state")? as u32,
+            );
+            gemm::emit_coopmat(
+                builder,
+                plan,
+                coopmat_args.0,
+                coopmat_args.1,
+                exit_bb,
+                coopmat_args.2,
+                coopmat_args.3,
+                coopmat_args.4,
+            )?;
+            builder.begin_block(Some(exit_bb));
+            builder.ret();
+            builder.end_function();
+            let interface: Vec<Word> = [global_id_var, local_id_var, workgroup_id_var]
+                .into_iter()
+                .flatten()
+                .chain(ssbo_var.into_iter())
+                .collect();
+            builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
+            builder.add_execution_mode(
+                func_id,
+                spirv::ExecutionMode::LocalSize,
+                32,
+                1,
+                1,
+            );
+            return Ok(func_id);
+        }
     }
 
     if let (Some((plan, a_v4, _b_v4, _y_v4)), Some(shared_a), Some(shared_b)) =

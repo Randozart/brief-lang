@@ -72,6 +72,34 @@ impl SpirvBuilder {
         self
     }
 
+    /// 2026-09-01 (M2.2): switch this module to the Vulkan memory model and
+    /// declare the cooperative-matrix machinery. The coopmat capability
+    /// REQUIRES the Vulkan memory model whenever the Shader capability is
+    /// present (SPV_KHR_cooperative_matrix). Must run BEFORE body emission
+    /// is validated — the binary sections are ordered by the assembler.
+    pub fn enable_cooperative_matrix(&mut self) {
+        self.builder
+            .capability(spirv::Capability::CooperativeMatrixKHR);
+        self.builder
+            .capability(spirv::Capability::VulkanMemoryModel);
+        self.builder
+            .capability(spirv::Capability::StorageBuffer16BitAccess);
+        self.builder.extension("SPV_KHR_cooperative_matrix");
+        self.builder.extension("SPV_KHR_vulkan_memory_model");
+        self.builder.extension("SPV_KHR_16bit_storage");
+        // Replace the module's memory model instruction (new() emitted
+        // GLSL450): dr::Module holds Option<Instruction>.
+        self.builder.module_mut().memory_model = Some(rspirv::dr::Instruction::new(
+            spirv::Op::MemoryModel,
+            None,
+            None,
+            vec![
+                Operand::LiteralBit32(spirv::AddressingModel::Logical as u32),
+                Operand::LiteralBit32(spirv::MemoryModel::Vulkan as u32),
+            ],
+        ));
+    }
+
     /// Finalize module and assemble to SPIR-V binary.
     pub fn build(mut self) -> Result<Vec<u8>, String> {
         // 2026-08-23 (layout bugfix): strict validators require the globals
