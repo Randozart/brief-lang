@@ -51,7 +51,13 @@ doctrine sections still accurate).
 | naive flat lowering (M2.0, correct) | 6717ms | 20 |
 | **+ tiled synthesis (M2.1, current HEAD)** | **25.3ms min / 26.2ms batched** | **5250 (~40% of SIMT peak)** |
 | RTX 3060 SIMT fp32 peak | — | ~13000 |
-| ggml-cuda GEMM anchor | NOT YET MEASURED — `ggml_gemm_bench.c` is the open item | — |
+| **ggml-cuda GEMM anchor (SAME GPU — Device 0 = the 3060, measured)** | **10.9ms avg / 10.6ms min** | **12600** |
+
+The GEMM gap to ggml is 2.4× on identical silicon — and ggml's 12.6 TFLOP/s
+on a ~13 TFLOP/s SIMT card means they are on the TENSOR-CORE path (TF32
+mma). The gap quantifies M2.2 (VK_KHR_cooperative_matrix) precisely: that
+rung is worth up to ~2.4× and is the difference between "derived kernel,
+respectable" and "derived kernel, cuBLAS-class".
 
 Verdicts on record (full trail in the ledger): O2 KEEP (−13%, exact
 numerics), O3 VERDICT ~5% (loads were already coalesced — instruction

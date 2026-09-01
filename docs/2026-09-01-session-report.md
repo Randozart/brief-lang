@@ -100,9 +100,13 @@ columns, TILE-scaled k offsets, phi-vs-backedge stores.
 
 ## 6. Open items (in order)
 
-1. **ggml GEMM anchor** (`ggml_gemm_bench.c`) — the honest same-box row for
-   M2.1's 5.25 TFLOP/s.
-2. Same-GPU pin for the GEMV row (`CUDA_VISIBLE_DEVICES` on the ggml anchor).
+1. ✅ **ggml GEMM anchor measured** (`ggml_gemm_bench.c`, same box, Device 0
+   = the 3060): **10.9ms avg / 12,600 GFLOP/s**. Our tiled kernel is at
+   42% of ggml on identical silicon — and their 12.6 TFLOP/s on a ~13
+   TFLOP SIMT card means tensor cores (TF32 mma), so the gap IS the M2.2
+   prize.
+2. Same-GPU pin for the GEMV row (`CUDA_VISIBLE_DEVICES=0` on the gemv
+   anchor — the "20GB pair" is this box's 3060+1070Ti).
 3. M2.2 — VK_KHR_cooperative_matrix (tensor cores), gated by the tile proof.
 4. Tile-config search over the static shapes (8×8 registers, double buffering).
 5. `.bv` resident-launch wrapper gate + `brievc run x.abv` (carried over).
