@@ -110,7 +110,9 @@ pub fn compile_spirv_builder(
                 // creation ("compute pipeline failed") while the same
                 // kernel embedded in the runner worked — the two paths must
                 // never disagree again.
-                emit_kernel(&mut builder, "main", &entry.shape, program)?;
+                let cooperative = entry.shape.reduction.is_some()
+                    && crate::config_tuning::ir_lowering().spirv_row_cooperative;
+                emit_kernel(&mut builder, "main", &entry.shape, program, cooperative)?;
                 emitted.push(txn.name.clone());
             }
         }
@@ -184,6 +186,7 @@ mod tests {
             eligible: true,
             reasons: vec![],
             work_cols: None,
+            reduction: None,
         }
     }
 
@@ -279,7 +282,7 @@ mod tests {
         let analysis = analyze(&program);
         let shape = eligible_shape(&analysis).clone();
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "scale", &shape, &program)
+        emit_kernel(&mut builder, "scale", &shape, &program, false)
             .expect("kernel with real body must compile");
         let m = builder.module_ref();
 
@@ -327,7 +330,7 @@ mod tests {
         let analysis = analyze(&program);
         let shape = eligible_shape(&analysis).clone();
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "scale", &shape, &program).unwrap();
+        emit_kernel(&mut builder, "scale", &shape, &program, false).unwrap();
         let binary = builder.build().unwrap();
 
         let dir = std::env::temp_dir().join(format!("briev_spv_{}", std::process::id()));
@@ -431,7 +434,7 @@ mod tests {
         eprintln!("read_buffers={:?} scalars={:?}", reads, entry.shape.scalar_ins);
 
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "mad", &entry.shape, &program).unwrap();
+        emit_kernel(&mut builder, "mad", &entry.shape, &program, false).unwrap();
         let m = builder.module_ref();
         let access_chains = m.functions.iter()
             .flat_map(|f| f.blocks.iter())
@@ -536,10 +539,11 @@ mod tests {
             eligible: true,
             reasons: vec![],
             work_cols: None,
+            reduction: None,
         };
 
         let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
-        emit_kernel(&mut builder, "fmad", &shape, &program)
+        emit_kernel(&mut builder, "fmad", &shape, &program, false)
             .expect("float kernel must lower");
         let ops = {
             let m = builder.module_ref();
@@ -681,10 +685,11 @@ mod tests {
             eligible: true,
             reasons: vec![],
             work_cols: None,
+            reduction: None,
         };
 
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "ls", &shape, &program).unwrap();
+        emit_kernel(&mut builder, "ls", &shape, &program, false).unwrap();
         // Count inside a scope: module_ref borrows; build() consumes.
         let chain_count = {
             let m = builder.module_ref();
@@ -761,7 +766,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        let err = emit_kernel(&mut builder, "bad", &raw_shape("i", stmts, &[], &["total"]), &program)
+        let err = emit_kernel(&mut builder, "bad", &raw_shape("i", stmts, &[], &["total"]), &program, false)
             .err()
             .expect("Load#(5) must be rejected");
         assert!(err.contains("not an address expression"), "{err}");
@@ -814,7 +819,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        let err = emit_kernel(&mut builder, "wbad", &raw_shape("i", stmts, &["a"], &[]), &program)
+        let err = emit_kernel(&mut builder, "wbad", &raw_shape("i", stmts, &["a"], &[]), &program, false)
             .err()
             .expect("width mismatch must error");
         assert!(err.contains("byte-width"), "{err}");
@@ -897,7 +902,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new().with_universe(&u, 64);
-        emit_kernel(&mut builder, "tk", &raw_shape("i", stmts, &[], &["t"]), &program).unwrap();
+        emit_kernel(&mut builder, "tk", &raw_shape("i", stmts, &[], &["t"]), &program, false).unwrap();
         // The SSBO struct member must be OpTypeFloat 64 — derived from the
         // Temp typedef's Cast.Float property + bits metadata, not from names.
         let has_float64 = builder.module_ref().types_global_values.iter().any(|inst| {
@@ -948,7 +953,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["i"]), &program).unwrap();
+        emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["i"]), &program, false).unwrap();
         let int_64_signed = builder.module_ref().types_global_values.iter().any(|inst| {
             inst.class.opcode == rspirv::spirv::Op::TypeInt
                 && inst.operands.get(0)
@@ -996,7 +1001,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        let err = emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["s"]), &program)
+        let err = emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["s"]), &program, false)
             .err()
             .expect("String state must be rejected");
         assert!(err.contains("String"), "{err}");
@@ -1086,7 +1091,7 @@ mod tests {
         let analysis = analyze(&program);
         let shape = eligible_shape(&analysis).clone();
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "scale", &shape, &program).unwrap();
+        emit_kernel(&mut builder, "scale", &shape, &program, false).unwrap();
         let asm = validate_and_disassemble(&builder.build().unwrap(), "harness_scale");
 
         // Entry point: GLCompute on "scale" (spirv-dis quotes the name).
@@ -1248,9 +1253,10 @@ mod tests {
             eligible: true,
             reasons: vec![],
             work_cols: None,
+            reduction: None,
         };
         let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
-        emit_kernel(&mut builder, "main", &shape, &program).unwrap();
+        emit_kernel(&mut builder, "main", &shape, &program, false).unwrap();
         let m = builder.module_ref();
         // The vec4 type exists, and the array-of-vec4 member type carries
         // ArrayStride 16.

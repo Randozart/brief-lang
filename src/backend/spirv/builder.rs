@@ -48,6 +48,10 @@ impl SpirvBuilder {
         b.capability(spirv::Capability::Shader);
         b.capability(spirv::Capability::Int64);
         b.capability(spirv::Capability::Float64);
+        // Cooperative row kernels (plan 2026-09-01-cooperative-row-kernels):
+        // subgroup arithmetic for the dot-product reduction.
+        b.capability(spirv::Capability::GroupNonUniform);
+        b.capability(spirv::Capability::GroupNonUniformArithmetic);
         b.memory_model(spirv::AddressingModel::Logical, spirv::MemoryModel::GLSL450);
         SpirvBuilder {
             builder: b,

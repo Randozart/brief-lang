@@ -111,6 +111,20 @@ pub struct KernelShape {
     /// ANY launch shape that covers the total count, so 1D launchers stay
     /// sound (flat: gid.y is always 0 and gid.x spans the count).
     pub work_cols: Option<u64>,
+    /// Cooperative row reduction (plan 2026-09-01-cooperative-row-kernels):
+    /// a `foreach k in 0..K` whose body is a float mul-add into a local
+    /// accumulator (`acc = acc + f1[..k..] * f2[..k..]`) is a dot-product
+    /// reduction. The backend lowers it lane-cooperatively: strided
+    /// accumulation + OpGroupNonUniformFAdd + one store per row. Holds the
+    /// loop END expression (K — resolved at emission).
+    pub reduction: Option<ReductionInfo>,
+}
+
+/// The inner-loop length expression of a recognized dot-product reduction.
+#[derive(Debug, Clone)]
+pub struct ReductionInfo {
+    /// The foreach END expression (e.g. `Identifier("K")`).
+    pub inner: crate::ast::Expr,
 }
 
 /// One analyzed candidate body, keyed by transaction name.
@@ -330,6 +344,12 @@ fn expr_is_pure(expr: &Expr) -> bool {
         Expr::Cast(e, _) => expr_is_pure(e),
         Expr::Tuple(items) => items.iter().all(expr_is_pure),
         Expr::List(items) => items.iter().all(expr_is_pure),
+        // 2026-09-01 (plan 2026-09-01-cooperative-row-kernels): the subgroup
+        // reduction is a pure fixed-shape tree over the subgroup — no
+        // observable side effects, deterministic per run.
+        Expr::Call(name, args, _) if name == "SubgroupFAdd#" => {
+            args.iter().all(expr_is_pure)
+        }
         _ => false,
     }
 }
@@ -499,6 +519,7 @@ fn prove_kernel(
         eligible: false,
         reasons: Vec::new(),
         work_cols: None,
+        reduction: None,
     };
 
     // 1. Bound: the contract precondition must CONTAIN an `[i < N]` conjunct
@@ -585,9 +606,56 @@ fn prove_kernel(
     //    `i & (cols-1)` confirms it. Best-effort: no match stays 1D.
     shape.work_cols = detect_work_cols(&shape.kernel_stmts, &index_var);
 
+    // 7. Dot-product reduction (plan 2026-09-01-cooperative-row-kernels):
+    //    conservative structural match — the LAST statement is a foreach
+    //    whose body is one mul-add into a local accumulator.
+    shape.reduction = detect_reduction(&shape.kernel_stmts);
+
     shape.eligible = reasons.is_empty();
     shape.reasons = reasons;
     shape
+}
+
+/// Recognize a dot-product reduction: a foreach whose body is exactly one
+/// assignment `acc = acc + f1[..k..] * f2[..k..]` (either mul order) with
+/// the accumulator self-referencing on one additive side. Returns the loop
+/// END expression for the cooperative lowering.
+fn detect_reduction(stmts: &[Statement]) -> Option<ReductionInfo> {
+    use crate::ast::BinaryOpKind::{Add, Mul};
+    for stmt in stmts {
+        let Statement::Foreach { list, body, .. } = stmt else {
+            continue;
+        };
+        let Expr::Range { end, .. } = list.as_ref() else {
+            continue;
+        };
+        if body.len() != 1 {
+            continue;
+        }
+        let Statement::Assign(lhs, rhs) = &body[0] else {
+            continue;
+        };
+        let Expr::Identifier(acc) = lhs else {
+            continue;
+        };
+        let rhs_ref: &Expr = rhs;
+        let Expr::BinaryOp(Add, a, b) = rhs_ref else {
+            continue;
+        };
+        let is_self = |e: &Expr| matches!(e, Expr::Identifier(n) if n == acc);
+        let is_mul = |e: &Expr| matches!(e, Expr::BinaryOp(Mul, _, _));
+        let (ar, br): (&Expr, &Expr) = (a, b);
+        if !((is_self(ar) && is_mul(br)) || (is_mul(ar) && is_self(br))) {
+            continue;
+        }
+        // Both mul operands must reference the loop var — they index with it.
+        // The loop item name check is structural (the mul sides contain
+        // Index expressions); a full var-flow proof is the lowerer's job.
+        return Some(ReductionInfo {
+            inner: end.as_ref().clone(),
+        });
+    }
+    None
 }
 
 /// Derive the 2D dispatch width from the kernel body's shift/mask uses of

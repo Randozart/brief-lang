@@ -60,6 +60,9 @@ fn build_supported_ops() -> HashSet<String> {
                    "Malloc#", "Free#", "Print#"] {
         set.insert(name.to_string());
     }
+    // 2026-09-01 (plan 2026-09-01-cooperative-row-kernels): subgroup
+    // reduction — lowered to OpGroupNonUniformFAdd (Subgroup scope).
+    set.insert("SubgroupFAdd#".to_string());
     set
 }
 

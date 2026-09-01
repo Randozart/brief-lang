@@ -258,7 +258,8 @@ impl<'a> FnLowerer<'a> {
                     // Unrolled prefix: `unrolled` inlined copies. O3: when
                     // the next four iterations form an aligned group with a
                     // vec4-typed field, ONE wide load covers k..k+3.
-                    let group_match = match_vec4_fma(body, &item, &self.vec4_fields);
+                    let group_match =
+                        match_vec4_fma(body, &item, &self.vec4_fields, &self.const_int_values);
                     while k < s0 + unrolled {
                         if k % 4 == 0
                             && s0 + unrolled - k >= 4
@@ -782,6 +783,34 @@ impl<'a> FnLowerer<'a> {
 
     fn emit_intrinsic_call(&mut self, name: &str, args: &[Expr]) -> Result<(Word, Type), String> {
         match name {
+            // Cooperative row kernels (plan 2026-09-01-cooperative-row-kernels):
+            // reduce `v` across the invocation's subgroup with a fixed-shape
+            // FAdd tree — bit-exact across runs, no atomics.
+            "SubgroupFAdd#" => {
+                let (v, vty) = match args.first() {
+                    Some(e) => self.emit_expr(e)?,
+                    None => return self.err("SubgroupFAdd# needs an operand"),
+                };
+                if !self.builder.is_float_type(&vty)? {
+                    return self.err("SubgroupFAdd# is a float reduction");
+                }
+                let ty_id = self.type_id(&vty)?;
+                let res = self.builder.gen_id();
+                // Scope is IdScope — a reference to a uint constant, not a
+                // literal (spirv-val rejected the literal form).
+                let scope = self.builder.u32_const(spirv::Scope::Subgroup as u32);
+                self.builder.emit(Instruction::new(
+                    spirv::Op::GroupNonUniformFAdd,
+                    Some(ty_id),
+                    Some(res),
+                    vec![
+                        Operand::IdRef(scope),
+                        Operand::LiteralBit32(spirv::GroupOperation::Reduce as u32),
+                        Operand::IdRef(v),
+                    ],
+                ));
+                Ok((res, vty))
+            }
             "GetGlobalId#" | "GetLocalId#" => {
                 let dim = match args.first() {
                     Some(Expr::Decimal(d)) if *d >= 0 && *d <= 2 => *d as u32,
@@ -1617,6 +1646,7 @@ fn match_vec4_fma(
     body: &[Statement],
     item: &str,
     vec4_fields: &HashMap<String, Vec4Field>,
+    consts: &HashMap<String, i64>,
 ) -> Option<Vec4Group> {
     use crate::ast::BinaryOpKind::{Add, Mul};
     if body.len() != 1 {
@@ -1665,6 +1695,13 @@ fn match_vec4_fma(
     if !vf.elem_float {
         return None; // stage-2 scope: float FMA groups only
     }
+    // The alignment proof must hold STATICALLY (base literals divisible by
+    // 4 after const folding) — otherwise the vector loop would bail at emit
+    // time with no fallback left. Call nodes (GetGlobalId# etc.) fail here,
+    // which is exactly the desired conservative behavior.
+    let zeroed = subst_var(vidx, item, 0);
+    let folded = fold_consts(&zeroed, consts);
+    div4(&folded)?;
     Some(Vec4Group {
         acc: acc.clone(),
         vec_field: vfname.to_string(),
@@ -1800,7 +1837,7 @@ fn expr_var_count(e: &Expr, name: &str) -> usize {
 }
 
 /// Replace Identifier `name` with an arbitrary replacement expression.
-fn subst_var_expr(e: &Expr, name: &str, repl: &Expr) -> Expr {
+pub(crate) fn subst_var_expr(e: &Expr, name: &str, repl: &Expr) -> Expr {
     match e {
         Expr::Identifier(n) if n == name => repl.clone(),
         Expr::BinaryOp(k, l, r) => Expr::BinaryOp(
@@ -1907,5 +1944,16 @@ fn field_name_of_index(e: &Expr) -> Option<&str> {
     match e {
         Expr::Identifier(n) => Some(n),
         _ => None,
+    }
+}
+
+/// Statement-level `subst_var_expr` (cooperative kernel synthesis).
+pub(crate) fn subst_stmt_var(stmt: &Statement, name: &str, repl: &Expr) -> Statement {
+    match stmt {
+        Statement::Assign(lhs, rhs) => Statement::Assign(
+            subst_var_expr(lhs, name, repl),
+            subst_var_expr(rhs, name, repl),
+        ),
+        other => other.clone(),
     }
 }

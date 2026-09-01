@@ -62,7 +62,7 @@ impl super::LlvmBackend {
             // Entry is "main" (each offload module is self-contained; the
             // device drivers look up "main" — kernel.rs's own header note).
             let emitted =
-                crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &shape, items)
+                crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &shape, items, false)
                     .and_then(|_| sb.build());
             match emitted {
                 Ok(bytes) => blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes }),

@@ -168,6 +168,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
 
         // ── GPU ───────────────────────────────────────────────────────
         "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "SubgroupFAdd#"  => Some(Signature { name: "SubgroupFAdd#",  parameters: vec![("v", Type::float())], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
         "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
         "WorkgroupSize#" => Some(Signature { name: "WorkgroupSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
@@ -397,7 +398,10 @@ mod tests {
             "Get#", "Insert#",
             // 2026-08-14 (UOL §6b): the collection-op intrinsic forms.
             "Count#", "At#", "Slice#", "InsertAt#", "ExtractFrom#", "CopyFrom#",
-            "GetGlobalId#", "GetGlobalSize#", "GetLocalId#", "WorkgroupSize#",
+            // 2026-09-01 (plan 2026-09-01-cooperative-row-kernels): the
+        // SPIR-V backend lowers this to OpGroupNonUniformFAdd (subgroup
+        // scope) — bit-exact fixed-tree reduction, no atomics.
+        "SubgroupFAdd#",        "GetGlobalId#", "GetGlobalSize#", "GetLocalId#", "WorkgroupSize#",
             "GetGroupId#", "GetNumGroups#", "Dims#",
             "AddressOf#", "SysCall#", "SysConf#",
             "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#", "AtomicAdd#", "Fence#",

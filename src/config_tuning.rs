@@ -63,6 +63,13 @@ pub struct IrLoweringSettings {
     /// 2026-08-31 (VITRIOL GEMM comparison O1): SPIR-V kernel foreach
     /// unroll factor for constant trip counts (0 disables unrolling).
     pub spirv_unroll: u32,
+    /// 2026-09-01 (plan 2026-09-01-cooperative-row-kernels): cooperative row
+    /// kernels (lane-strided accumulation + OpGroupNonUniformFAdd). OFF by
+    /// default: the emitted kernel passes spirv-val and the minimal subgroup
+    /// probe verifies on device, but the full GEMV integration produced
+    /// wrong rows on the RTX 3060 — re-enable after the integration bug is
+    /// root-caused (see the plan's outcome section).
+    pub spirv_row_cooperative: bool,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -141,6 +148,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     accel_probe_tolerance: 0.0001,
     accel_probe_margin: 0.05,
     spirv_unroll: 16,
+    spirv_row_cooperative: false,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -276,6 +284,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_unroll", 0)
             .map(|v| v.max(0) as u32)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_unroll),
+        spirv_row_cooperative: db
+            .field_int("spirv_row_cooperative", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_row_cooperative),
     }
 }
 

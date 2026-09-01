@@ -47,6 +47,9 @@ pub struct RunnerKernel {
     /// 2D dispatch width (None = 1D). Mirrors `KernelShape::work_cols` —
     /// the runner must dispatch the SAME geometry the blob was built for.
     pub work_cols: Option<u64>,
+    /// Cooperative row kernel (plan 2026-09-01-cooperative-row-kernels):
+    /// dispatch nx = 32 lanes x ny = rows.
+    pub cooperative: bool,
 }
 
 /// The SSBO layout EXACTLY as the kernel sees it (name-sorted, real element
@@ -415,7 +418,14 @@ pub fn emit_runner(
             out.push_str(&format!("    // kernel node '{}'\n", name));
             out.push_str(&format!("    if ({}) {{\n", pre));
             out.push_str(&format!("      fired = 1;\n      long long n_{} = {};\n", ci, count_c));
-            if let Some(cols) = k.work_cols {
+            if k.cooperative {
+                // One 32-lane workgroup per row (plan 2026-09-01-
+                // cooperative-row-kernels): nx = lanes, ny = rows.
+                out.push_str(&format!(
+                    "      long long rows_{ci} = (n_{ci} + 31) / 32;\n      if (n_{ci} > 0 && !briev_accel_launch_resident_2d({}, state, 32, rows_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n",
+                    kidx.unwrap()
+                ));
+            } else if let Some(cols) = k.work_cols {
                 // 2D geometry (plan 2026-08-31-gpu-next §2b): cols columns ×
                 // ceil(count/cols) rows. Coverage is identical to the flat
                 // launch; the hardware routes (x, y) directly.
@@ -507,13 +517,18 @@ pub fn build_kernels(
     for name in names {
         let e = &entries[name];
         let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
-        crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program)?;
+        eprintln!("DBG coop={} stmts={} red={:?}", e.shape.reduction.is_some(), e.shape.kernel_stmts.len(), e.shape.reduction.is_some());
+            let cooperative = e.shape.reduction.is_some()
+                    && crate::config_tuning::ir_lowering().spirv_row_cooperative;
+                crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
         out.push(RunnerKernel {
             name: name.clone(),
             spirv: sb.build()?,
             index_var: e.shape.index_var.clone(),
             count_expr: e.shape.count_expr.clone().unwrap_or(Expr::Decimal(0)),
             work_cols: e.shape.work_cols,
+            cooperative: e.shape.reduction.is_some()
+                && crate::config_tuning::ir_lowering().spirv_row_cooperative,
         });
     }
     Ok(out)

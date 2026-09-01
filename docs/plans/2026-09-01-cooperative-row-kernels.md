@@ -73,3 +73,28 @@ ny=M workgroups.
 Bar: within 2× of 0.213ms on the first cut (≤ 0.43ms); parity is the
 follow-up tuning target (LocalSize, unroll of the strided loop).
 Before/after rows in the ledger; a miss is a VERDICT entry.
+
+## 5. Outcome (same session) — WIP, gated OFF
+
+Landed behind `spirv_row_cooperative: false` (ir-lowering tuning table):
+
+- **Working**: reduction recognition (§1); `SubgroupFAdd#` intrinsic →
+  `OpGroupNonUniformFAdd` (Subgroup scope — the scope operand is IdScope,
+  a uint CONSTANT reference, not a literal); capabilities; `LocalSize 32`
+  for cooperative kernels; runner `(32, rows)` 2D dispatch; harness coop
+  mode (`gemv_bench <spv> M K 1`).
+- **Verified on device**: the minimal subgroup probe
+  (`y[i] = SubgroupFAdd#(x[i])`, 32 lanes, 8 workgroups) returns exact
+  results — the intrinsic, scope encoding, and capability set are sound.
+- **THE OPEN BUG**: the full cooperative GEMV (strided foreach + reduce)
+  executes ONLY workgroup 0; rows ≥ 1 keep their sentinel values in the
+  download. Non-cooperative kernels with the same 2D dispatch run all
+  workgroups, and the identical blob under 1D dispatch computes row 0
+  correctly. So: recognition, synthesis, subgroup op, and dispatch each
+  work in isolation; the integration of (synthesized strided foreach +
+  subgroup reduce + multi-workgroup 2D) does not.
+- Next session: bisect with `_sg6`-style minimal kernels (single Fma per
+  lane, 2 workgroups) — first suspects: an id-space collision between the
+  synthesized AST emission and the O1 unroller's const rebinding, or the
+  bounds-guard selection merge interacting with the strided loop.
+- M1 is UNREGRESSED with the knob off (0.93ms, exact gate, 2012 tests).

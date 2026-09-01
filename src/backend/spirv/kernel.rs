@@ -17,6 +17,7 @@ use crate::ast::{Expr, Type};
 use crate::backend::spirv::builder::SpirvBuilder;
 use crate::backend::spirv::lower::{collect_locals, collect_state_fields, FnLowerer};
 use crate::analysis::accel::KernelShape;
+use crate::ast::Statement;
 
 /// Local workgroup size — matches the WorkgroupSize# intrinsic constants.
 const LOCAL_SIZE_X: u32 = 256;
@@ -27,6 +28,7 @@ pub fn emit_kernel(
     kernel_name: &str,
     shape: &KernelShape,
     items: &[crate::ast::TopLevel],
+    cooperative: bool,
 ) -> Result<Word, String> {
     let void_id = builder.lower_type(&Type::void())?;
     let func_type_id = builder.gen_id();
@@ -110,7 +112,12 @@ pub fn emit_kernel(
         lower.vars.insert(name.clone(), (*var, ty.clone()));
     }
 
-    bind_work_item_index(&mut lower, index_var, shape.work_cols);
+    if cooperative {
+        // Row = gid.y; the lane is GetGlobalId#(0) inside the body.
+        bind_work_item_row(&mut lower, index_var)?;
+    } else {
+        bind_work_item_index(&mut lower, index_var, shape.work_cols);
+    }
 
     // 2026-08-31 (plan abv-gpu-by-default): BOUNDS GUARD. The host dispatches
     // ceil(N / LocalSize) workgroups, so up to LocalSize-1 extra invocations
@@ -169,11 +176,38 @@ pub fn emit_kernel(
         lower.builder.begin_block(Some(body_bb));
     }
 
-    for stmt in &shape.kernel_stmts {
-        if lower.terminated {
-            break;
+    if cooperative {
+        let red = shape
+            .reduction
+            .as_ref()
+            .ok_or("cooperative kernel without a recognized reduction")?;
+        let inner_len = match &red.inner {
+            Expr::Identifier(name) => *lower
+                .const_int_values
+                .get(name)
+                .ok_or_else(|| format!("reduction length '{}' is not a literal const", name))?,
+            Expr::Decimal(n) => *n,
+            other => {
+                return Err(format!(
+                    "reduction length {:?} must be a literal const for the cooperative path",
+                    other
+                ))
+            }
+        };
+        if inner_len <= 0 || inner_len % 32 != 0 {
+            return Err(format!(
+                "cooperative reduction needs a length divisible by 32 (got {})",
+                inner_len
+            ));
         }
-        lower.emit_stmt(stmt)?;
+        emit_cooperative_reduce(&mut lower, shape, inner_len as u64)?;
+    } else {
+        for stmt in &shape.kernel_stmts {
+            if lower.terminated {
+                break;
+            }
+            lower.emit_stmt(stmt)?;
+        }
     }
 
     lower.builder.builder.branch(exit_bb);
@@ -188,10 +222,13 @@ pub fn emit_kernel(
         .chain(ssbo_var.into_iter())
         .collect();
     builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
+    // Cooperative row kernels (plan 2026-09-01-cooperative-row-kernels):
+    // ONE 32-lane workgroup per row — the subgroup IS the row's team.
+    let local_x = if cooperative { 32 } else { LOCAL_SIZE_X };
     builder.add_execution_mode(
         func_id,
         spirv::ExecutionMode::LocalSize,
-        LOCAL_SIZE_X,
+        local_x,
         1,
         1,
     );
@@ -237,5 +274,102 @@ fn bind_work_item_index(
     };
     let (gid64, _t) = lower.emit_expr(&idx_expr)?;
     lower.builder.store(index_var, gid64);
+    Ok(())
+}
+
+/// Cooperative row kernels (plan 2026-09-01-cooperative-row-kernels): bind
+/// the work-item index to `GetGlobalId#(1)` — the ROW. The lane is
+/// `GetGlobalId#(0)`, referenced inside the synthesized body.
+fn bind_work_item_row(lower: &mut FnLowerer, index_var: spirv::Word) -> Result<(), String> {
+    let (gid64, _t) = lower.emit_expr(&Expr::Call(
+        "GetGlobalId#".into(),
+        vec![Expr::Decimal(1)],
+        None,
+    ))?;
+    lower.builder.store(index_var, gid64);
+    Ok(())
+}
+
+/// Synthesize the cooperative body for a recognized dot-product reduction:
+/// the foreach iterates `t in 0..K/32` with the original loop var mapped to
+/// `lane + t*32` (coalesced stride), the accumulator ends in a subgroup
+/// FAdd, and the counter increment is dropped (the runner fast-forwards).
+fn emit_cooperative_reduce(
+    lower: &mut FnLowerer,
+    shape: &KernelShape,
+    inner_len: u64,
+) -> Result<(), String> {
+    // Locate the recognized foreach and its item name.
+    let mut foreach: Option<(String, Vec<Statement>)> = None;
+    for stmt in &shape.kernel_stmts {
+        if let Statement::Foreach { item, body, .. } = stmt {
+            foreach = Some((item.clone(), body.clone()));
+            break;
+        }
+    }
+    let Some((item, fbody)) = foreach else {
+        return Err("cooperative kernel lost its foreach".into());
+    };
+    // The strided loop REUSES the original loop-var name (it is the one
+    // pre-declared local collect_locals saw); the replacement inserts the
+    // same name as the group index — subst inserts the replacement without
+    // re-processing it, so this is safe.
+    let lane: Expr = Expr::Call("GetGlobalId#".into(), vec![Expr::Decimal(0)], None);
+    let repl = Expr::BinaryOp(
+        crate::ast::BinaryOpKind::Add,
+        Box::new(lane),
+        Box::new(Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Mul,
+            Box::new(Expr::Identifier(item.clone())),
+            Box::new(Expr::Decimal(32)),
+        )),
+    );
+    let new_body: Vec<Statement> = fbody
+        .iter()
+        .map(|st| crate::backend::spirv::lower::subst_stmt_var(st, &item, &repl))
+        .collect();
+
+    let groups = (inner_len / 32) as i64;
+    let synthesized = Statement::Foreach {
+        item: item.clone(),
+        list: Box::new(Expr::Range {
+            start: Box::new(Expr::Decimal(0)),
+            end: Box::new(Expr::Decimal(groups)),
+            inclusive: false,
+        }),
+        body: new_body,
+    };
+    for stmt in &shape.kernel_stmts {
+        match stmt {
+            Statement::Foreach { .. } => {
+                lower.emit_stmt(&synthesized)?;
+            }
+            // The final store: `y[i] = acc` → reduce across the subgroup.
+            Statement::Assign(lhs, Expr::Identifier(name))
+                if shape.reduction.as_ref().is_some() && lower.vars.contains_key(name) =>
+            {
+                // Only the accumulator's store is wrapped — identified by the
+                // var being a LOCAL (not the index var / a state field).
+                if *name == shape.index_var {
+                    lower.emit_stmt(stmt)?;
+                } else {
+                    let reduced = Expr::Call(
+                        "SubgroupFAdd#".into(),
+                        vec![Expr::Identifier(name.clone())],
+                        None,
+                    );
+                    lower.emit_stmt(&Statement::Assign(lhs.clone(), reduced))?;
+                }
+            }
+            // Drop the counter increment: the runner fast-forwards the
+            // counter; a cooperative row kernel does not advance it.
+            Statement::Assign(Expr::Identifier(n), _)
+                if *n == shape.index_var =>
+            {
+                continue;
+            }
+            other => lower.emit_stmt(other)?,
+        }
+    }
     Ok(())
 }
