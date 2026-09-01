@@ -39,9 +39,19 @@ doctrine sections still accurate).
 | + O3 float4 + cooperative scalar | 0.93ms | ~36 |
 | + vec4 inside the cooperative loop | 0.25ms min / 0.28ms avg | ~120 |
 | + vec4 projection layout + vector-Fma accumulator | 0.26ms min / 0.29ms avg | ~115-128 |
+| + hybrid spin fence wait (per-call sync row) | 0.228ms | 147 |
 | + **batched launches** (current HEAD, per-call = wall/ITERS) | **0.205ms** | **163 — BEATS the anchor** |
-| ggml-cuda (the bar; their 20GB CUDA GPU) | 0.213ms | 157.8 (~83% of VRAM roofline) |
+| ggml-cuda GEMV (SAME BOX — the "20GB pair" is this box's 3060+1070Ti; pin to the 3060 for the final same-GPU row) | 0.213ms | 157.8 (~83% of VRAM roofline) |
 | ggml-cpu 1T | 4.4ms | 7.7 |
+
+### GEMM ladder (4096³ fp32, plan 2026-09-01-m2-gemm)
+
+| 4096³ GEMM | time | GFLOP/s |
+|---|---|---|
+| naive flat lowering (M2.0, correct) | 6717ms | 20 |
+| **+ tiled synthesis (M2.1, current HEAD)** | **25.3ms min / 26.2ms batched** | **5250 (~40% of SIMT peak)** |
+| RTX 3060 SIMT fp32 peak | — | ~13000 |
+| ggml-cuda GEMM anchor | NOT YET MEASURED — `ggml_gemm_bench.c` is the open item | — |
 
 Verdicts on record (full trail in the ledger): O2 KEEP (−13%, exact
 numerics), O3 VERDICT ~5% (loads were already coalesced — instruction
