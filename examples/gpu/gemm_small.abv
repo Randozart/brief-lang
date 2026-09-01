@@ -1,0 +1,22 @@
+// gemm_small.abv - 64x64x64 GEMM for exact device verification (plan
+// 2026-09-01-m2-gemm M2.0).
+const M: Int = 64;
+const N: Int = 64;
+const K: Int = 64;
+
+let i: Int = 0;
+let a: Float[4096];
+let b: Float[4096];
+let y: Float[4096];
+
+async node gemm [i < M * N][i == M * N] {
+    let acc: Float = 0;
+    let m: Int = i / N;
+    let n: Int = i % N;
+    foreach k in 0..K {
+        acc = acc + a[m * K + k] * b[k * N + n];
+    }
+    y[i] = acc;
+    i = i + 1;
+    term;
+};

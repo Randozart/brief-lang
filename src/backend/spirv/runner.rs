@@ -493,8 +493,7 @@ pub fn build_kernels(
     for name in names {
         let e = &entries[name];
         let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
-        let cooperative = e.shape.reduction.is_some()
-            && crate::config_tuning::ir_lowering().spirv_row_cooperative;
+        let cooperative = crate::backend::spirv::kernel::is_cooperative_shape(&e.shape);
         crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
         out.push(RunnerKernel {
             name: name.clone(),
@@ -502,8 +501,7 @@ pub fn build_kernels(
             index_var: e.shape.index_var.clone(),
             count_expr: e.shape.count_expr.clone().unwrap_or(Expr::Decimal(0)),
             work_cols: e.shape.work_cols,
-            cooperative: e.shape.reduction.is_some()
-                && crate::config_tuning::ir_lowering().spirv_row_cooperative,
+            cooperative: crate::backend::spirv::kernel::is_cooperative_shape(&e.shape),
         });
     }
     Ok(out)

@@ -1788,20 +1788,22 @@ impl<'a> FnLowerer<'a> {
                 div4(&folded).ok_or("vec4 group lost alignment")?
             }
             None => {
-                // The loop var counts ELEMENTS (stepping 4). The vec4 group
-                // index is (base + kv)/4 = div4(base) + (kv - loop_start)/4,
-                // and (kv - loop_start) is a multiple of 4 by construction,
-                // so the /4 is a shift by 2.
+                // The loop var counts ABSOLUTE elements (stepping 4, starting
+                // at loop_start). The vec4 group index is
+                // (zeroed + kv)/4 = div4(zeroed) + kv/4 — the ANCHOR at
+                // kv = loop_start is div4(zeroed) + loop_start/4, i.e. the
+                // unrolled prefix's offset MUST be included. The old
+                // `(kv - loop_start)/4` dropped it: every runtime iteration
+                // read the vec4 block from the loop's START, re-summing the
+                // prefix and shifting the a/b pairing by the whole prefix
+                // (found via the identity-matrix probe on GEMM 64^3 —
+                // plan 2026-09-01-m2-gemm M2.0).
                 let zeroed = subst_var(&g.vec_side, item, 0);
                 let folded = fold_consts(&zeroed, &self.const_int_values);
                 let b0 = div4(&folded).ok_or("vec4 group lost alignment")?;
                 let rel = Expr::BinaryOp(
                     crate::ast::BinaryOpKind::Shr,
-                    Box::new(Expr::BinaryOp(
-                        crate::ast::BinaryOpKind::Sub,
-                        Box::new(Expr::Identifier(item.to_string())),
-                        Box::new(Expr::Decimal(loop_start as i64)),
-                    )),
+                    Box::new(Expr::Identifier(item.to_string())),
                     Box::new(Expr::Decimal(2)),
                 );
                 Expr::BinaryOp(
@@ -2018,25 +2020,69 @@ pub(crate) fn expr_references(e: &Expr, name: &str) -> bool {
 }
 
 /// Collect Index expressions in an expression tree that reference a vec4-eligible field.
-pub(crate) fn collect_vec4_indices(e: &Expr, vec4_fields: &HashMap<String, Vec4Field>, item: &str, indices: &mut Vec<(String, Expr)>) {
+pub(crate) fn collect_vec4_indices(
+    e: &Expr,
+    vec4_fields: &HashMap<String, Vec4Field>,
+    item: &str,
+    consts: &HashMap<String, i64>,
+    indices: &mut Vec<(String, Expr)>,
+) {
     match e {
         Expr::Index(obj, idx) => {
             if let Some(fname) = field_name_of_index(obj) {
-                if vec4_fields.contains_key(fname) && expr_references(idx, item) {
+                // 2026-09-01 (M2.0 hole 1, plan m2-gemm): the cooperative
+                // vec4 load derives its SSBO base as
+                // `subst(idx, item → repl) >> 2` — exact ONLY if the
+                // substituted index is 4-divisible. The collector must
+                // PROVE it: repl is 4-aligned by construction, so the
+                // substituted expr must be ≡ 0 (mod 4). `b[k*N + n]` (n
+                // arbitrary) rejects → scalar loads; `a[m*K + k]` (K a
+                // multiple of 4) proves. Without this the vec4 path read
+                // the WRONG element for GEMM's B operand — silently.
+                if vec4_fields.contains_key(fname)
+                    && expr_references(idx, item)
+                    && expr_provably_mod4_zero(idx, item, consts)
+                {
                     indices.push((fname.to_string(), (**idx).clone()));
                 }
             }
         }
         Expr::BinaryOp(_, l, r) => {
-            collect_vec4_indices(l, vec4_fields, item, indices);
-            collect_vec4_indices(r, vec4_fields, item, indices);
+            collect_vec4_indices(l, vec4_fields, item, consts, indices);
+            collect_vec4_indices(r, vec4_fields, item, consts, indices);
         }
         Expr::Call(_, args, _) => {
             for a in args {
-                collect_vec4_indices(a, vec4_fields, item, indices);
+                collect_vec4_indices(a, vec4_fields, item, consts, indices);
             }
         }
         _ => {}
+    }
+}
+
+/// Provability lattice for "this expression is ≡ 0 (mod 4) after the
+/// cooperative substitution". `item` maps to the lane/iteration replacement
+/// `lane*4 + t*stride` — 4-aligned by construction, hence Provably0. A
+/// product is Provably0 when EITHER factor is (4a·b ≡ 0); a sum needs both
+/// sides; division/modulo/calls destroy the proof (conservative Unknown).
+fn expr_provably_mod4_zero(e: &Expr, item: &str, consts: &HashMap<String, i64>) -> bool {
+    match e {
+        Expr::Identifier(name) if name == item => true,
+        Expr::Decimal(d) => d % 4 == 0,
+        Expr::Float(_) => false,
+        Expr::Identifier(name) => consts.get(name).map(|v| v % 4 == 0).unwrap_or(false),
+        Expr::BinaryOp(kind, l, r) => match kind {
+            crate::ast::BinaryOpKind::Mul => {
+                expr_provably_mod4_zero(l, item, consts)
+                    || expr_provably_mod4_zero(r, item, consts)
+            }
+            crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Sub => {
+                expr_provably_mod4_zero(l, item, consts)
+                    && expr_provably_mod4_zero(r, item, consts)
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 

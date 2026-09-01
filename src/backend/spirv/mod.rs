@@ -110,8 +110,8 @@ pub fn compile_spirv_builder(
                 // creation ("compute pipeline failed") while the same
                 // kernel embedded in the runner worked — the two paths must
                 // never disagree again.
-                let cooperative = entry.shape.reduction.is_some()
-                    && crate::config_tuning::ir_lowering().spirv_row_cooperative;
+                let cooperative =
+                    crate::backend::spirv::kernel::is_cooperative_shape(&entry.shape);
                 emit_kernel(&mut builder, "main", &entry.shape, program, cooperative)?;
                 emitted.push(txn.name.clone());
             }

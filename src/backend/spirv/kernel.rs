@@ -30,6 +30,7 @@ pub fn emit_kernel(
     items: &[crate::ast::TopLevel],
     cooperative: bool,
 ) -> Result<Word, String> {
+    let mut cooperative = cooperative;
     let void_id = builder.lower_type(&Type::void())?;
     let func_type_id = builder.gen_id();
     builder.builder.type_function_id(Some(func_type_id), void_id, []);
@@ -110,6 +111,16 @@ pub fn emit_kernel(
         .insert(shape.index_var.clone(), (index_var, Type::int()));
     for (name, var, ty) in &local_vars {
         lower.vars.insert(name.clone(), (*var, ty.clone()));
+    }
+
+    // 2026-09-01 (M2.0 hole 2, plan m2-gemm): the cooperative row form
+    // requires the item id to BE the row (y[i], a[i*K + k]). When the body
+    // DECOMPOSES the counter (m = i / N, n = i % N — a flattened 2D shape),
+    // binding row = gid>>5 would compute each output element 32x (once per
+    // lane) with a wrong work mapping. Div/mod of the index var anywhere in
+    // the kernel statements → flat path. MUST run before the binding.
+    if cooperative && kernel_stmts_decompose_counter(shape) {
+        cooperative = false;
     }
 
     if cooperative {
@@ -317,7 +328,7 @@ fn collect_dedup_vec4_indices(
     for stmt in fbody {
         if let Statement::Assign(_, rhs) = stmt {
             crate::backend::spirv::lower::collect_vec4_indices(
-                rhs, &lower.vec4_fields, item, &mut indices,
+                rhs, &lower.vec4_fields, item, &lower.const_int_values, &mut indices,
             );
         }
     }
@@ -876,6 +887,45 @@ fn emit_cooperative_scalar(
     }
     lower.emit_stmt(&synthesized)?;
     emit_coop_reduce_store(lower, &post_loop, shape)
+}
+
+/// THE cooperative-shape decision — single source of truth consumed by
+/// kernel emission AND the runner's dispatch geometry, so the two can never
+/// drift (the M2.0 bug: the blob went flat while the runner still dispatched
+/// cooperative geometry, 256x redundant work). Shape-level properties only;
+/// emission-side refinements (literal inner length, %32) keep their
+/// error-and-CPU-fallback path.
+pub(crate) fn is_cooperative_shape(shape: &KernelShape) -> bool {
+    crate::config_tuning::ir_lowering().spirv_row_cooperative
+        && shape.reduction.is_some()
+        && !kernel_stmts_decompose_counter(shape)
+}
+
+/// True when any kernel statement derives a value from the counter via
+/// division or modulo (the flattened-2D signature: `m = i / N`, `n = i %N`).
+fn kernel_stmts_decompose_counter(shape: &KernelShape) -> bool {
+    fn expr_decomposes(e: &Expr, iv: &str) -> bool {
+        match e {
+            Expr::BinaryOp(kind, l, r) => {
+                let here = matches!(kind, crate::ast::BinaryOpKind::Div | crate::ast::BinaryOpKind::Mod)
+                    && matches!(l.as_ref(), Expr::Identifier(n) if n == iv);
+                here || expr_decomposes(l, iv) || expr_decomposes(r, iv)
+            }
+            Expr::Call(_, args, _) => args.iter().any(|a| expr_decomposes(a, iv)),
+            _ => false,
+        }
+    }
+    fn stmt_decomposes(s: &Statement, iv: &str) -> bool {
+        match s {
+            Statement::Assign(_, rhs) => expr_decomposes(rhs, iv),
+            Statement::Let { expr: Some(e), .. } => expr_decomposes(e, iv),
+            Statement::Foreach { list, body, .. } => {
+                expr_decomposes(list, iv) || body.iter().any(|b| stmt_decomposes(b, iv))
+            }
+            _ => false,
+        }
+    }
+    shape.kernel_stmts.iter().any(|s| stmt_decomposes(s, &shape.index_var))
 }
 
 /// Synthesize the cooperative body for a recognized dot-product reduction:
