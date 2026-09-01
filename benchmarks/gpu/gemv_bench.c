@@ -12,7 +12,8 @@
 //   x @ i_end + 0    (K * 4 bytes)
 //   y @ x_end        (M * 4 bytes)
 //
-// Usage: gemv_bench <kernel.spv> [M] [K]
+// Usage: gemv_bench <kernel.spv> [M] [K] [coop]
+//   coop=1 → dispatch as cooperative row kernels: 32 lanes x M rows.
 //
 // Evidence rules (VITRIOL ledger): prints the config fingerprint, warm-up
 // count, steady-state iterations, min/avg/max, and GFLOP/s (2*M*K flops).
@@ -45,6 +46,7 @@ int main(int argc, char** argv) {
     }
     const uint64_t M = argc > 2 ? strtoull(argv[2], NULL, 10) : 4096;
     const uint64_t K = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
+    const int coop = argc > 4 ? atoi(argv[4]) : 0;
 
     // Load the SPIR-V blob (read from file — the harness stays reusable
     // across recompiles of the kernel).
@@ -95,7 +97,9 @@ int main(int argc, char** argv) {
     // Warm-up (JIT/pipe setup excluded from steady-state numbers).
     for (int w = 0; w < WARMUP; w++) {
         *(int64_t*)(state + off_i) = 0;
-        if (!briev_accel_launch_resident(0, state, M)) {
+        int ok = coop ? briev_accel_launch_resident_2d(0, state, 32, M)
+                      : briev_accel_launch_resident(0, state, M);
+        if (!ok) {
             fprintf(stderr, "briev: dispatch failed\n");
             return 1;
         }
@@ -125,7 +129,9 @@ int main(int argc, char** argv) {
     for (int it = 0; it < ITERS; it++) {
         *(int64_t*)(state + off_i) = 0;
         double t0 = now_ms();
-        if (!briev_accel_launch_resident(0, state, M)) {
+        int ok = coop ? briev_accel_launch_resident_2d(0, state, 32, M)
+                      : briev_accel_launch_resident(0, state, M);
+        if (!ok) {
             fprintf(stderr, "briev: dispatch failed\n");
             return 1;
         }

@@ -831,9 +831,7 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
                             0, 1, &k->desc_set, 0, NULL);
     if (k->dev_buffer != VK_NULL_HANDLE) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] 2d launch: full=%d dirty=%u\n", full_sync, n_dirty);
         if (full_sync || (n_dirty > 0 && n_dirty <= VK_BRIEV_MAX_RANGES)) {
-            if (verbose) fprintf(stderr, "[briev_accel/vulkan] recording copy staging->dev (full=%d)\n", full_sync);
             record_copy(k, 1, dirty, n_dirty);
             record_barrier(k, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
@@ -842,6 +840,7 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
     size_t groups_x = (nx + local_n - 1) / local_n;
     if (groups_x == 0) { groups_x = 1; }
     if (ny == 0) { ny = 1; }
+                        if (verbose) fprintf(stderr, "[briev_accel/vulkan] dispatch gx=%u gy=%u (nx=%zu ny=%zu local=%zu)",                         (uint32_t)groups_x, (uint32_t)ny, nx, ny, local_n);
     vkCmdDispatch(vk_cmd_buf, (uint32_t)groups_x, (uint32_t)ny, 1);
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
