@@ -18,8 +18,13 @@
 // entries below shift x/y up — that is what makes x vec4-loadable in the
 // cooperative kernel.
 //
-// Usage: gemv_bench <kernel.spv> [M] [K] [coop]
+// Usage: gemv_bench <kernel.spv> [M] [K] [coop] [batch]
 //   coop=1 → dispatch as cooperative row kernels: 32 lanes x M rows.
+//   batch=1 → steady-state loop as ONE batched submission (times=ITERS):
+//     per-call = wall/ITERS. Isolates the kernel from the per-launch fence
+//     wake (~33us) that dominates small-M per-call times (plan
+//     2026-09-01-smallm-splitk). The ledger keeps BOTH rows: per-call sync
+//     (apples-to-apples vs ggml's synchronous compute) and batched.
 //
 // Evidence rules (VITRIOL ledger): prints the config fingerprint, warm-up
 // count, steady-state iterations, min/avg/max, and GFLOP/s (2*M*K flops).
@@ -53,6 +58,7 @@ int main(int argc, char** argv) {
     const uint64_t M = argc > 2 ? strtoull(argv[2], NULL, 10) : 4096;
     const uint64_t K = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
     const int coop = argc > 4 ? atoi(argv[4]) : 0;
+    const int batch = argc > 5 ? atoi(argv[5]) : 0;
 
     // Load the SPIR-V blob (read from file — the harness stays reusable
     // across recompiles of the kernel).
@@ -136,19 +142,36 @@ int main(int argc, char** argv) {
 
     // Steady-state GPU timing.
     double gpu_min = 1e30, gpu_max = 0.0, gpu_sum = 0.0;
-    for (int it = 0; it < ITERS; it++) {
+    if (batch) {
+        // One submission carrying ITERS identical dispatches (scalars are
+        // launch-invariant: i is reset once). Per-call = wall / ITERS.
         *(int64_t*)(state + off_i) = 0;
         double t0 = now_ms();
-        int ok = coop ? briev_accel_launch_resident_2d(0, state, 32, M)
-                      : briev_accel_launch_resident(0, state, M);
+        int ok = coop
+            ? briev_accel_launch_resident_batch(0, state, 32, M, ITERS)
+            : briev_accel_launch_resident_batch(0, state, M, 1, ITERS);
+        double dt = now_ms() - t0;
         if (!ok) {
             fprintf(stderr, "briev: dispatch failed\n");
             return 1;
         }
-        double dt = now_ms() - t0;
-        gpu_sum += dt;
-        if (dt < gpu_min) gpu_min = dt;
-        if (dt > gpu_max) gpu_max = dt;
+        gpu_sum = dt;
+        gpu_min = gpu_max = dt / ITERS;
+    } else {
+        for (int it = 0; it < ITERS; it++) {
+            *(int64_t*)(state + off_i) = 0;
+            double t0 = now_ms();
+            int ok = coop ? briev_accel_launch_resident_2d(0, state, 32, M)
+                          : briev_accel_launch_resident(0, state, M);
+            if (!ok) {
+                fprintf(stderr, "briev: dispatch failed\n");
+                return 1;
+            }
+            double dt = now_ms() - t0;
+            gpu_sum += dt;
+            if (dt < gpu_min) gpu_min = dt;
+            if (dt > gpu_max) gpu_max = dt;
+        }
     }
     double gpu_avg = gpu_sum / ITERS;
     double gflop = 2.0 * (double)M * (double)K / 1e9;

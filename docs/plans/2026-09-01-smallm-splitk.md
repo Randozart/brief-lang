@@ -76,3 +76,46 @@ prior binary, min-of-many (the box throws 2-3ms interference outliers).
 
 Handoff ladder rows per phase; the ledger above is the canonical
 "everything we tried" record — update it, never rewrite it.
+
+## Verdict (2026-09-01, same session — P0/P1 executed; Split-K pre-empted)
+
+**P0 baseline** (exact correctness, quiet-run mins): M=64 sync 0.036-0.044ms
+(~12 GFLOP/s); M=256 sync 0.047-0.061ms; M=4096 sync 0.242-0.255ms.
+
+**The dispatch-floor experiment (Rule 20) pre-empted Split-K.** A trivial
+64-store kernel costs the SAME ~40µs per resident launch as the M=64 GEMV —
+the kernel's compute is invisible under the launch tax. Decomposition
+(probe, `BRIEV_ACCEL_NO_WAIT`): submit ≈ 6.7µs + fence-wake ≈ 33µs. The
+first no-wait probe attempt also proved the per-launch wait is LOAD-BEARING
+(single staging buffer reuse + one-fence-one-submission) — pipelining needs
+batching, not flag-flipping. Split-K's extra warps would attack the
+invisible µs; refuted before building.
+
+**P1' — launch batching** (the real fix): `launch_dev2d_batch` driver op —
+`times` identical dispatches recorded in ONE command buffer, ONE submit,
+ONE fence wait; `briev_accel_launch_resident_batch` in the RT (scalars sync
+once per batch; contract: launch-invariant host scalar state — true for the
+cooperative i-reset loop and the flat i=0 push). Sequential fallback for
+drivers without the op. Measured (per-call = wall/ITERS, exact correctness):
+
+| shape | per-call sync | **per-call batched** | ggml-cuda (their GPU) |
+|---|---|---|---|
+| M=64, K=4096 | 0.039-0.044ms | **0.004ms — 10×** | 0.016ms avg |
+| M=256, K=4096 | 0.047-0.061ms | (not the target; scales as M=64) | 2.29ms (their mul_mat path) |
+| M=4096 (M1) | 0.242-0.255ms | **0.205-0.206ms — 163 GFLOP/s** | 0.213ms avg |
+
+- **M1 BEATS the ggml-cuda anchor number** — on our RTX 3060 against their
+  20GB CUDA device (cross-device caveat stands, the direction is right):
+  kernel-only was already faster; the 40µs launch tax was the benchmark
+  loss. Batched per-call is now the deployment-loop row in the ledger.
+- **M=64 batched runs at the SAME 123 GFLOP/s as M=4096** — the
+  "latency-bound regime" collapses entirely once the launch tax is gone;
+  there is nothing left for Split-K to win at these shapes. The small-M
+  benchmark programs (`gemv_m64.abv`, `gemv_m256.abv`) are banked with
+  their baselines.
+
+Infra notes: driver `BrievDeviceDriver` ABI +1 op (`launch_dev2d_batch`,
+LAST member — zero-fill keeps OpenCL's table valid); the batched path
+shares `launch_core` with the sync path (`times` dispatch loop inside one
+begin/end). Bench 5th arg `batch=1`. Praetor clean, 2012 tests, RT
+self-test passed, probe scaffolding removed.

@@ -99,6 +99,14 @@ typedef struct BrievDeviceDriver {
     // Pull the device working set into the staging window (device residency
     // download). NULL → the staging window is the source of truth already.
     int (*download_dev)(void* kernel);
+    // 2026-09-01 (plan smallm-splitk): `times` identical dispatches in ONE
+    // submission (one record, one submit, one fence wait) — the per-launch
+    // fence wake (~33us measured) amortizes once per batch. Requires
+    // launch-invariant host scalar state across the batch (the caller's
+    // contract; scalars sync once, before the dispatches). NULL → the
+    // runtime falls back to `times` sequential launch_dev2d calls.
+    int (*launch_dev2d_batch)(void* kernel, size_t nx, size_t ny, uint32_t times,
+                              int full_sync, const size_t* dirty, uint32_t n_dirty);
 } BrievDeviceDriver;
 
 extern BrievDeviceDriver briev_dev_vulkan;
@@ -342,6 +350,71 @@ int briev_accel_launch_resident_2d(uint32_t idx, void* state,
     // uploaded); arrays stay device-resident until briev_accel_download.
     return g_driver->launch_dev2d(g_kernels[idx], nx, ny, full_sync,
                                   dirty, n_dirty);
+}
+
+/// Batched resident launch (plan 2026-09-01-smallm-splitk): `times`
+/// IDENTICAL dispatches in one submission. The fence wake (~33us) and the
+/// submit cost (~7us) amortize once per batch instead of once per launch —
+/// loop deployments (inference steps, benchmark iterations) see per-call
+/// cost ≈ kernel time. CONTRACT: the host's scalar state must be
+/// launch-invariant across the batch (e.g. the cooperative kernel's i=0
+/// reset); scalars sync ONCE before the dispatches. Returns 1 on success.
+int briev_accel_launch_resident_batch(uint32_t idx, void* state,
+                                      uint64_t nx, uint64_t ny, uint32_t times) {
+    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+        || g_kernels[idx] == NULL || times == 0) {
+        return 0;
+    }
+    if (g_driver->launch_dev2d_batch == NULL || g_driver->mapped == NULL
+        || g_driver->launch_dev == NULL) {
+        // Driver can't batch: sequential fallback (identical semantics).
+        for (uint32_t t = 0; t < times; t++) {
+            if (!briev_accel_launch_resident_2d(idx, state, nx, ny)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    void* mapped = g_driver->mapped(g_kernels[idx]);
+    if (mapped == NULL) {
+        for (uint32_t t = 0; t < times; t++) {
+            if (!briev_accel_launch_resident_2d(idx, state, nx, ny)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    const BrievKernelDesc* k = &g_descs[idx];
+    int full_sync = 0;
+    size_t dirty[2 * 16];
+    uint32_t n_dirty = 0;
+    if (!g_resident_seeded[idx]) {
+        full_sync = 1;
+        for (uint32_t i = 0; i < k->n_fields; i++) {
+            const BrievField* f = &k->fields[i];
+            memcpy(mapped + f->proj_offset,
+                   (const uint8_t*)state + f->host_offset,
+                   (size_t)(f->count * f->elem_bytes));
+        }
+        g_resident_seeded[idx] = 1;
+    } else {
+        // Scalars sync ONCE — the batch contract is launch-invariant scalars.
+        for (uint32_t i = 0; i < k->n_fields && n_dirty < 16; i++) {
+            const BrievField* f = &k->fields[i];
+            if (f->kind != BRIEV_FIELD_SCALAR) {
+                continue;
+            }
+            uint64_t off = f->proj_offset;
+            dirty[2 * n_dirty] = off;
+            dirty[2 * n_dirty + 1] = f->elem_bytes;
+            n_dirty++;
+            memcpy(mapped + off,
+                   (const uint8_t*)state + f->host_offset,
+                   (size_t)f->elem_bytes);
+        }
+    }
+    return g_driver->launch_dev2d_batch(g_kernels[idx], nx, ny, times, full_sync,
+                                        dirty, n_dirty);
 }
 
 /// Pull the FULL projection back to the host state (end of a resident run —

@@ -819,6 +819,11 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
                                          int full_sync, const size_t* dirty,
                                          uint32_t n_dirty);
 
+static int briev_dev_vulkan_launch_dev2d_batch(void* handle, size_t nx, size_t ny,
+                                               uint32_t times,
+                                               int full_sync, const size_t* dirty,
+                                               uint32_t n_dirty);
+
 static int briev_dev_vulkan_download_dev(void* handle);
 
 static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n) {
@@ -836,13 +841,19 @@ static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n) {
 // `full_sync` (the seed), else only the `dirty` (offset, bytes) pairs (the
 // scalar counters the host phase machine owns). Dispatch reads VRAM
 // directly; nothing crosses PCIe per launch.
-static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
-                                         int full_sync, const size_t* dirty,
-                                         uint32_t n_dirty) {
+// Shared submission core: one command buffer recording `times` identical
+// dispatches, one submit, one fence wait. times > 1 is the batched-launch
+// path (plan 2026-09-01-smallm-splitk): the per-launch fence wake (~33us
+// measured) amortizes to once per batch; requires launch-invariant host
+// scalar state (the caller's contract — scalars sync once, before the batch).
+static int briev_dev_vulkan_launch_core(void* handle, size_t nx, size_t ny,
+                                        uint32_t times,
+                                        int full_sync, const size_t* dirty,
+                                        uint32_t n_dirty) {
     BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
     int verbose = g_verbose;
     size_t local_n = k ? (k->local_x ? k->local_x : VK_LOCAL_SIZE_X) : VK_LOCAL_SIZE_X;
-    if (!k || k->buffer == VK_NULL_HANDLE) {
+    if (!k || k->buffer == VK_NULL_HANDLE || times == 0) {
         return 0;
     }
     VkCommandBufferBeginInfo bbi = {0};
@@ -872,7 +883,9 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
     // a gid.y probe kernel). Flatten the grid into X until root-caused.
     {
         size_t total_groups = groups_x * ny;
-        vkCmdDispatch(vk_cmd_buf, (uint32_t)total_groups, 1, 1);
+        for (uint32_t t = 0; t < times; t++) {
+            vkCmdDispatch(vk_cmd_buf, (uint32_t)total_groups, 1, 1);
+        }
     }
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
@@ -900,6 +913,19 @@ static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
         return 0;
     }
     return 1;
+}
+
+static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
+                                         int full_sync, const size_t* dirty,
+                                         uint32_t n_dirty) {
+    return briev_dev_vulkan_launch_core(handle, nx, ny, 1, full_sync, dirty, n_dirty);
+}
+
+static int briev_dev_vulkan_launch_dev2d_batch(void* handle, size_t nx, size_t ny,
+                                               uint32_t times,
+                                               int full_sync, const size_t* dirty,
+                                               uint32_t n_dirty) {
+    return briev_dev_vulkan_launch_core(handle, nx, ny, times, full_sync, dirty, n_dirty);
 }
 
 static void briev_dev_vulkan_destroy_kernel(void* handle) {
@@ -990,4 +1016,5 @@ BrievDeviceDriver briev_dev_vulkan = {
     briev_dev_vulkan_launch_dev,
     briev_dev_vulkan_launch_dev2d,
     briev_dev_vulkan_download_dev,
+    briev_dev_vulkan_launch_dev2d_batch,
 };

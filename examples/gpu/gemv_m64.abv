@@ -1,0 +1,19 @@
+// gemv_m64.abv - M=64, K=4096: the latency-bound small-M shape (plan
+// 2026-09-01-smallm-splitk). 64 cooperative row warps on a 28-SM GPU.
+const M: Int = 64;
+const K: Int = 4096;
+
+let i: Int = 0;
+let a: Float[262144];
+let x: Float[4096];
+let y: Float[64];
+
+async node gemv [i < M][i == M] {
+    let acc: Float = 0;
+    foreach k in 0..K {
+        acc = acc + a[i * K + k] * x[k];
+    }
+    y[i] = acc;
+    i = i + 1;
+    term;
+};
