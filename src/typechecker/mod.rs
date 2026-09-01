@@ -2318,6 +2318,91 @@ fn literal_fits_sized(ty: &Type, expr: &Expr, universe: &TypeUniverse) -> bool {
     value_fits_width(v, *w, unsigned)
 }
 
+/// 2026-09-01 (plan float16-float-join-and-purge): does a Float literal
+/// construct this narrow FLOAT-category type? True when the target's
+/// category is Float AND the literal round-trips through the target width
+/// exactly (f32→f16→f32 for 16-bit). The float twin of the int
+/// width-admission: the precision contract narrows explicitly.
+fn float_literal_fits(
+    ty: &Type,
+    expr: &Expr,
+    universe: &crate::type_universe::TypeUniverse,
+) -> bool {
+    // Bit-rooted flexible form is not a float target.
+    if matches!(ty, Type::Bits(_)) {
+        return false;
+    }
+    let Some(v) = expr_literal_f32(expr) else {
+        return false;
+    };
+    // Target width from the type's OWN bits metadata (the MaxBits ladder —
+    // the same key the casting graph's FloatWidth resolver reads).
+    let bits = ty.universe_key().and_then(|k| universe.get(k)).and_then(|rt| {
+        rt.properties.iter().find_map(|(k, pv)| match (k.as_str(), pv) {
+            ("bits", crate::ast::PropertyValue::Int(n))
+            | ("maxbits", crate::ast::PropertyValue::Int(n)) => Some(*n as u32),
+            _ => None,
+        })
+    });
+    match bits {
+        // 16-bit target: f32→f16→f32 round-trip must be exact.
+        Some(16) => f32_fits_f16(v),
+        // 32/64-bit float targets admit every f32 literal; unknown → the
+        // primordial f32 default admits it too.
+        _ => true,
+    }
+}
+
+/// The literal's f32 value (Float literals are stored as f64; the kernel
+/// surface and SSBO storage are f32 — the admission gate checks the f32
+/// form, which is what actually reaches the buffer).
+fn expr_literal_f32(e: &Expr) -> Option<f32> {
+    match e {
+        Expr::Float(v) => Some(*v as f32),
+        _ => None,
+    }
+}
+
+/// f32 → f16 → f32 round-trip exactness via IEEE-754 binary16 encoding
+/// (round-to-nearest-even), no NaN/Inf subtleties for literals: NaN/Inf
+/// literals pass through losslessly too.
+fn f32_fits_f16(v: f32) -> bool {
+    let bits = v.to_bits();
+    let sign = (bits >> 16) & 0x8000;
+    let exp = ((bits >> 23) & 0xff) as i32;
+    let mant = bits & 0x007f_ffff;
+    // NaN: exponent all ones (255), mantissa nonzero — representable.
+    if exp == 255 {
+        return mant != 0;
+    }
+    // ±Inf: representable.
+    if exp == 255 {
+        return true;
+    }
+    let unbiased = exp - 127;
+    if unbiased > 15 {
+        return false; // overflow → Inf in f16
+    }
+    if unbiased >= -14 {
+        // Normal range: f16 mantissa is 10 bits; f32 mantissa is 23.
+        // Exact iff the low 13 bits are zero (or the value is a f16
+        // mantissa pattern).
+        return mant & 0x0000_1fff == 0;
+    }
+    // Subnormal f16 range: -24 <= unbiased <= -15 (2^-24 smallest subnormal).
+    if unbiased < -24 {
+        return v == 0.0; // underflows to zero — only exact for ±0
+    }
+    // Subnormal: the implicit leading bit shifts the mantissa right.
+    let shift = -unbiased - 10; // bits lost from the f32 mantissa
+    // The value is exact iff the dropped bits are all zero.
+    if shift >= 23 {
+        return v == 0.0;
+    }
+    let lost = mant & ((1u32 << shift) - 1);
+    lost == 0 // the sign bit always survives the round trip
+}
+
 fn decimal_value(e: &Expr) -> Option<i64> {
     match e {
         Expr::Decimal(n) => i64::try_from(*n).ok(),
@@ -2878,9 +2963,27 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                     }
                     _ => false,
                 };
+                // 2026-09-01 (plan float16-float-join-and-purge): a Float
+                // literal coerces into a FLOAT-category narrow type when it
+                // round-trips through the target width exactly (`let acc:
+                // Float16 = 0.0;`) — the float twin of the int width
+                // admission. Broader literals are rejected: the precision
+                // contract narrows explicitly, never silently.
+                let float_literal = match (declared, expr.as_ref()) {
+                    (t, Some(e @ Expr::Float(_))) => {
+                        // Category gate first: only FLOAT-category targets
+                        // admit float literals (a hypothetical `FakeInt16`
+                        // must not).
+                        let (cat, _) = ctx
+                            .casting_graph
+                            .type_to_protocol(ctx.universe, t);
+                        cat == "Float" && float_literal_fits(t, e, ctx.universe)
+                    }
+                    _ => false,
+                };
                 // 2026-08-22 (Phase 3): structural sums admit their members
                 // (`let v: Int | String = 5`) via types_compatible.
-                let compatible = if vector_literal || sized_literal {
+                let compatible = if vector_literal || sized_literal || float_literal {
                     true
                 } else if types_compatible(declared, &inferred, ctx) {
                     true
@@ -8146,4 +8249,32 @@ defn poke(m: Meter) -> Bool { term m.bump(3); };
 
 
 
+}
+
+#[cfg(test)]
+mod float16_join_tests {
+    //! Float16 ↔ Float category join (plan float16-float-join-and-purge):
+    //! literal admission gates + the f16 round-trip exactness function.
+
+    #[test]
+    fn f16_round_trip_exactness_table() {
+        use super::f32_fits_f16;
+        // Exact in f16: zero, small halves/quarters, powers of two.
+        assert!(f32_fits_f16(0.0));
+        assert!(f32_fits_f16(-0.0));
+        assert!(f32_fits_f16(1.5));
+        assert!(f32_fits_f16(0.25));
+        assert!(f32_fits_f16(2048.0));
+        assert!(f32_fits_f16(-65504.0)); // f16 max finite
+        // 1e-4: normal-range exponent but 21 mantissa bits — NOT exact.
+        assert!(!f32_fits_f16(1.0e-4));
+        // Overflow: f16 max is 65504.
+        assert!(!f32_fits_f16(65536.0));
+        // Mantissa loss: pi's f32 mantissa does not fit 10 bits.
+        assert!(!f32_fits_f16(std::f32::consts::PI));
+        // Underflow below the smallest f16 subnormal (2^-24).
+        assert!(!f32_fits_f16(1.0e-8));
+        // The smallest f16 subnormal IS exact.
+        assert!(f32_fits_f16(2.0f32.powi(-24)));
+    }
 }

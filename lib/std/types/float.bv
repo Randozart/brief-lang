@@ -6,15 +6,26 @@
 //
 // 2026-07-26: Updated to new op syntax — no more -> or =.
 
-// 16-bit half-precision float (hardware on some GPUs)
-type Float16 : Bits {
+// 16-bit half-precision float (hardware on some GPUs).
+// 2026-09-01 (plan float16-float-join-and-purge): parent is the FLOAT
+// category (bare fundamental — post-hashtag spelling), so the width
+// ladder, protocol arithmetic bindings, and cast paths apply; MaxBits: 16
+// selects the f16 kernel shape (StorageBuffer16BitAccess +
+// VK_KHR_cooperative_matrix fragments).
+type Float16 : Float, #Float {
     spec MaxBits: 16;
     spec Alignment: 2;
     !> tbaa: "FloatNode";
 
-    op Add: FAdd16(#Lh, #Rh);
-    op Sub: FSub16(#Lh, #Rh);
-    op Mul: FMul16(#Lh, #Rh);
+    // Variant coverage: the variant is the TYPE'S OWN NAME —
+    // `variant_covers` treats a non-hashword variant as a concrete type
+    // name, so `op Mul(#Float)` (stripped to "Float") would cover only the
+    // f32 primordial, never Float16. With `op Mul(Float16)` the declared
+    // FAdd16/FMul16 bindings govern Float16 arithmetic. (plan
+    // float16-float-join-and-purge.)
+    op Add(Float16): FAdd16(#Lh, #Rh);
+    op Sub(Float16): FSub16(#Lh, #Rh);
+    op Mul(Float16): FMul16(#Lh, #Rh);
 };
 
 // 4-lane SIMD float vector

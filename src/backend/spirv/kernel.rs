@@ -159,6 +159,13 @@ pub fn emit_kernel(
         vec![Operand::StorageClass(StorageClass::Function)],
     );
     for (_, var, ty) in &local_vars {
+        // 2026-09-01 (M2.2): the tensor kernel uses none of the .abv body's
+        // locals — and Vulkan forbids 16-bit-typed variables in Function
+        // storage (the body's `acc: Float16` would land here). Skip them on
+        // the tensor path.
+        if gemm_tensor {
+            continue;
+        }
         let elem = builder.lower_type(ty)?;
         let ptr = builder.ptr_class(StorageClass::Function, elem);
         builder.instr(

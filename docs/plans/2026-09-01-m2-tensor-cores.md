@@ -141,3 +141,39 @@ async node gemm [i < M * N][i == M * N] {
     term;
 };
 ```
+
+## P2 status (2026-09-01, session end) — front door OPEN, f16 device path FAULTS
+
+**The Float16 join LANDED**: `type Float16 : Float, #Float { ... }` — bare
+fundamental parent (the first post-hashtag fundamental protocol join) plus
+the protocol-membership form the relationship grammar requires today
+(Phase B de-hashes it). Zero typechecker changes needed for the join
+itself. Added: Float-literal admission into Float-category narrow targets,
+gated on f32→f16→f32 round-trip exactness (`float_literal_fits` +
+`f32_fits_f16`; unit-tested). Fixed en route: the op-variant coverage trap
+— `op Mul(#Float)` strips to the CONCRETE name "Float", covering only the
+f32 primordial; the variant must be the type's own name
+(`op Mul(Float16): FMul16(...)`). Unit tests: 2025 green.
+
+**The f16 tensor kernel emits and validates** (spirv-val clean,
+LocalSize 32, coopmat loads/mma/FConvert/store, runner dispatch
+(n/(16·16))·32) — but **faults on device**: every Float16 run (16×16 and
+16×64 variants, 256³ and 4096³) writes only ~25% of the output then dies
+(rows 0..~1025 of 4096 at 4096³; SEGFAULT in the harness at 256³). The
+fault footprint is variant-independent and size-independent per-output —
+consistent with a GPU-side fault in the f16 surface (16-bit storage
+interaction, NVVM f16-fragment handling, or a missing capability the
+validator doesn't gate). The f32 coopmat smoke was FULLY CORRECT at
+4096³, so the coopmat pipeline itself works.
+
+**Decision: `spirv_coopmat: 0` in the default config** — the emitter and
+driver enablement stay (all unit-gated), Float32 GEMMs keep the Tier-2
+tiled kernel (25.3ms, exact), and Float16 GEMMs stay on the exact tiled
+path until the fault is root-caused. The fault investigation needs:
+(a) a RenderDoc/NVIDIA-tools capture of the f16 submission, (b) a
+`shaderFloat16`-feature probe before chaining, (c) an NVVM-bug check via
+equivalent hand-GLSL (GLSLANG lacks coopmat on this box — needs a newer
+glslang or DXC), (d) per-workgroup-write tracing via a debug y-fill
+(pre-store y-fill to detect which workgroups RAN vs never stored).
+
+Revived example: `examples/gpu/gemm_h.abv` (typechecks end-to-end now).

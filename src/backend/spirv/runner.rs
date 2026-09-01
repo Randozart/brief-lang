@@ -58,6 +58,10 @@ pub struct RunnerKernel {
     /// flattened: workgroups = (M/64)*(N/64), nx items = workgroups * 16
     /// (the driver divides by the module's local_x = 16).
     pub tiled: bool,
+    /// Tensor GEMM (plan 2026-09-01-m2-tensor-cores): cooperative-matrix
+    /// kernel (LocalSize 32, 16x16 tile). Dispatch: workgroups = (M/16)*
+    /// (N/16) = n/256, nx items = workgroups * 32.
+    pub tensor: bool,
 }
 
 /// The SSBO layout EXACTLY as the kernel sees it (name-sorted, real element
@@ -500,6 +504,26 @@ pub fn build_kernels(
         let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
         let cooperative = crate::backend::spirv::kernel::is_cooperative_shape(&e.shape);
         let tiled = crate::backend::spirv::gemm::GemmPlan::match_stmts(&e.shape, program).is_some();
+        let tensor = tiled
+            && crate::config_tuning::ir_lowering().spirv_coopmat
+            && {
+                // f16 operands (same shape_of check as the kernel hook —
+                // rule 19: through the casting graph, never a name match).
+                let mut sb = crate::backend::spirv::SpirvBuilder::new()
+                    .with_universe(universe, int_bits);
+                let sfields = crate::backend::spirv::lower::collect_state_fields(program);
+                let elem = |name: &str| -> Option<Type> {
+                    sfields.iter().find(|f| f.name == name)
+                        .and_then(|f| match &f.ty {
+                            Type::Vector(inner, _) => Some((**inner).clone()),
+                            other => Some(other.clone()),
+                        })
+                };
+                match (elem("a"), elem("b"), elem("y")) {
+                    (Some(ae), Some(be), Some(ye)) => crate::backend::spirv::gemm::fields_are_f16(&mut sb, &ae, &be, &ye),
+                    _ => false,
+                }
+            };
         crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
         out.push(RunnerKernel {
             name: name.clone(),
@@ -509,6 +533,7 @@ pub fn build_kernels(
             work_cols: e.shape.work_cols,
             cooperative,
             tiled,
+            tensor,
         });
     }
     Ok(out)
@@ -610,6 +635,13 @@ fn emit_kernel_node(
 /// fallback. Coverage is identical in all three; only the hardware routing
 /// of the work-item id differs.
 fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
+    if k.tensor {
+        // Tensor GEMM: workgroups = n/(16*16), nx items = workgroups*32
+        // (the driver divides nx by the module's local_x = 32).
+        return format!(
+            "      long long w_{ci} = (n_{ci} / (16 * 16)) * 32;\n      if (w_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, w_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
+        );
+    }
     if k.tiled {
         // Tiled GEMM: workgroups = items / (64*64), nx items = workgroups*16
         // (the driver's launch_dev2d divides nx by the module's local_x 16,
