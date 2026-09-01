@@ -1074,6 +1074,71 @@ verbose;` is a separate observability key that emits an optimization remark
 for every analyzed body. The keyword and the module shortcut feed the same
 verification pipeline.
 
+
+### 9.8 GPU kernel synthesis tiers (2026-09-01)
+
+When an `accel` body is proven eligible, the SPIR-V backend selects the
+most efficient kernel form from the proven shape — never by keyword, never
+by user request. Three tiers exist, plus a planned fourth; each tier's
+recognition conditions are exact, and any body not matching a tier lowers
+to the plain work-item kernel (always correct).
+
+**Tier 0 — work-item (flat).** One invocation per work-item, local size
+256. The counter binds to `GlobalInvocationId`. Every eligible body lands
+here at minimum.
+
+**Tier 1 — cooperative row.** A `foreach k in 0..K` whose body is a float
+mul-add into a local accumulator, the counter used BARE as the row index
+(`y[i] = ...`, `a[i*K + k]` — no `i / N`, no `i % N` anywhere in the
+kernel statements), and `K` a literal multiple of 32. The workgroup IS
+the row's team: local size 32, lane-strided accumulation
+(`lane + t*32`, or `lane*4 + t*128` when vec4-eligible), one
+`OpGroupNonUniformFAdd` reduce, one store per row. Requires the
+`spirv_row_cooperative` lowering knob (on by default).
+
+**Tier 2 — tiled GEMM.** The counter DECOMPOSED (`m = i / N`,
+`n = i % N`) over a canonical dot-product body
+`acc = acc + a[m*K + k] * b[k*N + n]`, with `M`, `N`, `K` literals all
+divisible by 64. Synthesized: one workgroup per 64×64 output tile
+(local size 16×16), A/B k-panels staged through Workgroup shared memory
+(two barriers per panel), 4×4 register tiles per invocation, loop-carried
+accumulator phis. Falls back to Tier 0 for any non-matching body.
+
+**Tier 3 — cooperative matrix (planned).** Operand types choose the
+hardware path: `Bit`-rooted **Float16** array fields qualify the GEMM for
+`VK_KHR_cooperative_matrix` tensor-core lowering (f16 operands, f32
+accumulate, 16×16×16 fragments). Float32 fields keep the Tier 2 exact
+kernel — the 3060-class hardware exposes no f32×f32 tensor shape, so
+tensor precision is a TYPE-LEVEL decision the author makes, never a
+silent compiler trade. Gate: the device extension must be present at
+runtime; absent devices take the Tier 2 kernel.
+
+**Vec4 eligibility gate.** A field participates in wide loads only when
+its element is 32-bit float-shaped, its count is a multiple of 4, its
+projection offset is 16-byte aligned, AND the load index is provably
+4-divisible after substitution (`expr_provably_mod4_zero`: products prove
+via either factor, sums via both, division/modulo reject). Unproven
+fields load scalar — never speculatively.
+
+**Projection layout rule.** Device projections are name-sorted, packed,
+EXCEPT vec4-eligible arrays aligned up to 16B
+(`FnLowerer::projection_offsets` — the single definition; kernel member
+offsets, runner literals, and the runtime's declared `proj_offset` all
+derive from it). Host layouts stay packed; the runtime copies per field.
+
+**Dispatch geometry contract.** The kernel's work mapping and the
+launcher's grid derive from ONE predicate per tier
+(`is_cooperative_shape`, the tiled plan match) — kernel emission and
+runner dispatch can never disagree. Grids are X-flattened (this driver's
+Y dispatch dimension is inert); tile coordinates decode from
+`gl_WorkGroupID.x`.
+
+**Launch modes.** Per-call synchronous launches pay a fence-wake tax
+(~33µs measured on this class of device) on top of ~7µs submission; loop
+deployments use batched submission (K identical dispatches, one fence).
+Batched launches require launch-invariant host scalar state — the
+cooperative counter reset satisfies this by construction.
+
 ## 10. Contracts, invariants, and watchdogs
 
 ### 10.1 Contracts

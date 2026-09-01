@@ -781,3 +781,205 @@ fn emit_panel_loads(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::accel::{KernelShape, ReductionInfo};
+    use crate::ast::{BinaryOpKind, Dimension, Type};
+
+    /// Hand-built canonical GEMM shape — no typechecker universe needed
+    /// (the matcher consumes the raw AST + a const map).
+    fn gemm_shape(m: i64, n: i64, k: i64) -> (KernelShape, Vec<TopLevel>) {
+        let idx = |name: &str| Expr::Identifier(name.to_string());
+        let num = |v: i64| Expr::Decimal(v);
+        let bin = |kind, l: Expr, r: Expr| Expr::BinaryOp(kind, Box::new(l), Box::new(r));
+        let index = |of: Expr, i: Expr| Expr::Index(Box::new(of), Box::new(i));
+
+        let items = vec![
+            TopLevel::Constant(crate::ast::Constant {
+                name: "M".into(),
+                expr: num(m),
+                ty: Type::Custom("Int".into()),
+            }),
+            TopLevel::Constant(crate::ast::Constant {
+                name: "N".into(),
+                expr: num(n),
+                ty: Type::Custom("Int".into()),
+            }),
+            TopLevel::Constant(crate::ast::Constant {
+                name: "K".into(),
+                expr: num(k),
+                ty: Type::Custom("Int".into()),
+            }),
+        ];
+
+        let body = vec![
+            // acc = acc + a[m*K + k] * b[k*N + n];
+            Statement::Assign(
+                idx("acc"),
+                bin(BinaryOpKind::Add, idx("acc"),
+                    bin(BinaryOpKind::Mul,
+                        index(idx("a"), bin(BinaryOpKind::Add, bin(BinaryOpKind::Mul, idx("m"), num(k)), idx("k"))),
+                        index(idx("b"), bin(BinaryOpKind::Add, bin(BinaryOpKind::Mul, idx("k"), num(n)), idx("n"))))),
+            ),
+        ];
+
+        let kernel_stmts = vec![
+            // let acc: Float = 0;
+            Statement::Let {
+                name: "acc".into(),
+                names: vec![],
+                ty: Some(Type::Custom("Float".into())),
+                expr: Some(num(0)),
+                modifiers: vec![],
+            },
+            // let m: Int = i / N;
+            Statement::Let {
+                name: "m".into(),
+                names: vec![],
+                ty: Some(Type::Custom("Int".into())),
+                expr: Some(bin(BinaryOpKind::Div, idx("i"), num(n))),
+                modifiers: vec![],
+            },
+            // let n: Int = i % N;
+            Statement::Let {
+                name: "n".into(),
+                names: vec![],
+                ty: Some(Type::Custom("Int".into())),
+                expr: Some(bin(BinaryOpKind::Mod, idx("i"), num(n))),
+                modifiers: vec![],
+            },
+            Statement::Foreach {
+                item: "k".into(),
+                list: Box::new(Expr::Range {
+                    start: Box::new(num(0)),
+                    end: Box::new(idx("K")),
+                    inclusive: false,
+                }),
+                body,
+            },
+            // y[i] = acc;
+            Statement::Assign(index(idx("y"), idx("i")), idx("acc")),
+        ];
+
+        let shape = KernelShape {
+            index_var: "i".into(),
+            count_expr: Some(bin(BinaryOpKind::Mul, idx("M"), idx("N"))),
+            kernel_stmts,
+            host_stmts: vec![],
+            read_buffers: vec![],
+            write_buffers: vec![],
+            scalar_ins: vec![],
+            eligible: true,
+            reasons: vec![],
+            work_cols: None,
+            reduction: Some(ReductionInfo { inner: idx("K") }),
+        };
+        (shape, items)
+    }
+
+    #[test]
+    fn gemm_plan_matches_canonical_body() {
+        let (shape, items) = gemm_shape(64, 64, 64);
+        let plan = GemmPlan::match_stmts(&shape, &items)
+            .expect("canonical body must match");
+        assert_eq!((plan.m, plan.n, plan.k), (64, 64, 64));
+        assert_eq!(plan.a_field, "a");
+        assert_eq!(plan.b_field, "b");
+        assert_eq!(plan.y_field, "y");
+    }
+
+    #[test]
+    fn gemm_plan_requires_tile_divisibility() {
+        // 60 is not divisible by the 64-tile → flat fallback.
+        let (shape, items) = gemm_shape(60, 64, 64);
+        assert!(GemmPlan::match_stmts(&shape, &items).is_none(),
+            "non-tile-divisible M must fall back to the flat kernel");
+        let (shape, items) = gemm_shape(64, 64, 60);
+        assert!(GemmPlan::match_stmts(&shape, &items).is_none(),
+            "non-tile-divisible K must fall back to the flat kernel");
+    }
+
+    /// Walk every expression (including foreach bodies — the reduction
+    /// lives inside one) and retarget the decimal k-stride term to 128.
+    fn rewrite_stmt_b_stride(stmt: &mut Statement) {
+        match stmt {
+            Statement::Assign(_, rhs) => rewrite_b_stride(rhs),
+            Statement::Foreach { body, list, .. } => {
+                rewrite_b_stride(list);
+                for st in body {
+                    rewrite_stmt_b_stride(st);
+                }
+            }
+            Statement::Let { expr: Some(e), .. } => rewrite_b_stride(e),
+            _ => {}
+        }
+    }
+
+    fn rewrite_b_stride(e: &mut Expr) {
+        match e {
+            Expr::BinaryOp(kind, l, r) => {
+                rewrite_b_stride(l);
+                rewrite_b_stride(r);
+                retarget_stride(kind, l, r);
+            }
+            // the index lives INSIDE an Index — descend
+            Expr::Index(of, idx) => {
+                rewrite_b_stride(of);
+                rewrite_b_stride(idx);
+            }
+            Expr::UnaryOp(_, e) => rewrite_b_stride(e),
+            // everything else carries no stride term
+            _ => {}
+        }
+    }
+
+    /// Replace the decimal stride of the `k * stride` term with 128.
+    fn retarget_stride(kind: &BinaryOpKind, l: &mut Box<Expr>, r: &mut Box<Expr>) {
+        if *kind != BinaryOpKind::Mul {
+            return;
+        }
+        let lhs_k = matches!(l.as_ref(), Expr::Identifier(n) if n == "k");
+        let rhs_k = matches!(r.as_ref(), Expr::Identifier(n) if n == "k");
+        if lhs_k {
+            if let Expr::Decimal(_) = r.as_ref() {
+                *r = Box::new(Expr::Decimal(128));
+            }
+        } else if rhs_k {
+            if let Expr::Decimal(_) = l.as_ref() {
+                *l = Box::new(Expr::Decimal(128));
+            }
+        }
+    }
+
+    #[test]
+    fn gemm_plan_rejects_stride_mismatch() {
+        // b's column stride N2 != N: the tile math would read the wrong
+        // columns — the matcher must reject (flat kernel is correct). The
+        // .abv's `k * N` arrives const-folded (`k * 64`) — retarget that
+        // decimal to 128; a's `m * K` term uses Identifier(m), untouched.
+        let (mut shape, items) = gemm_shape(64, 64, 64);
+        for stmt in &mut shape.kernel_stmts {
+            rewrite_stmt_b_stride(stmt);
+        }
+        let r = GemmPlan::match_stmts(&shape, &items);
+        assert!(r.is_none(),
+            "b stride != N must not match the tiled plan");
+    }
+
+    #[test]
+    fn gemm_plan_ignores_extra_statements() {
+        // A host-side statement between the lets and the store keeps the
+        // matcher working (statement ORDER never mattered — content does).
+        let (mut shape, items) = gemm_shape(64, 64, 64);
+        shape.kernel_stmts.insert(
+            0,
+            Statement::Assign(
+                Expr::Identifier("i".into()),
+                Expr::Decimal(0),
+            ),
+        );
+        assert!(GemmPlan::match_stmts(&shape, &items).is_some());
+    }
+}

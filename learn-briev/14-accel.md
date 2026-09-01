@@ -95,3 +95,60 @@ accel node init_bodies [beginprogram && i < nb][i == nb] {
 ```
 
 Here `beginprogram` marks the entry, and `accel` offloads the init pass.
+
+## What the GPU compiler builds from your loop (2026-09-01)
+
+You write the loop; the compiler picks the kernel. Three forms exist —
+picked by the proven shape, never by a keyword you write:
+
+**1. Plain work-item kernel** — every eligible body gets at least this:
+one invocation per work-item.
+
+**2. Cooperative row kernel** — for dot-product reductions like GEMV:
+
+```briev
+let acc: Float = 0;
+foreach k in 0..K {
+    acc = acc + a[i * K + k] * x[k];
+}
+y[i] = acc;
+```
+
+Each 32-lane workgroup owns one row; lanes accumulate strided elements
+and one subgroup reduce produces the sum. Requirements: the counter `i`
+appears BARE as the row (no `i / N`, no `i % N` anywhere), `K` is a
+literal multiple of 32, and `a`'s projection offset is 16-byte aligned
+(then loads are wide float4 — `x` joins automatically when IT is aligned
+too; otherwise it stays scalar and the kernel is still exact).
+
+**3. Tiled GEMM** — for a decomposed counter over a matmul body:
+
+```briev
+let m: Int = i / N;
+let n: Int = i % N;
+foreach k in 0..K {
+    acc = acc + a[m * K + k] * b[k * N + n];
+}
+y[i] = acc;
+```
+
+The compiler replaces this with a shared-memory tiled kernel (64×64
+tiles, 16×16 workgroups, 4×4 register tiles per invocation, barriers
+between panels). Requirements: `M`, `N`, `K` all literal multiples of 64
+and the body in exactly the canonical form above. Anything else takes the
+plain kernel — correct, just slower. Measured at 4096³: 25.3ms (5250
+GFLOP/s) vs 6717ms naive.
+
+**Float16 means tensor cores.** Declare your operands
+`Float16[K * M]`-style (or accept the precision) and, on devices with
+`VK_KHR_cooperative_matrix`, the GEMM lowers to tensor-core fragments
+(fp16 in, fp32 accumulate). Float32 operands keep the exact tiled kernel
+— consumer-GPU tensor shapes have no f32×f32 mode, so precision is YOUR
+call, expressed as a type.
+
+**Launch cost matters at small sizes.** A synchronous launch costs ~40µs
+on this class of device regardless of kernel size; a 64-row GEMV compute
+is microseconds. Loop deployments should batch (`launch_resident_batch`):
+K launches in one submission ≈ kernel time per call. The benchmark files
+under `benchmarks/gpu/` show the working shapes (`gemv.abv`, `gemv_m64.abv`,
+`gemm.abv`).

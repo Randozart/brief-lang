@@ -5380,3 +5380,40 @@ same hole (`test_circt_call_submodule` codified it).
 `cell_defs`; anything else records the house capability error naming the
 callee and the fix (inline or declare as cell). Test rewritten to lock the
 corrected contract.
+
+## Terminology tripwire: the five meanings of "Bits" — canonical spelling is `Bit<N>` — DOCUMENTED 2026-09-01
+
+**Found:** while writing the M2.1/M2.2 unit tests, the working draft used
+`Bits(32)`/`Bits(N)` in test names and comments and would have propagated
+the stale spelling into the SPEC §9.7 GPU-backend update. Nearly recorded
+a non-canonical type name into the spec.
+
+**Root cause — "Bits" survives in FIVE distinct roles and only the first
+is the canonical type spelling:**
+
+1. `Bit<N>` — the canonical surface spelling of the unified bit type
+   (spec 2026-08-15 Fundamentals: "there is no separate `Bits` type").
+   `Bits<N>` and `bits<N>` parse as DEPRECATED aliases (parser/types.rs
+   normalizes all three to `Type::Bits(N)`).
+2. Bare `Bits` — the width-0 FLEXIBLE bit type (spec 2026-08-16
+   unification, `Type::Bits(0)`): accepts any `Bit<N>`.
+3. `type X : Bits { ... }` — typedef PARENT naming the flexible bit type
+   (lib/std/types/float.bv, lib/std/types.bv `type Byte : Bits {}`).
+   Current, correct — not a type-name use.
+4. `Type::Bits(N)` — the internal AST variant every spelling normalizes
+   to. Compiler-internal; never surfaces in user docs.
+5. `spec Bits: N;` / internal key `bits` — the layout METADATA KEY
+   (parser `spec_name_to_key`). Unrelated to the type name.
+
+The stale-impression sources, amended:
+- `import_resolver.rs` generated `bootstrap.bv` fixture wrote legacy
+  `type Int : Bits { maxbits <~ 64; };` — `maxbits <~` is legacy
+  metadata grammar; canonical is `spec MaxBits: 64;`. Fixture updated.
+- parser/definitions.rs legacy-alias comment now names the canonical
+  spelling at the point the aliases are accepted.
+
+**Rule going forward:** user-facing text (spec, tutorial, test names,
+comments describing surface syntax) uses `Bit<N>`; bare `Bits` only for
+the flexible width-0 form; `Type::Bits(N)` only inside compiler-internal
+code. A doc sweep for remaining user-visible `Bits<N>` aliases is
+deferred (they parse by design).

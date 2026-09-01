@@ -985,7 +985,7 @@ pub(crate) fn is_cooperative_shape(shape: &KernelShape) -> bool {
 
 /// True when any kernel statement derives a value from the counter via
 /// division or modulo (the flattened-2D signature: `m = i / N`, `n = i %N`).
-fn kernel_stmts_decompose_counter(shape: &KernelShape) -> bool {
+pub(crate) fn kernel_stmts_decompose_counter(shape: &KernelShape) -> bool {
     fn expr_decomposes(e: &Expr, iv: &str) -> bool {
         match e {
             Expr::BinaryOp(kind, l, r) => {
@@ -1060,4 +1060,98 @@ fn emit_cooperative_reduce(
         )),
     );
     emit_cooperative_scalar(lower, shape, &item, &fbody, inner_len, &repl)
+}
+
+#[cfg(test)]
+mod decomposition_gate_tests {
+    //! M2.0 hole 2 as unit tests: a counter decomposed with div/mod (the
+    //! flattened-2D signature) must reject the cooperative row form; a bare
+    //! counter (GEMV) must not. (Plan 2026-09-01-m2-gemm.)
+    use super::*;
+    use crate::analysis::accel::{KernelShape, ReductionInfo};
+    use crate::ast::{BinaryOpKind, Type};
+
+    fn shape_with(stmts: Vec<Statement>) -> KernelShape {
+        KernelShape {
+            index_var: "i".into(),
+            count_expr: Some(Expr::Decimal(4096)),
+            kernel_stmts: stmts,
+            host_stmts: vec![],
+            read_buffers: vec![],
+            write_buffers: vec![],
+            scalar_ins: vec![],
+            eligible: true,
+            reasons: vec![],
+            work_cols: None,
+            reduction: Some(ReductionInfo { inner: Expr::Decimal(64) }),
+        }
+    }
+
+    fn id(n: &str) -> Expr {
+        Expr::Identifier(n.into())
+    }
+
+    #[test]
+    fn decomposed_counter_rejects_cooperative() {
+        // let m: Int = i / N; let n: Int = i % N;  → flattened 2D.
+        let stmts = vec![
+            Statement::Let {
+                name: "m".into(),
+                names: vec![],
+                ty: Some(Type::Custom("Int".into())),
+                expr: Some(Expr::BinaryOp(BinaryOpKind::Div, Box::new(id("i")), Box::new(id("N")))),
+                modifiers: vec![],
+            },
+            Statement::Let {
+                name: "n".into(),
+                names: vec![],
+                ty: Some(Type::Custom("Int".into())),
+                expr: Some(Expr::BinaryOp(BinaryOpKind::Mod, Box::new(id("i")), Box::new(id("N")))),
+                modifiers: vec![],
+            },
+        ];
+        let shape = shape_with(stmts);
+        assert!(kernel_stmts_decompose_counter(&shape),
+            "div/mod of the counter must reject the cooperative form");
+    }
+
+    #[test]
+    fn bare_counter_keeps_cooperative() {
+        // y[i] = acc; — the GEMV form, no decomposition anywhere.
+        let stmts = vec![
+            Statement::Assign(Expr::Index(Box::new(id("y")), Box::new(id("i"))), id("acc")),
+        ];
+        let shape = shape_with(stmts);
+        assert!(!kernel_stmts_decompose_counter(&shape),
+            "a bare counter is the GEMV cooperative form");
+    }
+
+    #[test]
+    fn decomposition_inside_foreach_body_counts() {
+        // The counter decomposed INSIDE the reduction body must reject too —
+        // the binding happens before any body emission.
+        let inner = vec![
+            Statement::Let {
+                name: "row".into(),
+                names: vec![],
+                ty: Some(Type::Custom("Int".into())),
+                expr: Some(Expr::BinaryOp(BinaryOpKind::Div, Box::new(id("i")), Box::new(id("T")))),
+                modifiers: vec![],
+            },
+        ];
+        let stmts = vec![
+            Statement::Foreach {
+                item: "k".into(),
+                list: Box::new(Expr::Range {
+                    start: Box::new(Expr::Decimal(0)),
+                    end: Box::new(Expr::Decimal(64)),
+                    inclusive: false,
+                }),
+                body: inner,
+            },
+        ];
+        let shape = shape_with(stmts);
+        assert!(kernel_stmts_decompose_counter(&shape),
+            "decomposition inside the foreach body counts");
+    }
 }

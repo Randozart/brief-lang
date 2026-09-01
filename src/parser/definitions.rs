@@ -2663,6 +2663,8 @@ impl<'a> Parser<'a> {
                     }
                     // 2026-08-13: `Bits<N>` parses as Applied("Bits", [Number(N)])
                     // (the exact-width alias) — enforce the same slice limit.
+                    // CANONICAL SPELLING (BUGS.md "Bits tripwire"): `Bit<N>`
+                    // — this path only exists for pre-2026-08-15 code.
                     Type::Applied(name, args) if name == "Bits" => {
                         if let Some(crate::ast::Type::Number(n)) = args.first() {
                             if *n > 64 {

@@ -2140,3 +2140,131 @@ pub(crate) fn replace_index_in_stmt(stmt: &Statement, fname: &str, orig_idx: &Ex
         other => other.clone(),
     }
 }
+
+#[cfg(test)]
+mod vec4_gate_tests {
+    //! The M2.0 correctness gates as unit tests (plan 2026-09-01-m2-gemm):
+    //! the vec4 index-alignment proof and the projection layout rule.
+    use super::*;
+    use crate::ast::{BinaryOpKind, Dimension};
+
+    fn f32_vec(count: u32) -> Type {
+        // The internal form of the canonical `Bit<32>`-backed Float array
+        // element (BUGS.md "Bits tripwire": internal spelling `Type::Bits`).
+        Type::Vector(Box::new(Type::Bits(32)), vec![Dimension::Anonymous(count as usize)])
+    }
+
+    fn f32_scalar() -> Type {
+        Type::Bits(32)
+    }
+
+    fn idx_expr(op: &str) -> Expr {
+        // op = "gemv_a":  i*K + k    (2D row + loop var, K const 4096)
+        // op = "gemm_b":  k*N + n    (1D col + loop var — the M2.0 hole)
+        // op = "gemv_x":  k          (loop var only)
+        // op = "no_k":    i*K        (no loop var — never vec4-collected)
+        let i = Expr::Identifier("i".into());
+        let k = Expr::Identifier("k".into());
+        let n = Expr::Identifier("n".into());
+        match op {
+            "gemv_a" => Expr::BinaryOp(BinaryOpKind::Add,
+                Box::new(Expr::BinaryOp(BinaryOpKind::Mul, Box::new(i), Box::new(Expr::Identifier("K".into())))),
+                Box::new(k)),
+            "gemm_b" => Expr::BinaryOp(BinaryOpKind::Add,
+                Box::new(Expr::BinaryOp(BinaryOpKind::Mul, Box::new(k.clone()), Box::new(Expr::Identifier("N".into())))),
+                Box::new(n)),
+            "gemv_x" => k,
+            _ => Expr::BinaryOp(BinaryOpKind::Mul, Box::new(i), Box::new(Expr::Identifier("K".into()))),
+        }
+    }
+
+    fn vec4_map(fields: &[&str]) -> HashMap<String, Vec4Field> {
+        fields.iter().map(|f| (f.to_string(), Vec4Field {
+            array: 0, vector: 0, elem: f32_scalar(), elem_float: true,
+        })).collect()
+    }
+
+    #[test]
+    fn vec4_collector_accepts_aligned_row_index() {
+        // a[i*K + k] with K = 4096 (a multiple of 4): provably 4-aligned.
+        let mut got = Vec::new();
+        let access = Expr::Index(Box::new(Expr::Identifier("a".into())),
+                                 Box::new(idx_expr("gemv_a")));
+        collect_vec4_indices(
+            &access, &vec4_map(&["a"]), "k",
+            &[("K".to_string(), 4096)].into_iter().collect(),
+            &mut got,
+        );
+        assert_eq!(got.len(), 1, "aligned row index must be vec4-collected");
+    }
+
+    #[test]
+    fn vec4_collector_rejects_gemm_b_column_index() {
+        // b[k*N + n]: n is arbitrary — the >>2 base read the WRONG element
+        // (the M2.0 hole). The collector must reject it → scalar loads.
+        let mut got = Vec::new();
+        let access = Expr::Index(Box::new(Expr::Identifier("b".into())),
+                                 Box::new(idx_expr("gemm_b")));
+        collect_vec4_indices(
+            &access, &vec4_map(&["b"]), "k",
+            &[("N".to_string(), 4096)].into_iter().collect(),
+            &mut got,
+        );
+        assert!(got.is_empty(), "column-shifted index must stay scalar");
+    }
+
+    #[test]
+    fn vec4_collector_accepts_bare_loop_var() {
+        // x[k]: repl is 4-aligned by construction → provable.
+        let mut got = Vec::new();
+        let access = Expr::Index(Box::new(Expr::Identifier("x".into())),
+                                 Box::new(idx_expr("gemv_x")));
+        collect_vec4_indices(
+            &access, &vec4_map(&["x"]), "k",
+            &HashMap::new(),
+            &mut got,
+        );
+        assert_eq!(got.len(), 1, "bare loop-var index must be vec4-collected");
+    }
+
+    #[test]
+    fn vec4_collector_ignores_indices_without_loop_var() {
+        let mut got = Vec::new();
+        let access = Expr::Index(Box::new(Expr::Identifier("a".into())),
+                                 Box::new(idx_expr("no_k")));
+        collect_vec4_indices(
+            &access, &vec4_map(&["a"]), "k",
+            &[("K".to_string(), 4096)].into_iter().collect(),
+            &mut got,
+        );
+        assert!(got.is_empty(), "no loop var → nothing to substitute");
+    }
+
+    #[test]
+    fn projection_offsets_align_vec4_arrays_and_pack_the_rest() {
+        // THE layout rule (plan 2026-09-01-vec4-projection-layout): name-
+        // sorted fields; a vec4-eligible array (Bit<32>-element, count%4==0)
+        // aligns up to 16B; everything else packs. The gemv-like field set:
+        // a [Float x 4096], i [Int scalar], x [Float x 16], y [Float x 16].
+        let fields = vec![
+            StateField { name: "a".into(), ty: f32_vec(4096) },
+            StateField { name: "i".into(), ty: Type::Bits(64) },
+            StateField { name: "x".into(), ty: f32_vec(16) },
+            StateField { name: "y".into(), ty: f32_vec(16) },
+        ];
+        let mut sb = SpirvBuilder::new();
+        let offs = FnLowerer::projection_offsets(&mut sb, &fields).expect("layout");
+        // a @ 0 (already 16-aligned)
+        assert_eq!(offs[0], 0, "a: first field, naturally aligned");
+        // i: scalar Bit<64> → 8 bytes, PACKED right after a (host==this rule
+        // for scalars; only vec4-eligible arrays move)
+        assert_eq!(offs[1], 16384, "i: packed after a");
+        // x: vec4-eligible → aligned UP from 16392 to 16400
+        assert_eq!(offs[2], 16400, "x: 16B-aligned (16392 -> 16400)");
+        // y: x ends 16400+64=16464 (already aligned) → packed
+        assert_eq!(offs[3], 16464, "y: already aligned after x");
+        // Determinism: same input, same output.
+        let offs2 = FnLowerer::projection_offsets(&mut sb, &fields).expect("layout");
+        assert_eq!(offs, offs2, "the layout rule must be deterministic");
+    }
+}

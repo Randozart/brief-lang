@@ -1365,7 +1365,9 @@ mod tests {
         fs::create_dir_all(&types_dir).unwrap();
         fs::write(core_dir.join("ptr.bv"), "defn p_fn -> Int { term 0; };").unwrap();
         fs::write(core_dir.join("string_builder.bv"), "defn s_fn -> Int { term 0; };").unwrap();
-        fs::write(types_dir.join("bootstrap.bv"), "type Int : Bits { maxbits <~ 64; }; type Float : Bits { maxbits <~ 32; };").unwrap();
+        // 2026-09-01: canonical spellings (BUGS.md "Bits tripwire") — `spec
+// MaxBits: N;` metadata, not the legacy `maxbits <~ N;` grammar.
+fs::write(types_dir.join("bootstrap.bv"), "type Int : Bits { spec MaxBits: 64; }; type Float : Bits { spec MaxBits: 32; };").unwrap();
         let os_dir = stdlib_root.join("std").join("os");
         fs::create_dir_all(&os_dir).unwrap();
         for module in &["fs.bv", "net.bv", "signal.bv", "ipc.bv", "thread.bv", "dir.bv",
