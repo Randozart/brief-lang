@@ -21,6 +21,7 @@
 pub mod builder;
 pub mod kernel;
 pub mod lower;
+pub mod gemm;
 pub mod normalizer;
 
 // 2026-08-31 (plan abv-gpu-by-default): the accel OFFLOAD path (LLVM host)

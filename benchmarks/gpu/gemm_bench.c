@@ -1,9 +1,11 @@
 // gemm_bench.c — correctness + perf for the .abv GEMM lane (plan
 // 2026-09-01-m2-gemm). y[m*N+n] = sum_k A[m*K+k] * B[k*N+n].
-// Usage: gemm_bench <kernel.spv> [M] [N] [K] [batch]
+// Usage: gemm_bench <kernel.spv> [M] [N] [K] [batch] [tiled]
 //   correctness: R sampled output rows against a double reference.
 //   perf: ITERS launches; batch=1 runs them as ONE submission per iter
 //   group (per-call = wall/ITERS — the deployment-loop row).
+//   tiled=1 → the blob is a 64x64-tile shared-memory kernel (LocalSize
+//   16x16): dispatch workgroups = (M/64)*(N/64), nx items = wg*16.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +33,7 @@ int main(int argc, char** argv) {
     const uint64_t N = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
     const uint64_t K = argc > 4 ? strtoull(argv[4], NULL, 10) : 4096;
     const int batch = argc > 5 ? atoi(argv[5]) : 0;
+    const int tiled = argc > 6 ? atoi(argv[6]) : 0;
 
     FILE* f = fopen(argv[1], "rb");
     if (f == NULL) { perror("spv"); return 2; }
@@ -75,15 +78,21 @@ int main(int argc, char** argv) {
     if (!briev_accel_init(&desc, 1)) {
         fprintf(stderr, "no GPU device\n"); return 1;
     }
-    printf("# fingerprint: device=%s spv=%ldB M=%llu N=%llu K=%llu warmup=%d iters=%d batch=%d\n",
+    printf("# fingerprint: device=%s spv=%ldB M=%llu N=%llu K=%llu warmup=%d iters=%d batch=%d tiled=%d\n",
            briev_accel_device_name(), spv_len,
            (unsigned long long)M, (unsigned long long)N, (unsigned long long)K,
-           WARMUP, ITERS, batch);
+           WARMUP, ITERS, batch, tiled);
+
+    // Dispatch geometry: naive items vs tiled workgroups*local_x.
+    uint64_t dispatch_n = M * N;
+    if (tiled) {
+        dispatch_n = ((M + 63) / 64) * ((N + 63) / 64) * 16;
+    }
 
     // Warm-up + verify (the state after warm-up holds real outputs).
     for (int w = 0; w < WARMUP; w++) {
         *(int64_t*)(state + off_i) = 0;
-        int ok = briev_accel_launch_resident(0, state, M * N);
+        int ok = briev_accel_launch_resident(0, state, dispatch_n);
         if (!ok) { fprintf(stderr, "dispatch failed\n"); return 1; }
     }
     if (!briev_accel_download(0, state)) {
@@ -115,7 +124,7 @@ int main(int argc, char** argv) {
     double t0 = now_ms();
     if (batch) {
         *(int64_t*)(state + off_i) = 0;
-        if (!briev_accel_launch_resident_batch(0, state, M * N, 1, ITERS)) return 1;
+        if (!briev_accel_launch_resident_batch(0, state, dispatch_n, 1, ITERS)) return 1;
         double wall = now_ms() - t0;
         double per = wall / ITERS;
         printf("GPU  per-call %.3f ms  %.2f GFLOP/s  (batched x%d)\n",
@@ -127,7 +136,7 @@ int main(int argc, char** argv) {
         for (int it = 0; it < ITERS; it++) {
             *(int64_t*)(state + off_i) = 0;
             double t1 = now_ms();
-            int ok = briev_accel_launch_resident(0, state, M * N);
+            int ok = briev_accel_launch_resident(0, state, dispatch_n);
             double dt = now_ms() - t1;
             if (!ok) { fprintf(stderr, "dispatch failed\n"); return 1; }
             sum += dt; if (dt < mn) mn = dt; if (dt > mx) mx = dt;

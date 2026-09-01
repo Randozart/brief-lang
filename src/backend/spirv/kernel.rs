@@ -17,6 +17,7 @@ use crate::ast::{Expr, Type};
 use crate::backend::spirv::builder::SpirvBuilder;
 use crate::backend::spirv::lower::{collect_locals, collect_state_fields, FnLowerer};
 use crate::analysis::accel::KernelShape;
+use crate::backend::spirv::gemm;
 use crate::ast::Statement;
 
 /// Local workgroup size — matches the WorkgroupSize# intrinsic constants.
@@ -38,7 +39,7 @@ pub fn emit_kernel(
     // ── Module globals: state SSBO + invocation-id builtins. Ids thread
     // into the body lowerer so nothing is created twice.
     let state_fields = collect_state_fields(items);
-    let (ssbo_var, global_id_var, local_id_var, vec4_fields) = {
+    let (ssbo_var, global_id_var, local_id_var, workgroup_id_var, vec4_fields, state_fields_sorted) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
         warm.materialize_consts(items)?;
         warm.warm_builtins()?;
@@ -47,10 +48,47 @@ pub fn emit_kernel(
             warm.ssbo_var,
             warm.global_id_var,
             warm.local_id_var,
+            warm.workgroup_id_var,
             warm.vec4_fields,
+            warm.state_fields,
         )
     };
     // Types referenced by the function must precede it in the module.
+
+    // ── Tiled GEMM plan + module-scope shared arrays (M2.1) ──
+    // Workgroup-class variables are MODULE-GLOBAL in SPIR-V (glslang emits
+    // them before the function; the validator rejects them inside it —
+    // found on device, plan 2026-09-01-m2-gemm).
+    let gemm_tiled: Option<(gemm::GemmPlan, super::lower::Vec4Field, super::lower::Vec4Field, super::lower::Vec4Field)> =
+        gemm::GemmPlan::match_stmts(shape, items).and_then(|plan| {
+            let a_v4 = vec4_fields.get(&plan.a_field)?.clone();
+            let b_v4 = vec4_fields.get(&plan.b_field)?.clone();
+            let y_v4 = vec4_fields.get(&plan.y_field)?.clone();
+            Some((plan, a_v4, b_v4, y_v4))
+        });
+    let (shared_a, shared_b) = if gemm_tiled.is_some() {
+        let f32_ty = builder.lower_type(&gemm_tiled.as_ref().unwrap().1.elem)?;
+        let len_c = builder.u32_const((gemm::TILE * gemm::TILE) as u32);
+        let arr_ty = builder.builder.type_array(f32_ty, len_c);
+        let wg_ptr = builder.ptr_class(StorageClass::Workgroup, arr_ty);
+        let sa = builder.gen_id();
+        builder.emit_global(Instruction::new(
+            spirv::Op::Variable,
+            Some(wg_ptr),
+            Some(sa),
+            vec![Operand::StorageClass(StorageClass::Workgroup)],
+        ));
+        let sb = builder.gen_id();
+        builder.emit_global(Instruction::new(
+            spirv::Op::Variable,
+            Some(wg_ptr),
+            Some(sb),
+            vec![Operand::StorageClass(StorageClass::Workgroup)],
+        ));
+        (Some(sa), Some(sb))
+    } else {
+        (None, None)
+    };
 
     // All direct-builder work happens BEFORE the body lowerer borrows it:
     // ids, function, entry block, and every function-scope OpVariable (they
@@ -98,6 +136,50 @@ pub fn emit_kernel(
             Some(*var),
             vec![Operand::StorageClass(StorageClass::Function)],
         );
+    }
+
+    if let (Some((plan, a_v4, _b_v4, _y_v4)), Some(shared_a), Some(shared_b)) =
+        (&gemm_tiled, shared_a, shared_b)
+    {
+        let f32_ty = builder.lower_type(&a_v4.elem)?;
+        let member_of = |name: &str| -> Option<usize> {
+            state_fields_sorted
+                .iter()
+                .position(|f| f.name == name)
+        };
+        let ctx = gemm::TiledCtx {
+            ssbo: ssbo_var.ok_or("gemm without SSBO")?,
+            wgid: workgroup_id_var.ok_or("gemm without WorkGroupId")?,
+            lid: local_id_var.ok_or("gemm without LocalInvocationId")?,
+            shared_a,
+            shared_b,
+            f32_ty,
+            a_member: member_of(&plan.a_field).ok_or("gemm a field not in state")? as u32,
+            b_member: member_of(&plan.b_field).ok_or("gemm b field not in state")? as u32,
+            y_member: member_of(&plan.y_field).ok_or("gemm y field not in state")? as u32,
+            exit_bb: builder.gen_id(),
+        };
+        gemm::emit_tiled(builder, &plan, &ctx)?;
+        builder.begin_block(Some(ctx.exit_bb));
+        builder.ret();
+        builder.end_function();
+        // SPIR-V 1.4+: the interface lists EVERY global the shader touches —
+        // including the Workgroup shared arrays.
+        let interface: Vec<Word> = [global_id_var, local_id_var, workgroup_id_var]
+            .into_iter()
+            .flatten()
+            .chain(ssbo_var.into_iter())
+            .chain([shared_a, shared_b])
+            .collect();
+        builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
+        builder.add_execution_mode(
+            func_id,
+            spirv::ExecutionMode::LocalSize,
+            gemm::THREADS as u32,
+            gemm::THREADS as u32,
+            1,
+        );
+        return Ok(func_id);
     }
 
     let mut lower = FnLowerer::new(builder, state_fields);
@@ -500,67 +582,67 @@ fn emit_vec4_unrolled_body(
 }
 
 /// Basic-block set for the hand-built structured cooperative loop.
-struct CoopLoopBBs {
-    header_bb: Word,
-    continue_bb: Word,
-    merge_bb: Word,
+pub(crate) struct CoopLoopBBs {
+    pub(crate) header_bb: Word,
+    pub(crate) continue_bb: Word,
+    pub(crate) merge_bb: Word,
 }
 
 /// Shared operands of the structured-loop begin/end helpers: the lowered
 /// int/bool type ids and the trip count. The induction variable is SSA
 /// (a header phi returned by `begin_structured_loop`), not storage.
-struct CoopLoopSig {
-    int_ty: Word,
-    bool_ty: Word,
-    groups: i64,
+pub(crate) struct CoopLoopSig {
+    pub(crate) int_ty: Word,
+    pub(crate) bool_ty: Word,
+    pub(crate) groups: i64,
 }
 
 /// Begin the hand-built structured loop (preheader → header), leaving the
 /// builder positioned at the start of the body block. Mirrors the Foreach
 /// emission in lower.rs; splitting begin/end lets the caller interleave the
 /// body emission (vec4 loads depend on the loop variable).
-fn begin_structured_loop(
-    lower: &mut FnLowerer,
+pub(crate) fn begin_structured_loop(
+    builder: &mut SpirvBuilder,
     sig: &CoopLoopSig,
     // (type, init id, pre-reserved back-edge id) per loop-carried
     // accumulator; the body defines the back-edge value into that id.
     acc_phis: &[(Word, Word, Word)],
 ) -> Result<(CoopLoopBBs, Vec<Word>, Word, Word, Word, Word), String> {
     let CoopLoopSig { int_ty, bool_ty, groups, .. } = *sig;
-    let header_bb = lower.builder.gen_id();
-    let body_bb = lower.builder.gen_id();
-    let continue_bb = lower.builder.gen_id();
-    let merge_bb = lower.builder.gen_id();
-    let preheader_bb = lower.builder.gen_id();
-    let cond0 = lower.builder.gen_id();
-    let cond_next = lower.builder.gen_id();
+    let header_bb = builder.gen_id();
+    let body_bb = builder.gen_id();
+    let continue_bb = builder.gen_id();
+    let merge_bb = builder.gen_id();
+    let preheader_bb = builder.gen_id();
+    let cond0 = builder.gen_id();
+    let cond_next = builder.gen_id();
     // 2026-09-01 (P3): the induction variable is SSA — a header phi, not
     // Function storage. Removes the per-iteration OpLoad/OpStore pair in
     // the continue block AND every body-side load of the loop variable.
-    let loop_backedge = lower.builder.gen_id();
-    let zero = lower.builder.builder.constant_bit64(int_ty, 0);
+    let loop_backedge = builder.gen_id();
+    let zero = builder.builder.constant_bit64(int_ty, 0);
 
-    let emit_cond = |lower: &mut FnLowerer, cond_id: Word, cur: Word| -> Result<(), String> {
-        let end_c = lower.builder.builder.constant_bit64(int_ty, groups as u64);
-        lower.builder.emit(Instruction::new(
+    let emit_cond = |builder: &mut SpirvBuilder, cond_id: Word, cur: Word| -> Result<(), String> {
+        let end_c = builder.builder.constant_bit64(int_ty, groups as u64);
+        builder.emit(Instruction::new(
             spirv::Op::SLessThan, Some(bool_ty), Some(cond_id),
             vec![Operand::IdRef(cur), Operand::IdRef(end_c)],
         ));
         Ok(())
     };
 
-    lower.builder.builder.branch(preheader_bb);
-    lower.builder.begin_block(Some(preheader_bb));
-    emit_cond(lower, cond0, zero)?;
-    lower.builder.builder.branch(header_bb);
+    builder.builder.branch(preheader_bb);
+    builder.begin_block(Some(preheader_bb));
+    emit_cond(builder, cond0, zero)?;
+    builder.builder.branch(header_bb);
 
-    lower.builder.begin_block(Some(header_bb));
-    let loop_phi = lower.builder.builder.phi(
+    builder.begin_block(Some(header_bb));
+    let loop_phi = builder.builder.phi(
         int_ty,
         None,
         [(zero, preheader_bb), (loop_backedge, continue_bb)],
     ).map_err(|e| format!("loop induction phi: {:?}", e))?;
-    let cond_hdr = lower.builder.builder.phi(
+    let cond_hdr = builder.builder.phi(
         bool_ty,
         None,
         [(cond0, preheader_bb), (cond_next, continue_bb)],
@@ -572,28 +654,28 @@ fn begin_structured_loop(
     let acc_ids: Vec<Word> = acc_phis
         .iter()
         .map(|&(ty, init, backedge)| {
-            lower.builder.builder.phi(
+            builder.builder.phi(
                 ty,
                 None,
                 [(init, preheader_bb), (backedge, continue_bb)],
             ).expect("loop accumulator phi")
         })
         .collect();
-    lower.builder.builder.loop_merge(
+    builder.builder.loop_merge(
         merge_bb,
         continue_bb,
         rspirv::spirv::LoopControl::NONE,
         [] as [rspirv::dr::Operand; 0],
     );
-    lower.builder.builder.branch_conditional(cond_hdr, body_bb, merge_bb, [] as [u32; 0]);
-    lower.builder.begin_block(Some(body_bb));
+    builder.builder.branch_conditional(cond_hdr, body_bb, merge_bb, [] as [u32; 0]);
+    builder.begin_block(Some(body_bb));
     Ok((CoopLoopBBs { header_bb, continue_bb, merge_bb }, acc_ids, cond_next, cond0, loop_phi, loop_backedge))
 }
 
 /// Close the structured loop: continue block (increment + re-check), branch
 /// back to the header, then position the builder at the merge block.
-fn end_structured_loop(
-    lower: &mut FnLowerer,
+pub(crate) fn end_structured_loop(
+    builder: &mut SpirvBuilder,
     sig: &CoopLoopSig,
     bbs: &CoopLoopBBs,
     loop_phi: Word,
@@ -601,25 +683,25 @@ fn end_structured_loop(
     cond_next: Word,
 ) -> Result<(), String> {
     let CoopLoopSig { int_ty, groups, .. } = *sig;
-    lower.builder.builder.branch(bbs.continue_bb);
-    lower.builder.begin_block(Some(bbs.continue_bb));
+    builder.builder.branch(bbs.continue_bb);
+    builder.begin_block(Some(bbs.continue_bb));
     // next = cur + 1, defined INTO the induction phi's pre-reserved
     // back-edge id; then the next iteration's condition.
-    let one = lower.builder.builder.constant_bit64(int_ty, 1);
-    lower.builder.emit(Instruction::new(
+    let one = builder.builder.constant_bit64(int_ty, 1);
+    builder.emit(Instruction::new(
         spirv::Op::IAdd, Some(int_ty), Some(loop_backedge),
         vec![Operand::IdRef(loop_phi), Operand::IdRef(one)],
     ));
-    let bool_ty = lower.builder.lower_type(&crate::ast::Type::Bits(1))?;
-    let end_c = lower.builder.builder.constant_bit64(int_ty, groups as u64);
-    lower.builder.emit(Instruction::new(
+    let bool_ty = builder.lower_type(&crate::ast::Type::Bits(1))?;
+    let end_c = builder.builder.constant_bit64(int_ty, groups as u64);
+    builder.emit(Instruction::new(
         spirv::Op::SLessThan,
         Some(bool_ty),
         Some(cond_next),
         vec![Operand::IdRef(loop_backedge), Operand::IdRef(end_c)],
     ));
-    lower.builder.builder.branch(bbs.header_bb);
-    lower.builder.begin_block(Some(bbs.merge_bb));
+    builder.builder.branch(bbs.header_bb);
+    builder.begin_block(Some(bbs.merge_bb));
     Ok(())
 }
 
@@ -714,7 +796,7 @@ fn emit_cooperative_vec4(
     };
 
     let (bbs, _acc_ids, cond_next, _cond0, loop_phi, loop_backedge) =
-        begin_structured_loop(lower, &sig, &[])?;
+        begin_structured_loop(lower.builder, &sig, &[])?;
 
     lower.const_vars.remove(item);
     lower.value_vars.insert(item.to_string(), (loop_phi, crate::ast::Type::int()));
@@ -726,7 +808,7 @@ fn emit_cooperative_vec4(
         emit_vec4_unrolled_body(lower, &ctx, j)?;
     }
 
-    end_structured_loop(lower, &sig, &bbs, loop_phi, loop_backedge, cond_next)?;
+    end_structured_loop(lower.builder, &sig, &bbs, loop_phi, loop_backedge, cond_next)?;
     lower.value_vars.remove(item);
     lower.terminated = prev_terminated;
 
@@ -808,7 +890,7 @@ fn emit_cooperative_vec4_fma(
     let acc_backedge = lower.builder.gen_id();
     let acc_zero = lower.builder.builder.constant_null(v4_ty);
     let (bbs, acc_ids, cond_next, _cond0, loop_phi, loop_backedge) =
-        begin_structured_loop(lower, &sig, &[(v4_ty, acc_zero, acc_backedge)])?;
+        begin_structured_loop(lower.builder, &sig, &[(v4_ty, acc_zero, acc_backedge)])?;
     let acc_phi = *acc_ids.first().ok_or("accumulator phi lost")?;
     lower.const_vars.remove(ctx.item);
     lower.value_vars.insert(ctx.item.to_string(), (loop_phi, crate::ast::Type::int()));
@@ -819,7 +901,7 @@ fn emit_cooperative_vec4_fma(
     let (rhs_val, _) = emit_vec4_load(lower, ctx, &rhs_field, sig.int_ty, ssbo)?;
     lower.builder.glsl_fma_with_id(acc_backedge, v4_ty, lhs_val, rhs_val, acc_phi);
 
-    end_structured_loop(lower, &sig, &bbs, loop_phi, loop_backedge, cond_next)?;
+    end_structured_loop(lower.builder, &sig, &bbs, loop_phi, loop_backedge, cond_next)?;
     lower.value_vars.remove(ctx.item);
     lower.terminated = prev_terminated;
 

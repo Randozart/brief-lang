@@ -53,6 +53,8 @@ pub struct FnLowerer<'a> {
     pub global_id_var: Option<Word>,
     /// BuiltIn LocalInvocationId input variable (pre-threaded or lazy).
     pub local_id_var: Option<Word>,
+    /// 2026-09-01 (M2.1): gl_WorkGroupID — the tiled GEMM's tile coordinates.
+    pub workgroup_id_var: Option<Word>,
     /// 2026-08-31 (plan abv-gpu-by-default): module consts materialized as
     /// SPIR-V constants — name → (constant id, type). Kernel bodies read
     /// `const dt: Float = 0.001;` etc. directly; non-literal initializers
@@ -95,6 +97,7 @@ impl<'a> FnLowerer<'a> {
             ssbo_var: None,
             global_id_var: None,
             local_id_var: None,
+            workgroup_id_var: None,
             consts: HashMap::new(),
             const_int_values: HashMap::new(),
             const_vars: HashMap::new(),
@@ -157,7 +160,17 @@ impl<'a> FnLowerer<'a> {
     pub fn warm_builtins(&mut self) -> Result<(), String> {
         self.global_invocation_id()?;
         self.local_invocation_id()?;
+        self.work_group_id()?;
         Ok(())
+    }
+
+    pub fn work_group_id(&mut self) -> Result<Word, String> {
+        if let Some(v) = self.workgroup_id_var {
+            return Ok(v);
+        }
+        let v = self.builtin_input(spirv::BuiltIn::WorkgroupId)?;
+        self.workgroup_id_var = Some(v);
+        Ok(v)
     }
 
     fn err<T>(&self, what: impl Into<String>) -> Result<T, String> {

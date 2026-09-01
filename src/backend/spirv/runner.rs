@@ -53,6 +53,11 @@ pub struct RunnerKernel {
     /// Cooperative row kernel (plan 2026-09-01-cooperative-row-kernels):
     /// dispatch nx = 32 lanes x ny = rows.
     pub cooperative: bool,
+    /// Tiled GEMM (plan 2026-09-01-m2-gemm M2.1): the blob is a shared-
+    /// memory tiled kernel (LocalSize 16x16, 64x64 tile). Dispatch is 1D
+    /// flattened: workgroups = (M/64)*(N/64), nx items = workgroups * 16
+    /// (the driver divides by the module's local_x = 16).
+    pub tiled: bool,
 }
 
 /// The SSBO layout EXACTLY as the kernel sees it (name-sorted, real element
@@ -494,6 +499,7 @@ pub fn build_kernels(
         let e = &entries[name];
         let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
         let cooperative = crate::backend::spirv::kernel::is_cooperative_shape(&e.shape);
+        let tiled = crate::backend::spirv::gemm::GemmPlan::match_stmts(&e.shape, program).is_some();
         crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
         out.push(RunnerKernel {
             name: name.clone(),
@@ -501,7 +507,8 @@ pub fn build_kernels(
             index_var: e.shape.index_var.clone(),
             count_expr: e.shape.count_expr.clone().unwrap_or(Expr::Decimal(0)),
             work_cols: e.shape.work_cols,
-            cooperative: crate::backend::spirv::kernel::is_cooperative_shape(&e.shape),
+            cooperative,
+            tiled,
         });
     }
     Ok(out)
@@ -512,6 +519,7 @@ mod runner_tests {
     use super::*;
     use std::collections::HashMap;
 
+    #[allow(dead_code)]
     fn scalar_field(name: &str, offset: u64) -> RunnerField {
         RunnerField {
             name: name.to_string(),
@@ -602,6 +610,14 @@ fn emit_kernel_node(
 /// fallback. Coverage is identical in all three; only the hardware routing
 /// of the work-item id differs.
 fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
+    if k.tiled {
+        // Tiled GEMM: workgroups = items / (64*64), nx items = workgroups*16
+        // (the driver's launch_dev2d divides nx by the module's local_x 16,
+        // restoring the workgroup count — see gemm.rs grid contract).
+        return format!(
+            "      long long g_{ci} = (n_{ci} / (64 * 64)) * 16;\n      if (g_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, g_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
+        );
+    }
     if k.cooperative {
         // One 32-lane workgroup per row. The driver's 2D launch takes
         // (nx = x work items, ny = workgroup rows) and dispatches
