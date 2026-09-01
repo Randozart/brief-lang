@@ -29,6 +29,18 @@ pub struct StateField {
     pub ty: Type,
 }
 
+/// O3 (plan 2026-08-31-o3-float4-loads.md): a state array retyped as an
+/// array of 4-wide vectors. `array` is the member type id; `vector` the
+/// element vector type id; `elem` the scalar element type.
+#[derive(Clone)]
+pub struct Vec4Field {
+    pub array: Word,
+    pub vector: Word,
+    pub elem: Type,
+    /// Stage-2 scope: only float groups fuse into Fma.
+    pub elem_float: bool,
+}
+
 pub struct FnLowerer<'a> {
     pub builder: &'a mut SpirvBuilder,
     /// Local variables: name → (Function-storage pointer id, type).
@@ -59,7 +71,7 @@ pub struct FnLowerer<'a> {
     /// declared as an array of 4-wide vectors (byte-identical layout). Every
     /// scalar access goes through AccessChain(idx >> 2, idx & 3); aligned
     /// groups in the unrolled prefix emit wide loads.
-    pub vec4_fields: HashMap<String, Word>,
+    pub vec4_fields: HashMap<String, Vec4Field>,
 }
 
 impl<'a> FnLowerer<'a> {
@@ -243,8 +255,20 @@ impl<'a> FnLowerer<'a> {
                     let unrolled = trip.min(factor as u64);
                     let mut k = s0;
 
-                    // Unrolled prefix: `unrolled` inlined copies.
-                    for _ in 0..unrolled {
+                    // Unrolled prefix: `unrolled` inlined copies. O3: when
+                    // the next four iterations form an aligned group with a
+                    // vec4-typed field, ONE wide load covers k..k+3.
+                    let group_match = match_vec4_fma(body, &item, &self.vec4_fields);
+                    while k < s0 + unrolled {
+                        if k % 4 == 0
+                            && s0 + unrolled - k >= 4
+                            && group_match.is_some()
+                        {
+                            let g = group_match.as_ref().unwrap();
+                            self.emit_vec4_fma_group(g, &item, Some(k), k, var)?;
+                            k += 4;
+                            continue;
+                        }
                         let ck = self.builder.builder.constant_bit64(int_ty, k);
                         self.const_vars.insert(item.clone(), (ck, Type::int()));
                         for s in body {
@@ -254,6 +278,106 @@ impl<'a> FnLowerer<'a> {
                             self.emit_stmt(s)?;
                         }
                         k += 1;
+                    }
+
+                    // O3 VECTOR REMAINDER LOOP (plan o3-float4-loads.md):
+                    // the unrolled prefix is tiny relative to K — the real
+                    // win is a step-4 loop whose body emits one wide load
+                    // per vec4 field. Runs when the body matched the
+                    // mul-add group pattern; a scalar tail loop (below)
+                    // covers the last <4 iterations.
+                    if let Some(g) = &group_match {
+                        let group_end = k + ((e0 - k) / 4) * 4;
+                        if group_end > k {
+                            let step_ty = self.type_id(&Type::int())?;
+                            let header = self.builder.gen_id();
+                            let body_bb = self.builder.gen_id();
+                            let continue_bb = self.builder.gen_id();
+                            let merge = self.builder.gen_id();
+                            let preheader_bb = self.builder.gen_id();
+                            let cond0 = self.builder.gen_id();
+                            let cond_next = self.builder.gen_id();
+
+                            let start_c =
+                                self.builder.builder.constant_bit64(int_ty, k);
+                            let end_c =
+                                self.builder.builder.constant_bit64(int_ty, group_end);
+                            self.builder.store(var, start_c);
+                            let emit_cond = |lower: &mut Self,
+                                             cond: u32|
+                             -> Result<(), String> {
+                                let v = lower.builder.gen_id();
+                                lower.builder.emit(Instruction::new(
+                                    spirv::Op::Load,
+                                    Some(int_ty),
+                                    Some(v),
+                                    vec![Operand::IdRef(var)],
+                                ));
+                                lower.builder.emit(Instruction::new(
+                                    cmp_op,
+                                    Some(bool_ty),
+                                    Some(cond),
+                                    vec![Operand::IdRef(v), Operand::IdRef(end_c)],
+                                ));
+                                Ok(())
+                            };
+                            self.builder.builder.branch(preheader_bb);
+                            self.builder.begin_block(Some(preheader_bb));
+                            emit_cond(self, cond0)?;
+                            self.builder.builder.branch(header);
+                            self.builder.begin_block(Some(header));
+                            let cond_hdr = self
+                                .builder
+                                .builder
+                                .phi(
+                                    bool_ty,
+                                    None,
+                                    [(cond0, preheader_bb), (cond_next, continue_bb)],
+                                )
+                                .map_err(|e| format!("loop phi: {:?}", e))?;
+                            self.builder.builder.loop_merge(
+                                merge,
+                                continue_bb,
+                                rspirv::spirv::LoopControl::NONE,
+                                [] as [rspirv::dr::Operand; 0],
+                            );
+                            self.builder
+                                .builder
+                                .branch_conditional(cond_hdr, body_bb, merge, [] as [u32; 0]);
+                            self.builder.begin_block(Some(body_bb));
+                            self.vars.insert(item.clone(), (var, Type::int()));
+                            let prev_terminated = self.terminated;
+                            self.terminated = false;
+                            self.emit_vec4_fma_group(g, &item, None, k, var)?;
+                            self.builder.builder.branch(continue_bb);
+                            self.builder.begin_block(Some(continue_bb));
+                            let cur = self.builder.gen_id();
+                            self.builder.emit(Instruction::new(
+                                spirv::Op::Load,
+                                Some(step_ty),
+                                Some(cur),
+                                vec![Operand::IdRef(var)],
+                            ));
+                            let four = self.builder.builder.constant_bit64(step_ty, 4);
+                            let next = self.builder.gen_id();
+                            self.builder.emit(Instruction::new(
+                                spirv::Op::IAdd,
+                                Some(step_ty),
+                                Some(next),
+                                vec![Operand::IdRef(cur), Operand::IdRef(four)],
+                            ));
+                            self.builder.emit(Instruction::new(
+                                spirv::Op::Store,
+                                None,
+                                None,
+                                vec![Operand::IdRef(var), Operand::IdRef(next)],
+                            ));
+                            emit_cond(self, cond_next)?;
+                            self.builder.builder.branch(header);
+                            self.builder.begin_block(Some(merge));
+                            self.terminated = prev_terminated;
+                            k = group_end;
+                        }
                     }
 
                     // Structured remainder loop: k in [k, e0).
@@ -1054,24 +1178,47 @@ fn cast_opcode(
         let field_types: Vec<Type> =
             self.state_fields.iter().map(|f| f.ty.clone()).collect();
         let mut offset_pre: u32 = 0;
-        let mut vec4_ids: Vec<(String, Word)> = Vec::new();
+        let mut vec4_ids: Vec<(String, Word, Type)> = Vec::new();
         for f in &self.state_fields {
             let member_bytes = Self::field_storage_bytes(self.builder, &f.ty)?;
             if Self::vec4_eligible(self.builder, &f.ty, offset_pre)? {
                 let arr_id = Self::vec4_member_type(self.builder, &f.ty)?;
-                vec4_ids.push((f.name.clone(), arr_id));
+                vec4_ids.push((f.name.clone(), arr_id, f.ty.clone()));
             }
             offset_pre += member_bytes;
         }
-        for (name, arr_id) in &vec4_ids {
-            self.vec4_fields.insert(name.clone(), *arr_id);
+        for (name, arr_id, ty) in &vec4_ids {
+            // The VECTOR id is the first operand of the array type's
+            // OpTypeArray; the scalar element type comes from the field.
+            let vector = match self.builder.module_ref()
+                .types_global_values
+                .iter()
+                .find(|i| i.result_id == Some(*arr_id))
+                .and_then(|i| i.operands.first())
+            {
+                Some(rspirv::dr::Operand::IdRef(v)) => *v,
+                _ => return Err("vec4 member type lost its element".into()),
+            };
+            let Type::Vector(inner, _) = ty else {
+                return Err("vec4 field on a non-array".into());
+            };
+            let elem_float = self.builder.is_float_type(inner)?;
+            self.vec4_fields.insert(
+                name.clone(),
+                Vec4Field {
+                    array: *arr_id,
+                    vector,
+                    elem: (**inner).clone(),
+                    elem_float,
+                },
+            );
         }
         let mut members = Vec::with_capacity(field_types.len());
         for (idx, ty) in field_types.iter().enumerate() {
             // Vec4-typed members use their ARRAY-OF-VEC4 id, not the scalar
             // array id — byte-identical layout, wide loads possible.
             match self.vec4_fields.get(&self.state_fields[idx].name) {
-                Some(arr_id) => members.push(*arr_id),
+                Some(vf) => members.push(vf.array),
                 None => members.push(self.type_id(ty)?),
             }
         }
@@ -1450,5 +1597,315 @@ pub fn collect_locals(body: &[Statement], out: &mut Vec<(String, Type)>) {
             }
             _ => {}
         }
+    }
+}
+
+// ── O3 stage 2 (plan 2026-08-31-o3-float4-loads.md): aligned group loads ──
+
+/// A matched float mul-add group: `acc = acc + f1[base + k] * f2[...]`
+/// (either mul order), where `f1` is vec4-typed and its index is affine in
+/// the loop var with coefficient exactly 1.
+struct Vec4Group {
+    acc: String,
+    vec_field: String,
+    vec_side: Expr,
+    scalar_side: Expr,
+    elem: Type,
+}
+
+fn match_vec4_fma(
+    body: &[Statement],
+    item: &str,
+    vec4_fields: &HashMap<String, Vec4Field>,
+) -> Option<Vec4Group> {
+    use crate::ast::BinaryOpKind::{Add, Mul};
+    if body.len() != 1 {
+        return None;
+    }
+    let Statement::Assign(lhs, rhs) = &body[0] else {
+        return None;
+    };
+    let Expr::Identifier(acc) = lhs else {
+        return None;
+    };
+    let rhs_ref: &Expr = rhs;
+    let Expr::BinaryOp(Add, a, b) = rhs_ref else {
+        return None;
+    };
+    let mul = match (a.as_ref(), b.as_ref()) {
+        (m @ Expr::BinaryOp(Mul, _, _), _) => m,
+        (_, m @ Expr::BinaryOp(Mul, _, _)) => m,
+        _ => return None,
+    };
+    let Expr::BinaryOp(Mul, left, right) = mul else {
+        return None;
+    };
+    let (vec_expr, scalar_expr) = match (left.as_ref(), right.as_ref()) {
+        (Expr::Index(of, _), _)
+            if vec4_fields.contains_key(field_name_of_index(of).unwrap_or("")) =>
+        {
+            (left.as_ref(), right.as_ref())
+        }
+        (_, Expr::Index(of, _))
+            if vec4_fields.contains_key(field_name_of_index(of).unwrap_or("")) =>
+        {
+            (right.as_ref(), left.as_ref())
+        }
+        _ => return None,
+    };
+    let Expr::Index(vof, vidx) = vec_expr else {
+        return None;
+    };
+    let vfname = field_name_of_index(vof)?;
+    let vf = vec4_fields.get(vfname)?;
+    // Affine in the loop var with coefficient exactly 1.
+    if expr_var_count(vidx, item) != 1 {
+        return None;
+    }
+    if !vf.elem_float {
+        return None; // stage-2 scope: float FMA groups only
+    }
+    Some(Vec4Group {
+        acc: acc.clone(),
+        vec_field: vfname.to_string(),
+        vec_side: vidx.as_ref().clone(),
+        scalar_side: scalar_expr.clone(),
+        elem: vf.elem.clone(),
+    })
+}
+
+impl<'a> FnLowerer<'a> {
+    /// Emit ONE 4-iteration group of a matched mul-add. `at` is the group
+    /// start (constant, % 4 == 0) for the unrolled prefix; `var_storage`
+    /// carries the loop phi for the vector-loop form (base = div4(base
+    /// literals) + k). The scalar side rebinds the loop var via const_vars.
+    fn emit_vec4_fma_group(
+        &mut self,
+        g: &Vec4Group,
+        item: &str,
+        at: Option<u64>,
+        loop_start: u64,
+        var_storage: Word,
+    ) -> Result<(), String> {
+        let Some(vf) = self.vec4_fields.get(&g.vec_field).cloned() else {
+            return Err("vec4 group lost its field".into());
+        };
+        let Some(ssbo) = self.ssbo_var else {
+            return Err("vec4 group without an SSBO".into());
+        };
+        let member_pos = self
+            .state_fields
+            .iter()
+            .position(|f| f.name == g.vec_field)
+            .ok_or_else(|| format!("vec4 field '{}' lost", g.vec_field))?;
+        // Group base index: the vec side with the loop var substituted by
+        // the group start / k, divided by 4; for the runtime form, the var
+        // coefficient is 1 so the phi value IS the group index offset.
+        let base_expr = match at {
+            Some(k0) => {
+                let substituted = subst_var(&g.vec_side, item, k0 as i64);
+                let folded = fold_consts(&substituted, &self.const_int_values);
+                div4(&folded).ok_or("vec4 group lost alignment")?
+            }
+            None => {
+                // The loop var counts ELEMENTS (stepping 4). The vec4 group
+                // index is (base + kv)/4 = div4(base) + (kv - loop_start)/4,
+                // and (kv - loop_start) is a multiple of 4 by construction,
+                // so the /4 is a shift by 2.
+                let zeroed = subst_var(&g.vec_side, item, 0);
+                let folded = fold_consts(&zeroed, &self.const_int_values);
+                let b0 = div4(&folded).ok_or("vec4 group lost alignment")?;
+                let rel = Expr::BinaryOp(
+                    crate::ast::BinaryOpKind::Shr,
+                    Box::new(Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Sub,
+                        Box::new(Expr::Identifier(item.to_string())),
+                        Box::new(Expr::Decimal(loop_start as i64)),
+                    )),
+                    Box::new(Expr::Decimal(2)),
+                );
+                Expr::BinaryOp(
+                    crate::ast::BinaryOpKind::Add,
+                    Box::new(b0),
+                    Box::new(rel),
+                )
+            }
+        };
+        let (base_id, _bty) = self.emit_expr(&base_expr)?;
+        let v4_ptr = self
+            .builder
+            .ptr_class(StorageClass::StorageBuffer, vf.vector);
+        let member = self.builder.u32_const(member_pos as u32);
+        let group = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            spirv::Op::AccessChain,
+            Some(v4_ptr),
+            Some(group),
+            vec![
+                Operand::IdRef(ssbo),
+                Operand::IdRef(member),
+                Operand::IdRef(base_id),
+            ],
+        ));
+        let v4_val = self.builder.load(vf.vector, group);
+        let elem_ty_id = self.type_id(&vf.elem)?;
+        let acc_ptr = self
+            .vars
+            .get(&g.acc)
+            .map(|(p, _)| *p)
+            .ok_or_else(|| format!("vec4 accumulator '{}' lost", g.acc))?;
+        for j in 0u32..4 {
+            let comp = self.builder.gen_id();
+            self.builder.emit(Instruction::new(
+                spirv::Op::CompositeExtract,
+                Some(elem_ty_id),
+                Some(comp),
+                vec![Operand::IdRef(v4_val), Operand::LiteralBit32(j)],
+            ));
+            let (other_id, _oty) = match at {
+                Some(k0) => {
+                    let scalar_expr = subst_var(&g.scalar_side, item, (k0 + j as u64) as i64);
+                    self.emit_expr(&scalar_expr)?
+                }
+                // Runtime form: the loop var holds the group's base element
+                // index — component j reads base + j.
+                None => {
+                    let kv_plus_j = Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Add,
+                        Box::new(Expr::Identifier(item.to_string())),
+                        Box::new(Expr::Decimal(j as i64)),
+                    );
+                    let scalar_expr =
+                        subst_var_expr(&g.scalar_side, item, &kv_plus_j);
+                    self.emit_expr(&scalar_expr)?
+                }
+            };
+            let acc_val = self.builder.load(elem_ty_id, acc_ptr);
+            let fused = self
+                .builder
+                .glsl_fma(elem_ty_id, comp, other_id, acc_val);
+            self.builder.store(acc_ptr, fused);
+        }
+        Ok(())
+    }
+}
+
+/// Number of additive occurrences of `name` in `e`.
+fn expr_var_count(e: &Expr, name: &str) -> usize {
+    match e {
+        Expr::Identifier(n) if n == name => 1,
+        Expr::BinaryOp(_, l, r) => expr_var_count(l, name) + expr_var_count(r, name),
+        _ => 0,
+    }
+}
+
+/// Replace Identifier `name` with an arbitrary replacement expression.
+fn subst_var_expr(e: &Expr, name: &str, repl: &Expr) -> Expr {
+    match e {
+        Expr::Identifier(n) if n == name => repl.clone(),
+        Expr::BinaryOp(k, l, r) => Expr::BinaryOp(
+            *k,
+            Box::new(subst_var_expr(l, name, repl)),
+            Box::new(subst_var_expr(r, name, repl)),
+        ),
+        Expr::Index(o, i) => Expr::Index(
+            Box::new(subst_var_expr(o, name, repl)),
+            Box::new(subst_var_expr(i, name, repl)),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Replace Identifier `name` with Decimal(value).
+fn subst_var(e: &Expr, name: &str, value: i64) -> Expr {
+    match e {
+        Expr::Identifier(n) if n == name => Expr::Decimal(value),
+        Expr::BinaryOp(k, l, r) => Expr::BinaryOp(
+            *k,
+            Box::new(subst_var(l, name, value)),
+            Box::new(subst_var(r, name, value)),
+        ),
+        // The scalar side is typically `x[k]` — the var hides inside Index.
+        Expr::Index(o, i) => Expr::Index(
+            Box::new(subst_var(o, name, value)),
+            Box::new(subst_var(i, name, value)),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Prove `e` (an index expression with the loop var ALREADY substituted —
+/// i.e. the group base) is divisible by 4, returning the expression with
+/// every literal divided by 4. Structural rule: Decimals must be 4-divisible;
+/// Mul(other, Decimal d) divides d; Add recurses; anything else fails.
+fn aligned_div4(
+    e: &Expr,
+    name: &str,
+    at: i64,
+    consts: &std::collections::HashMap<String, i64>,
+) -> Option<Expr> {
+    // `at` is the group start (k0 % 4 == 0) — substituting it before the
+    // division keeps every literal 4-divisible.
+    let at = subst_var(e, name, at);
+    let folded = fold_consts(&at, consts);
+    div4(&folded)
+}
+
+/// Replace const identifiers with their literal values (the unroll alignment
+/// proof needs coefficients as literals; emit-time const resolution happens
+/// later).
+fn fold_consts(e: &Expr, consts: &std::collections::HashMap<String, i64>) -> Expr {
+    match e {
+        Expr::Identifier(n) => match consts.get(n) {
+            Some(v) => Expr::Decimal(*v),
+            None => e.clone(),
+        },
+        Expr::BinaryOp(k, l, r) => Expr::BinaryOp(
+            *k,
+            Box::new(fold_consts(l, consts)),
+            Box::new(fold_consts(r, consts)),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn div4(e: &Expr) -> Option<Expr> {
+    match e {
+        Expr::Decimal(d) => {
+            if d % 4 == 0 {
+                Some(Expr::Decimal(d / 4))
+            } else {
+                None
+            }
+        }
+        Expr::BinaryOp(crate::ast::BinaryOpKind::Add, l, r) => Some(Expr::BinaryOp(
+            crate::ast::BinaryOpKind::Add,
+            Box::new(div4(l)?),
+            Box::new(div4(r)?),
+        )),
+        Expr::BinaryOp(crate::ast::BinaryOpKind::Mul, l, r) => {
+            match (l.as_ref(), r.as_ref()) {
+                (Expr::Decimal(d), other) | (other, Expr::Decimal(d)) => {
+                    if d % 4 != 0 {
+                        return None;
+                    }
+                    Some(Expr::BinaryOp(
+                        crate::ast::BinaryOpKind::Mul,
+                        Box::new(other.clone()),
+                        Box::new(Expr::Decimal(d / 4)),
+                    ))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Field name of an `Identifier` (the object of an Index expression).
+fn field_name_of_index(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Identifier(n) => Some(n),
+        _ => None,
     }
 }
