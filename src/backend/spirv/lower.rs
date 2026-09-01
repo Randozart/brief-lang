@@ -55,6 +55,11 @@ pub struct FnLowerer<'a> {
     /// Set when the body executed a term/endprogram — callers stop
     /// branching afterwards (a block can only have one terminator).
     pub terminated: bool,
+    /// O3 (plan 2026-08-31-o3-float4-loads.md): fields whose SSBO member is
+    /// declared as an array of 4-wide vectors (byte-identical layout). Every
+    /// scalar access goes through AccessChain(idx >> 2, idx & 3); aligned
+    /// groups in the unrolled prefix emit wide loads.
+    pub vec4_fields: HashMap<String, Word>,
 }
 
 impl<'a> FnLowerer<'a> {
@@ -70,6 +75,7 @@ impl<'a> FnLowerer<'a> {
             const_int_values: HashMap::new(),
             const_vars: HashMap::new(),
             terminated: false,
+            vec4_fields: HashMap::new(),
         }
     }
 
@@ -979,6 +985,64 @@ fn cast_opcode(
 }
 
 // ── State (SSBO) ────────────────────────────────────────────────────
+    /// O3 helpers: member byte size (shared by the offset walk) and the
+    /// vec4 eligibility / member-type construction.
+    fn field_storage_bytes(builder: &mut SpirvBuilder, ty: &Type) -> Result<u32, String> {
+        match ty {
+            Type::Vector(inner, dims) => {
+                let elems: u32 = dims
+                    .iter()
+                    .map(|d| match d {
+                        crate::ast::Dimension::Anonymous(n) => *n as u32,
+                        crate::ast::Dimension::Named(_, n) => *n as u32,
+                    })
+                    .product::<u32>()
+                    .max(1);
+                Ok(builder.scalar_storage_bytes(inner)? * elems)
+            }
+            other => builder.scalar_storage_bytes(other),
+        }
+    }
+
+    fn vec4_eligible(builder: &mut SpirvBuilder, ty: &Type, offset: u32) -> Result<bool, String> {
+        if offset % 16 != 0 {
+            return Ok(false);
+        }
+        let Type::Vector(inner, dims) = ty else {
+            return Ok(false);
+        };
+        if builder.scalar_storage_bytes(inner)? != 4 {
+            return Ok(false);
+        }
+        let elems: u32 = dims
+            .iter()
+            .map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u32,
+                crate::ast::Dimension::Named(_, n) => *n as u32,
+            })
+            .product::<u32>()
+            .max(1);
+        Ok(elems % 4 == 0)
+    }
+
+    /// OpTypeArray(vec4, N/4) with ArrayStride 16 — byte-identical to the
+    /// scalar array it replaces (count % 4 == 0 is the eligibility gate).
+    fn vec4_member_type(builder: &mut SpirvBuilder, ty: &Type) -> Result<Word, String> {
+        let Type::Vector(inner, dims) = ty else {
+            return Err("vec4_member_type on a non-array".into());
+        };
+        let elems: u32 = dims
+            .iter()
+            .map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u32,
+                crate::ast::Dimension::Named(_, n) => *n as u32,
+            })
+            .product::<u32>()
+            .max(1);
+        let scalar = builder.lower_type(inner)?;
+        Ok(builder.vec4_array_type(scalar, elems))
+    }
+
     /// Declare the StorageBuffer struct over collected fields (sorted by
     /// name — determinism rule) and create its variable. Called BEFORE any
     /// body statement lowers.
@@ -989,9 +1053,27 @@ fn cast_opcode(
         self.state_fields.sort_by(|a, b| a.name.cmp(&b.name));
         let field_types: Vec<Type> =
             self.state_fields.iter().map(|f| f.ty.clone()).collect();
+        let mut offset_pre: u32 = 0;
+        let mut vec4_ids: Vec<(String, Word)> = Vec::new();
+        for f in &self.state_fields {
+            let member_bytes = Self::field_storage_bytes(self.builder, &f.ty)?;
+            if Self::vec4_eligible(self.builder, &f.ty, offset_pre)? {
+                let arr_id = Self::vec4_member_type(self.builder, &f.ty)?;
+                vec4_ids.push((f.name.clone(), arr_id));
+            }
+            offset_pre += member_bytes;
+        }
+        for (name, arr_id) in &vec4_ids {
+            self.vec4_fields.insert(name.clone(), *arr_id);
+        }
         let mut members = Vec::with_capacity(field_types.len());
-        for ty in &field_types {
-            members.push(self.type_id(ty)?);
+        for (idx, ty) in field_types.iter().enumerate() {
+            // Vec4-typed members use their ARRAY-OF-VEC4 id, not the scalar
+            // array id — byte-identical layout, wide loads possible.
+            match self.vec4_fields.get(&self.state_fields[idx].name) {
+                Some(arr_id) => members.push(*arr_id),
+                None => members.push(self.type_id(ty)?),
+            }
         }
         let member_ids: Vec<Word> = members.clone();
         let struct_ty = self.builder.builder.type_struct(member_ids);
@@ -1067,6 +1149,39 @@ fn cast_opcode(
         let member_idx = self.builder.u32_const(pos as u32);
         let ptr_ty = self.builder.ptr_class(StorageClass::StorageBuffer, elem_id);
         let chain = self.builder.gen_id();
+        if self.vec4_fields.contains_key(field) {
+            // O3: the member is an array of 4-wide vectors (byte-identical
+            // layout). The scalar element lives at [idx >> 2][idx & 3].
+            let int_ty = self.type_id(&Type::int())?;
+            let two = self.builder.i64_const(2);
+            let q = self.builder.gen_id();
+            self.builder.emit(Instruction::new(
+                spirv::Op::ShiftRightArithmetic,
+                Some(int_ty),
+                Some(q),
+                vec![Operand::IdRef(idx), Operand::IdRef(two)],
+            ));
+            let three = self.builder.i64_const(3);
+            let r = self.builder.gen_id();
+            self.builder.emit(Instruction::new(
+                spirv::Op::BitwiseAnd,
+                Some(int_ty),
+                Some(r),
+                vec![Operand::IdRef(idx), Operand::IdRef(three)],
+            ));
+            self.builder.emit(Instruction::new(
+                spirv::Op::AccessChain,
+                Some(ptr_ty),
+                Some(chain),
+                vec![
+                    Operand::IdRef(var),
+                    Operand::IdRef(member_idx),
+                    Operand::IdRef(q),
+                    Operand::IdRef(r),
+                ],
+            ));
+            return Ok((chain, elem_ty));
+        }
         self.builder.emit(Instruction::new(
             spirv::Op::AccessChain,
             Some(ptr_ty),

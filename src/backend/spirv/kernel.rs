@@ -35,12 +35,17 @@ pub fn emit_kernel(
     // ── Module globals: state SSBO + invocation-id builtins. Ids thread
     // into the body lowerer so nothing is created twice.
     let state_fields = collect_state_fields(items);
-    let (ssbo_var, global_id_var, local_id_var) = {
+    let (ssbo_var, global_id_var, local_id_var, vec4_fields) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
         warm.materialize_consts(items)?;
         warm.warm_builtins()?;
         warm.setup_state_buffer()?;
-        (warm.ssbo_var, warm.global_id_var, warm.local_id_var)
+        (
+            warm.ssbo_var,
+            warm.global_id_var,
+            warm.local_id_var,
+            warm.vec4_fields,
+        )
     };
     // Types referenced by the function must precede it in the module.
 
@@ -96,6 +101,7 @@ pub fn emit_kernel(
     lower.ssbo_var = ssbo_var;
     lower.global_id_var = global_id_var;
     lower.local_id_var = local_id_var;
+    lower.vec4_fields = vec4_fields;
     lower.materialize_consts(items)?;
     lower
         .vars

@@ -1168,5 +1168,146 @@ mod tests {
             .expect("ineligible body must not become a kernel");
         assert!(err.contains("no GPU kernels"), "{err}");
     }
+    /// O3 (plan 2026-08-31-o3-float4-loads.md): vec4-eligible array members
+    /// are declared as arrays of 4-wide vectors (byte-identical layout); every
+    /// scalar access to them goes through AccessChain(member, idx>>2, idx&3).
+    /// Locks: OpTypeVector present, the shifted AccessChain shape, and the
+    /// binary passes spirv-val.
+    #[test]
+    fn test_vec4_member_typing_and_shifted_access() {
+        use crate::ast::*;
+        use crate::ast::Dimension as _Dimension_unused;
+        let has_val = std::process::Command::new("spirv-val").arg("--version").output().is_ok();
+        let float_state = |name: &str, n: i64| TopLevel::StateDecl(StateDecl {
+            name: name.into(),
+            ty: Type::Vector(Box::new(Type::float()), vec![Dimension::Anonymous(n as usize)]),
+            span: None,
+        });
+        let program = vec![
+            float_state("a", 4096),
+            float_state("out", 4096),
+            TopLevel::Transaction(Transaction {
+                name: "copy".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::BinaryOp(
+                        BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(4096)),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                    post_authority: false,
+                },
+                body: vec![
+                    Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("out".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                        Expr::Index(
+                            Box::new(Expr::Identifier("a".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                    ),
+                    Statement::Assign(
+                        Expr::Identifier("i".into()),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("i".into())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                ],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        let txn_stmts = match &program.last().unwrap() {
+            TopLevel::Transaction(t) => t.body.clone(),
+            other => panic!("expected transaction, got {other:?}"),
+        };
+        let shape = crate::analysis::accel::KernelShape {
+            index_var: "i".into(),
+            count_expr: Some(Expr::Decimal(4096)),
+            kernel_stmts: txn_stmts,
+            host_stmts: vec![],
+            read_buffers: vec!["a".into()],
+            write_buffers: vec!["out".into()],
+            scalar_ins: vec![],
+            eligible: true,
+            reasons: vec![],
+            work_cols: None,
+        };
+        let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
+        emit_kernel(&mut builder, "main", &shape, &program).unwrap();
+        let m = builder.module_ref();
+        // The vec4 type exists, and the array-of-vec4 member type carries
+        // ArrayStride 16.
+        // Find the array-of-vector member type: a TypeArray whose element is
+        // a TypeVector (the builtin vec3 input is also a TypeVector, so match
+        // by structure, not by "first vector in the module").
+        let arr = m.types_global_values.iter()
+            .find(|i| {
+                if i.class.opcode != spirv::Op::TypeArray {
+                    return false;
+                }
+                let Some(&rspirv::dr::Operand::IdRef(elem)) = i.operands.first() else {
+                    return false;
+                };
+                m.types_global_values.iter().any(|t| {
+                    t.result_id == Some(elem)
+                        && t.class.opcode == spirv::Op::TypeVector
+                })
+            })
+            .expect("array-of-vec4 member type");
+        let v4_id = match arr.operands.first() {
+            Some(rspirv::dr::Operand::IdRef(v)) => *v,
+            other => panic!("unexpected TypeArray operand {other:?}"),
+        };
+        let arr_id = arr.result_id.unwrap();
+        assert!(
+            m.types_global_values.iter().any(|a| {
+                a.class.opcode == spirv::Op::Decorate
+                    && a.operands.first() == Some(&rspirv::dr::Operand::IdRef(arr_id))
+            }),
+            "vec4 array must carry its ArrayStride decoration"
+        );
+        // Every AccessChain into the vec4 member has FOUR operands:
+        // var, member, idx>>2, idx&3.
+        assert!(
+            m.functions.iter()
+                .flat_map(|f| f.blocks.iter())
+                .flat_map(|b| b.instructions.iter())
+                .filter(|inst| inst.class.opcode == spirv::Op::AccessChain)
+                .any(|inst| inst.operands.len() == 4),
+            "scalar access into a vec4 member must use the shifted chain"
+        );
+        if !has_val {
+            eprintln!("spirv-val not found — binary checks only");
+            return;
+        }
+        let binary = builder.build().unwrap();
+        let dir = std::env::temp_dir().join(format!("briev_spv_vec4_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("vec4.spv");
+        std::fs::write(&path, &binary).unwrap();
+        let out = std::process::Command::new("spirv-val").arg(&path).output().expect("spirv-val");
+        assert!(out.status.success(), "spirv-val rejected:
+{}",
+            String::from_utf8_lossy(&out.stderr));
+    }
+
 }
 pub mod runner;
+

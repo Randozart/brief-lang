@@ -35,6 +35,10 @@ pub struct SpirvBuilder {
     /// O2 (plan 2026-08-31-gpu-next): lazily imported GLSL.std.450 set id,
     /// cached so repeated Fma emissions share one OpExtInstImport.
     glsl_set: Option<Word>,
+    /// O3 (plan 2026-08-31-o3-float4-loads.md): array-of-vec4 member types,
+    /// cached per (scalar elem id, length) — rspirv dedups the OpTypeArray,
+    /// so a second decoration would be invalid.
+    vec4_arrays: HashMap<(Word, u32), Word>,
 }
 
 impl SpirvBuilder {
@@ -52,6 +56,7 @@ impl SpirvBuilder {
             casting_graph: CastingGraph::new(),
             int_bits: 64,
             glsl_set: None,
+            vec4_arrays: HashMap::new(),
         }
     }
 
@@ -102,6 +107,26 @@ impl SpirvBuilder {
     /// Allocate a fresh result ID.
     pub fn gen_id(&mut self) -> Word {
         self.builder.id()
+    }
+
+    /// O3 (plan 2026-08-31-o3-float4-loads.md): OpTypeArray(vec4, len/4)
+    /// with ArrayStride 16 — byte-identical to the scalar array. Cached per
+    /// (scalar elem id, element count): rspirv dedups identical OpTypeArrays
+    /// and a second ArrayStride decoration on the same id is invalid.
+    pub fn vec4_array_type(&mut self, scalar: Word, elems: u32) -> Word {
+        let v4 = self.builder.type_vector(scalar, 4);
+        let len = self.u32_const(elems / 4);
+        if let Some(arr) = self.vec4_arrays.get(&(v4, elems)) {
+            return *arr;
+        }
+        let arr = self.builder.type_array(v4, len);
+        self.decorate_raw(
+            arr,
+            spirv::Decoration::ArrayStride,
+            vec![rspirv::dr::Operand::LiteralBit32(16)],
+        );
+        self.vec4_arrays.insert((v4, elems), arr);
+        arr
     }
 
     /// O2 (plan 2026-08-31-gpu-next): emit `GLSL.std.450 Fma(a, b, c)` —
