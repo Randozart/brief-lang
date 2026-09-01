@@ -1172,10 +1172,35 @@ fn cast_opcode(
         }
     }
 
-    fn vec4_eligible(builder: &mut SpirvBuilder, ty: &Type, offset: u32) -> Result<bool, String> {
-        if offset % 16 != 0 {
-            return Ok(false);
+    /// THE projection layout rule (plan 2026-09-01-vec4-projection-layout):
+    /// fields are name-sorted (caller's duty) and packed, EXCEPT that a
+    /// field the vec4 gate would accept (Float32 array, count % 4 == 0) is
+    /// aligned up to 16B so it can be declared as an array-of-v4float and
+    /// wide-loaded. Consumers: `setup_state_buffer` (member decorations),
+    /// `runner::ssbo_layout` (runner BrievField literals), and the LLVM
+    /// descriptor path — device offsets have exactly this one definition.
+    /// The HOST state layouts (runner `state[]`, LLVM %State) stay packed;
+    /// the RT copies per field, so host ≠ projection needs no bridging.
+    pub fn projection_offsets(
+        builder: &mut SpirvBuilder,
+        fields: &[StateField],
+    ) -> Result<Vec<u32>, String> {
+        let mut offsets = Vec::with_capacity(fields.len());
+        let mut offset: u32 = 0;
+        for f in fields {
+            if Self::vec4_shape_eligible(builder, &f.ty)? {
+                offset = offset.next_multiple_of(16);
+            }
+            offsets.push(offset);
+            offset += Self::field_storage_bytes(builder, &f.ty)?;
         }
+        Ok(offsets)
+    }
+
+    /// Shape half of the vec4 gate — offset-independent (Float32 array,
+    /// count % 4 == 0). The layout rule aligns these fields so the offset
+    /// half holds by construction.
+    fn vec4_shape_eligible(builder: &mut SpirvBuilder, ty: &Type) -> Result<bool, String> {
         let Type::Vector(inner, dims) = ty else {
             return Ok(false);
         };
@@ -1191,6 +1216,13 @@ fn cast_opcode(
             .product::<u32>()
             .max(1);
         Ok(elems % 4 == 0)
+    }
+
+    fn vec4_eligible(builder: &mut SpirvBuilder, ty: &Type, offset: u32) -> Result<bool, String> {
+        if offset % 16 != 0 {
+            return Ok(false);
+        }
+        Self::vec4_shape_eligible(builder, ty)
     }
 
     /// OpTypeArray(vec4, N/4) with ArrayStride 16 — byte-identical to the
@@ -1221,15 +1253,16 @@ fn cast_opcode(
         self.state_fields.sort_by(|a, b| a.name.cmp(&b.name));
         let field_types: Vec<Type> =
             self.state_fields.iter().map(|f| f.ty.clone()).collect();
-        let mut offset_pre: u32 = 0;
+        // THE layout rule (plan 2026-09-01-vec4-projection-layout): shared
+        // with the runner + LLVM descriptor paths; vec4-eligible arrays are
+        // 16B-aligned, everything else packed.
+        let proj_offsets = Self::projection_offsets(self.builder, &self.state_fields)?;
         let mut vec4_ids: Vec<(String, Word, Type)> = Vec::new();
-        for f in &self.state_fields {
-            let member_bytes = Self::field_storage_bytes(self.builder, &f.ty)?;
-            if Self::vec4_eligible(self.builder, &f.ty, offset_pre)? {
+        for (f, &off) in self.state_fields.iter().zip(&proj_offsets) {
+            if Self::vec4_eligible(self.builder, &f.ty, off)? {
                 let arr_id = Self::vec4_member_type(self.builder, &f.ty)?;
                 vec4_ids.push((f.name.clone(), arr_id, f.ty.clone()));
             }
-            offset_pre += member_bytes;
         }
         for (name, arr_id, ty) in &vec4_ids {
             // The VECTOR id is the first operand of the array type's
@@ -1272,33 +1305,18 @@ fn cast_opcode(
                 self.builder
             .decorate_raw(struct_ty, spirv::Decoration::Block, vec![]);
         // Explicit member offsets — Block structs must be fully laid out.
-        let mut offset: u32 = 0;
-        for (idx, f) in self.state_fields.iter().enumerate() {
+        // 2026-09-01: from the shared projection rule (vec4 arrays 16B-aligned);
+        // member byte-size commentary: the element's REAL storage width —
+        // arrays are count × elem (matching the ArrayStride layout), scalars
+        // are their own width. The old fixed-8 sizing mis-slotted every
+        // Float32 element.
+        for (idx, &off) in proj_offsets.iter().enumerate() {
             self.builder.builder.member_decorate(
                 struct_ty,
                 idx as u32,
                 spirv::Decoration::Offset,
-                [rspirv::dr::Operand::LiteralBit32(offset)],
+                [rspirv::dr::Operand::LiteralBit32(off)],
             );
-            // 2026-08-31: member sizes use the element's REAL storage width —
-            // arrays are count × elem (matching the ArrayStride layout and the
-            // runtime's pack sizes), scalars are their own width. The old
-            // fixed-8 sizing mis-slotted every Float32 element.
-            let member_bytes = match &f.ty {
-                Type::Vector(inner, dims) => {
-                    let elems: u32 = dims
-                        .iter()
-                        .map(|d| match d {
-                            crate::ast::Dimension::Anonymous(n) => *n as u32,
-                            crate::ast::Dimension::Named(_, n) => *n as u32,
-                        })
-                        .product::<u32>()
-                        .max(1);
-                    self.builder.scalar_storage_bytes(inner)? * elems
-                }
-                other => self.builder.scalar_storage_bytes(other)?,
-            };
-            offset += member_bytes;
         }
         let struct_ptr = self.builder.ptr_class(StorageClass::StorageBuffer, struct_ty);
         let var = self.builder.gen_id();

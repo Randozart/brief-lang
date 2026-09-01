@@ -41,6 +41,12 @@ typedef struct {
     uint64_t elem_bytes;   // array: element size; scalar: value size
     uint64_t count;        // array: element count; scalar: 1
     uint32_t is_write;     // array written by the kernel (readback after)
+    // 2026-09-01 (plan vec4-projection-layout): byte offset of the field in
+    // the DEVICE projection — declared by the compiler's descriptor
+    // emitters (vec4-eligible arrays are 16B-aligned there; host layouts
+    // stay packed). The old packed-sum recomputation is gone: one rule,
+    // compiler-owned, consumers derive.
+    uint64_t proj_offset;
 } BrievField;
 
 /// One compiled SPIR-V kernel + its layout.
@@ -218,21 +224,16 @@ const char* briev_accel_device_name(void) {
 // Generic pack/unpack + dispatch
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Byte offset of kernel field `i` inside the flat projection.
-static uint64_t proj_field_offset(const BrievKernelDesc* k, uint32_t i) {
-    uint64_t off = 0;
-    for (uint32_t j = 0; j < i; j++) {
-        off += k->fields[j].count * k->fields[j].elem_bytes;
-    }
-    return off;
-}
-
+/// Total device projection size — fields' declared ends (the projection is
+/// the union of the declared per-field spans; alignment gaps included).
 static uint64_t proj_size(const BrievKernelDesc* k) {
-    uint64_t off = 0;
+    uint64_t end = 0;
     for (uint32_t j = 0; j < k->n_fields; j++) {
-        off += k->fields[j].count * k->fields[j].elem_bytes;
+        uint64_t f_end = k->fields[j].proj_offset
+                       + k->fields[j].count * k->fields[j].elem_bytes;
+        if (f_end > end) { end = f_end; }
     }
-    return off;
+    return end;
 }
 
 /// Pack the kernel's fields from the host %State into a flat projection
@@ -254,9 +255,8 @@ int briev_accel_launch(uint32_t idx, void* state, uint64_t work_n) {
     // Pack: copy each field from its host offset into projection order.
     for (uint32_t i = 0; i < k->n_fields; i++) {
         const BrievField* f = &k->fields[i];
-        uint64_t off = proj_field_offset(k, i);
         size_t n = (size_t)(f->count * f->elem_bytes);
-        memcpy(proj + off, (const uint8_t*)state + f->host_offset, n);
+        memcpy(proj + f->proj_offset, (const uint8_t*)state + f->host_offset, n);
     }
     int ok = g_driver->launch(g_kernels[idx], proj, bytes, work_n, proj_out);
     // Unpack: copy written fields back to the host state.
@@ -265,9 +265,8 @@ int briev_accel_launch(uint32_t idx, void* state, uint64_t work_n) {
         if (!f->is_write) {
             continue;
         }
-        uint64_t off = proj_field_offset(k, i);
         size_t n = (size_t)(f->count * f->elem_bytes);
-        memcpy((uint8_t*)state + f->host_offset, proj_out + off, n);
+        memcpy((uint8_t*)state + f->host_offset, proj_out + f->proj_offset, n);
     }
     free(proj);
     free(proj_out);
@@ -317,7 +316,7 @@ int briev_accel_launch_resident_2d(uint32_t idx, void* state,
         full_sync = 1;
         for (uint32_t i = 0; i < k->n_fields; i++) {
             const BrievField* f = &k->fields[i];
-            memcpy(mapped + proj_field_offset(k, i),
+            memcpy(mapped + f->proj_offset,
                    (const uint8_t*)state + f->host_offset,
                    (size_t)(f->count * f->elem_bytes));
         }
@@ -330,7 +329,7 @@ int briev_accel_launch_resident_2d(uint32_t idx, void* state,
             if (f->kind != BRIEV_FIELD_SCALAR) {
                 continue;
             }
-            uint64_t off = proj_field_offset(k, i);
+            uint64_t off = f->proj_offset;
             dirty[2 * n_dirty] = off;
             dirty[2 * n_dirty + 1] = f->elem_bytes;
             n_dirty++;
@@ -367,7 +366,7 @@ int briev_accel_download(uint32_t idx, void* state) {    if (!briev_accel_availa
     for (uint32_t i = 0; i < k->n_fields; i++) {
         const BrievField* f = &k->fields[i];
         memcpy((uint8_t*)state + f->host_offset,
-               mapped + proj_field_offset(k, i),
+               mapped + f->proj_offset,
                (size_t)(f->count * f->elem_bytes));
     }
     return 1;
@@ -496,18 +495,18 @@ static int fake_launch(void* k, const void* proj, size_t bytes,
 }
 
 int main(void) {
-    // Field projection order + offsets: array a (Float[4], 4B) then scalar
-    // s (Int, 8B) → flat layout: a at 0 (16B), s at 16 (8B). Host struct has
-    // count first (8B) so a's host_offset is 8, s's is 24.
+    // Field projection order + offsets (declared): array a (Float[4], 4B)
+    // is vec4-eligible and 16B-aligned at proj 0 (16B); scalar s packed at
+    // proj 16 (8B). Host struct has count first (8B) so a's host_offset is
+    // 8, s's is 24 — host layouts stay packed; only the projection aligns.
     BrievField fields[2] = {
-        { "a", BRIEV_FIELD_ARRAY, 8, 4, 4, 1 },
-        { "s", BRIEV_FIELD_SCALAR, 24, 8, 1, 0 },
+        { "a", BRIEV_FIELD_ARRAY, 8, 4, 4, 1, 0 },
+        { "s", BRIEV_FIELD_SCALAR, 24, 8, 1, 0, 16 },
     };
     BrievKernelDesc desc = { "force", NULL, 0, 2, fields };
 
     // ── Pack math ──
     expect(proj_size(&desc) == 24, "proj_size = 16 + 8");
-    expect(proj_field_offset(&desc, 1) == 16, "scalar offset after array");
 
     // ── Launch with the fake driver ──
     static BrievDeviceDriver fake_driver = {

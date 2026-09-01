@@ -253,9 +253,12 @@ struct KernelFieldTable {
     names: Vec<String>,
 }
 
-/// Field IR entry for one kernel field.
+/// Field IR entry for one kernel field. `proj_off` is the DEVICE projection
+/// offset from the shared layout rule (FnLowerer::projection_offsets —
+/// vec4-eligible arrays 16B-aligned); the host `%State` offset stays packed.
 fn field_entry_ir(
     host_off: u64,
+    proj_off: u64,
     ty: &str,
     name: &str,
     txn: &str,
@@ -273,8 +276,8 @@ fn field_entry_ir(
         (2u32, llvm_agg_size(ty), 1u64, 0u32)
     };
     format!(
-        "%briev.field {{ ptr @str.briev.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i32 {} }}",
-        txn, name, kind, host_off, elem_bytes, count, w
+        "%briev.field {{ ptr @str.briev.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i64 {}, i32 {} }}",
+        txn, name, kind, host_off, proj_off, elem_bytes, count, w
     )
 }
 
@@ -303,13 +306,24 @@ fn kernel_field_table(
         shape.write_buffers.iter().map(|s| s.as_str()).collect();
 
     let field_types = &backend.ctx.field_types;
+    // Device projection offsets from the ONE shared rule (mirrors the
+    // kernel's setup_state_buffer walk; 2026-09-01 vec4-projection-layout).
+    let proj_offsets = {
+        let mut sb = crate::backend::spirv::SpirvBuilder::new()
+            .with_universe(backend.ctx.type_universe.as_ref().expect("type universe"), backend.ctx.int_bits);
+        let mut sfields = crate::backend::spirv::lower::collect_state_fields(items);
+        sfields.sort_by(|a, b| a.name.cmp(&b.name));
+        crate::backend::spirv::lower::FnLowerer::projection_offsets(&mut sb, &sfields)
+            .unwrap_or_default()
+    };
     let mut fields = Vec::new();
-    for name in &names {
+    for (pos, name) in names.iter().enumerate() {
         let Some(&fidx) = backend.ctx.field_index_map.get(name) else {
             return KernelFieldTable { fields: Vec::new(), names: Vec::new() };
         };
         fields.push(field_entry_ir(
             host_field_offset(field_types, fidx),
+            proj_offsets.get(pos).copied().unwrap_or(0) as u64,
             &field_types[fidx],
             name,
             txn,
@@ -390,7 +404,9 @@ pub(crate) fn emit_accel_descriptors(
         return (out, idx_of);
     }
     out.push_str("\n; === Accel kernel descriptors ===\n");
-    out.push_str("%briev.field = type { ptr, i32, i64, i64, i64, i32 }\n");
+    // Mirrors the C BrievField exactly — the 7th member is proj_offset
+    // (2026-09-01 vec4-projection-layout).
+    out.push_str("%briev.field = type { ptr, i32, i64, i64, i64, i32, i64 }\n");
     // 2026-08-31: { name, spirv ptr, size, n_fields, fields } — mirrors the C
     // BrievKernelDesc exactly (the old i32 blob slot misaligned the struct).
     out.push_str("%briev.kernel = type { ptr, ptr, i32, i32, ptr }\n");

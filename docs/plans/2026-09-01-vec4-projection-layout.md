@@ -105,3 +105,42 @@ place with consumers deriving from it.
 - `docs/HANDOFF-2026-09-01-gpu.md`: trap list (stale proj_field_offset),
   ladder table after P2/P3.
 - `docs/plans/2026-09-01-cooperative-row-kernels.md`: reference this plan.
+
+## Verdict (2026-09-01, same session — all three phases landed)
+
+| variant | min (ms) | avg (ms) | GFLOP/s | max_rel_err |
+|---|---|---|---|---|
+| baseline vec4 (plan start) | 0.245 | 0.281 | ~120 | 0.000e+00 |
+| P1 alignment + P2 x-vec4 + P3 vector Fma | 0.259 | 0.290 | ~115-128 | 0.000e+00 |
+
+**Perf: FLAT within run-to-run noise.** The instruction-count reduction is
+real (per lane-iteration: 5 loads + 4 FMA + 4 extracts → 2 loads + 1 Fma;
+the accumulator phi removed the per-iteration acc load/store), but the M1
+shape is DRAM/warp-MLP-bound, not instruction-bound — exactly the O3
+verdict repeating at a smaller scale. Kept anyway, because the wins are
+ARCHITECTURAL and the gate was "measure; keep if it moves the number OR
+removes a drift hazard":
+
+1. **One layout rule, compiler-owned** (`FnLowerer::projection_offsets`):
+   the three independent packed-offset implementations (kernel member
+   decorations, runner literals, RT `proj_field_offset`) collapsed to one
+   Rust fn + declared C offsets. The RT's packed-sum recomputation is
+   DELETED; `BrievField` carries `proj_offset` (ABI +1 member, all
+   consumers updated, self-test extended).
+2. **Any 1D Float32 field is now vec4-eligible** (x here; tomorrow's
+   `bias[]`/`mask[]` too) — no per-field special cases anywhere.
+3. **Vector-accumulator cooperative form**: bodies matching
+   `acc = acc + F1[i] * F2[i]` with both fields vec4-loaded run one
+   componentwise `OpExtInst Fma` per iteration through an `OpPhi`
+   accumulator; everything else falls back to the unrolled per-component
+   form (ADDITIVE: the old path is the fallback, not a replaced arm).
+
+Next squeeze for the remaining ~1.15× (per the gap decomposition): more
+loads in flight per lane (multi-vec4 ILP: lane handles 2 vec4s per
+iteration → 8 elements), or Split-K for small M.
+
+Infra notes: `begin/end_structured_loop` take a `CoopLoopSig` bundle
+(loop var, int/bool types, trip count) + declared accumulator phis
+(pre-reserved back-edge ids — the body defines the phi's back-edge value);
+`builder::glsl_fma_with_id` exists for exactly that. spirv-val clean,
+2012 lib tests, RT self-test passed, Praetor clean on changed fns.

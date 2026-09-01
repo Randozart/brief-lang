@@ -1854,13 +1854,17 @@ fn test_accel_descriptors_emit() {
     let (ir, idx_of) =
         crate::backend::llvm::kernel::emit_accel_descriptors(&backend, &[blob], &[state_item]);
     assert_eq!(idx_of["force"], 0, "txn → descriptor index");
-    assert!(ir.contains("%briev.field = type { ptr, i32, i64, i64, i64, i32 }"), "field type");
+    assert!(
+        ir.contains("%briev.field = type { ptr, i32, i64, i64, i64, i32, i64 }"),
+        "field type (7th member = proj_offset)"
+    );
     assert!(ir.contains("%briev.kernel = type { ptr, ptr, i32, i32, ptr }"), "kernel type");
     assert!(ir.contains("@briev_accel_descs"), "descs table");
     assert!(ir.contains("declare i32 @briev_accel_init(ptr, i32)"), "init decl");
     assert!(ir.contains("declare i32 @briev_accel_launch(i32, ptr, i64)"), "launch decl");
-    // a: array, host_offset 0 (fidx 0), elem 4 (float), count 16, write.
-    assert!(ir.contains("i32 1, i64 0, i64 4, i64 16, i32 1"), "field entry: {ir}");
+    // a: array, host_offset 0 (fidx 0), proj_offset 0 (a is first — already
+    // 16B-aligned), elem 4 (float), count 16, write.
+    assert!(ir.contains("i32 1, i64 0, i64 0, i64 4, i64 16, i32 1"), "field entry: {ir}");
 }
 
 #[test]

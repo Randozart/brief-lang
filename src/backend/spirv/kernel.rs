@@ -303,7 +303,6 @@ struct Vec4LoopCtx<'a> {
     all_indices: &'a [(String, Expr)],
     stride: u64,
     inner_len: u64,
-    row_id: Word,
 }
 
 /// Collect (field, index_expr) pairs the body loads through vec4-eligible
@@ -377,9 +376,61 @@ fn emit_coop_reduce_store(
     Ok(())
 }
 
-/// Emit ONE vec4 load per vec4-eligible field at the cooperative base index
-/// `row*(K/4) + lane + t*(stride/4)`, extracting the 4 components into
-/// synthetic `__vec4_<field>_<j>` variables the unrolled body reads.
+/// Load one vec4 element of `fname` at the cooperative base index —
+/// `subst(field index, loop_var → repl) >> 2` — and return the `v4float`
+/// value id. Deriving the base FROM THE FIELD'S OWN index expression makes
+/// 2D (`i*K + k`) and 1D (`k`) fields work alike; the row term is not
+/// special-cased. The shift is exact: the vec4 gate (count % 4 == 0) makes
+/// the row term 4-aligned, and repl = lane*4 + t*stride is 4-aligned by
+/// construction. Callers must have bound the loop var in `lower.vars`.
+fn emit_vec4_load(
+    lower: &mut FnLowerer,
+    ctx: &Vec4LoopCtx,
+    fname: &str,
+    loop_var: Word,
+    int_ty: Word,
+    ssbo: Word,
+) -> Result<(Word, crate::backend::spirv::lower::Vec4Field), String> {
+    let (vf, member_pos) = {
+        let (_, vf, mp) = ctx.field_data.iter().find(|(f, _, _)| f == fname)
+            .ok_or_else(|| format!("vec4 field '{}' not loaded", fname))?;
+        (vf.clone(), *mp)
+    };
+    let idx_expr = &ctx.all_indices.iter().find(|(f, _)| f == fname).unwrap().1;
+    // subst inserts the replacement without re-processing it, so the
+    // loop-var reference inside repl survives.
+    let scalar_idx = crate::backend::spirv::lower::subst_var_deep(idx_expr, ctx.item, ctx.repl);
+    let (scalar_id, _) = lower.emit_expr(&scalar_idx)?;
+    let two = lower.builder.builder.constant_bit64(int_ty, 2);
+    let base = lower.builder.gen_id();
+    lower.builder.emit(Instruction::new(
+        spirv::Op::ShiftRightArithmetic, Some(int_ty), Some(base),
+        vec![Operand::IdRef(scalar_id), Operand::IdRef(two)],
+    ));
+
+    let v4_ptr = lower.builder.ptr_class(
+        rspirv::spirv::StorageClass::StorageBuffer,
+        vf.vector,
+    );
+    let member = lower.builder.u32_const(member_pos as u32);
+    let group = lower.builder.gen_id();
+    lower.builder.emit(Instruction::new(
+        spirv::Op::AccessChain,
+        Some(v4_ptr),
+        Some(group),
+        vec![
+            Operand::IdRef(ssbo),
+            Operand::IdRef(member),
+            Operand::IdRef(base),
+        ],
+    ));
+    let v4_val = lower.builder.load(vf.vector, group);
+    Ok((v4_val, vf))
+}
+
+/// Per-iteration vec4 loads for the UNROLLED (per-component) body form:
+/// one vec4 load per field, components exposed as synthetic
+/// `__vec4_<field>_<j>` variables the unrolled statements read.
 fn emit_vec4_field_loads(
     lower: &mut FnLowerer,
     ctx: &Vec4LoopCtx,
@@ -387,79 +438,8 @@ fn emit_vec4_field_loads(
     int_ty: Word,
     ssbo: Word,
 ) -> Result<(), String> {
-    // The caller resolved inner_len to a literal (or hard-errored), so the
-    // vec4 count per row is just inner_len / 4.
-    let k_div4 = ctx.inner_len / 4;
-
-    // row * (K/4)
-    let row_val = lower.builder.gen_id();
-    lower.builder.emit(Instruction::new(
-        spirv::Op::Load, Some(int_ty), Some(row_val),
-        vec![Operand::IdRef(ctx.row_id)],
-    ));
-    let row_mul = lower.builder.gen_id();
-    let k4_c = lower.builder.builder.constant_bit64(int_ty, k_div4);
-    lower.builder.emit(Instruction::new(
-        spirv::Op::IMul, Some(int_ty), Some(row_mul),
-        vec![Operand::IdRef(row_val), Operand::IdRef(k4_c)],
-    ));
-
-    // lane = gid & 31 — emit_expr handles the u32→i64 widening.
-    let (gid64, _) = lower.emit_expr(&Expr::Call(
-        "GetGlobalId#".into(), vec![Expr::Decimal(0)], None,
-    ))?;
-    let lane_id = lower.builder.gen_id();
-    let mask = lower.builder.i64_const(31);
-    lower.builder.emit(Instruction::new(
-        spirv::Op::BitwiseAnd, Some(int_ty), Some(lane_id),
-        vec![Operand::IdRef(gid64), Operand::IdRef(mask)],
-    ));
-
-    // partial = lane + row*(K/4)
-    let partial = lower.builder.gen_id();
-    lower.builder.emit(Instruction::new(
-        spirv::Op::IAdd, Some(int_ty), Some(partial),
-        vec![Operand::IdRef(lane_id), Operand::IdRef(row_mul)],
-    ));
-
-    // t * (stride/4)
-    let t_val = lower.builder.gen_id();
-    lower.builder.emit(Instruction::new(
-        spirv::Op::Load, Some(int_ty), Some(t_val),
-        vec![Operand::IdRef(loop_var)],
-    ));
-    let t_mul = lower.builder.gen_id();
-    let s4_c = lower.builder.builder.constant_bit64(int_ty, ctx.stride / 4);
-    lower.builder.emit(Instruction::new(
-        spirv::Op::IMul, Some(int_ty), Some(t_mul),
-        vec![Operand::IdRef(t_val), Operand::IdRef(s4_c)],
-    ));
-
-    // base = partial + t_mul
-    let base = lower.builder.gen_id();
-    lower.builder.emit(Instruction::new(
-        spirv::Op::IAdd, Some(int_ty), Some(base),
-        vec![Operand::IdRef(partial), Operand::IdRef(t_mul)],
-    ));
-
-    for (fname, vf, member_pos) in ctx.field_data {
-        let v4_ptr = lower.builder.ptr_class(
-            rspirv::spirv::StorageClass::StorageBuffer,
-            vf.vector,
-        );
-        let member = lower.builder.u32_const(*member_pos as u32);
-        let group = lower.builder.gen_id();
-        lower.builder.emit(Instruction::new(
-            spirv::Op::AccessChain,
-            Some(v4_ptr),
-            Some(group),
-            vec![
-                Operand::IdRef(ssbo),
-                Operand::IdRef(member),
-                Operand::IdRef(base),
-            ],
-        ));
-        let v4_val = lower.builder.load(vf.vector, group);
+    for (fname, vf, _member_pos) in ctx.field_data {
+        let (v4_val, vf) = emit_vec4_load(lower, ctx, fname, loop_var, int_ty, ssbo)?;
         let elem_ty_id = lower.builder.lower_type(&vf.elem)?;
         for jj in 0u32..4 {
             let comp = lower.builder.gen_id();
@@ -517,17 +497,27 @@ struct CoopLoopBBs {
     merge_bb: Word,
 }
 
+/// Shared operands of the structured-loop begin/end helpers: the loop
+/// variable's storage, the lowered int/bool type ids, and the trip count.
+struct CoopLoopSig {
+    loop_var: Word,
+    int_ty: Word,
+    bool_ty: Word,
+    groups: i64,
+}
+
 /// Begin the hand-built structured loop (preheader → header), leaving the
 /// builder positioned at the start of the body block. Mirrors the Foreach
 /// emission in lower.rs; splitting begin/end lets the caller interleave the
 /// body emission (vec4 loads depend on the loop variable).
 fn begin_structured_loop(
     lower: &mut FnLowerer,
-    loop_var: Word,
-    int_ty: Word,
-    bool_ty: Word,
-    groups: i64,
-) -> Result<(CoopLoopBBs, Word, Word), String> {
+    sig: &CoopLoopSig,
+    // (type, init id, pre-reserved back-edge id) per loop-carried
+    // accumulator; the body defines the back-edge value into that id.
+    acc_phis: &[(Word, Word, Word)],
+) -> Result<(CoopLoopBBs, Vec<Word>, Word, Word), String> {
+    let CoopLoopSig { loop_var, int_ty, bool_ty, groups } = *sig;
     let header_bb = lower.builder.gen_id();
     let body_bb = lower.builder.gen_id();
     let continue_bb = lower.builder.gen_id();
@@ -565,6 +555,20 @@ fn begin_structured_loop(
         None,
         [(cond0, preheader_bb), (cond_next, continue_bb)],
     ).map_err(|e| format!("loop phi: {:?}", e))?;
+    // Loop-carried accumulators (e.g. the v4float FMA accumulator): one phi
+    // each, (init, preheader) + (back-edge value, continue). Back-edge ids
+    // are defined later in the body — the same forward reference the cond
+    // phi makes to cond_next.
+    let acc_ids: Vec<Word> = acc_phis
+        .iter()
+        .map(|&(ty, init, backedge)| {
+            lower.builder.builder.phi(
+                ty,
+                None,
+                [(init, preheader_bb), (backedge, continue_bb)],
+            ).expect("loop accumulator phi")
+        })
+        .collect();
     lower.builder.builder.loop_merge(
         merge_bb,
         continue_bb,
@@ -573,19 +577,18 @@ fn begin_structured_loop(
     );
     lower.builder.builder.branch_conditional(cond_hdr, body_bb, merge_bb, [] as [u32; 0]);
     lower.builder.begin_block(Some(body_bb));
-    Ok((CoopLoopBBs { header_bb, continue_bb, merge_bb }, cond_next, cond0))
+    Ok((CoopLoopBBs { header_bb, continue_bb, merge_bb }, acc_ids, cond_next, cond0))
 }
 
 /// Close the structured loop: continue block (increment + re-check), branch
 /// back to the header, then position the builder at the merge block.
 fn end_structured_loop(
     lower: &mut FnLowerer,
+    sig: &CoopLoopSig,
     bbs: &CoopLoopBBs,
-    loop_var: Word,
-    int_ty: Word,
-    groups: i64,
     cond_next: Word,
 ) -> Result<(), String> {
+    let CoopLoopSig { loop_var, int_ty, groups, .. } = *sig;
     lower.builder.builder.branch(bbs.continue_bb);
     lower.builder.begin_block(Some(bbs.continue_bb));
     let cur = lower.builder.gen_id();
@@ -666,20 +669,6 @@ fn emit_cooperative_vec4(
         lower.emit_stmt(stmt)?;
     }
 
-    let groups = (inner_len / stride) as i64;
-    let int_ty = lower.builder.lower_type(&crate::ast::Type::int())?;
-    let bool_ty = lower.builder.lower_type(&crate::ast::Type::Bits(1))?;
-    let loop_var = lower.vars.get(item).map(|(v, _)| *v)
-        .ok_or_else(|| format!("loop var '{}' not pre-declared", item))?;
-
-    let (bbs, cond_next, _cond0) =
-        begin_structured_loop(lower, loop_var, int_ty, bool_ty, groups)?;
-
-    lower.const_vars.remove(item);
-    lower.vars.insert(item.to_string(), (loop_var, crate::ast::Type::int()));
-    let prev_terminated = lower.terminated;
-    lower.terminated = false;
-
     let ctx = Vec4LoopCtx {
         item,
         repl,
@@ -688,18 +677,159 @@ fn emit_cooperative_vec4(
         all_indices: &all_indices,
         stride,
         inner_len,
-        row_id: *lower.vars.get(&shape.index_var).map(|(v, _)| v)
-            .ok_or("row var not found")?,
     };
+    // Vector-accumulator form first (one Fma per iteration); the unrolled
+    // per-component form is the fallback for bodies it cannot match.
+    if emit_cooperative_vec4_fma(lower, &ctx, shape, &post_loop)? {
+        return Ok(());
+    }
+
+    let sig = CoopLoopSig {
+        loop_var: lower.vars.get(item).map(|(v, _)| *v)
+            .ok_or_else(|| format!("loop var '{}' not pre-declared", item))?,
+        int_ty: lower.builder.lower_type(&crate::ast::Type::int())?,
+        bool_ty: lower.builder.lower_type(&crate::ast::Type::Bits(1))?,
+        groups: (inner_len / stride) as i64,
+    };
+
+    let (bbs, _acc_ids, cond_next, _cond0) =
+        begin_structured_loop(lower, &sig, &[])?;
+
+    lower.const_vars.remove(item);
+    lower.vars.insert(item.to_string(), (sig.loop_var, crate::ast::Type::int()));
+    let prev_terminated = lower.terminated;
+    lower.terminated = false;
+
+    emit_vec4_field_loads(lower, &ctx, sig.loop_var, sig.int_ty, ssbo)?;
     for j in 0..4u32 {
-        emit_vec4_field_loads(lower, &ctx, loop_var, int_ty, ssbo)?;
         emit_vec4_unrolled_body(lower, &ctx, j)?;
     }
 
-    end_structured_loop(lower, &bbs, loop_var, int_ty, groups, cond_next)?;
+    end_structured_loop(lower, &sig, &bbs, cond_next)?;
     lower.terminated = prev_terminated;
 
     emit_coop_reduce_store(lower, &post_loop, shape)
+}
+
+/// Both-sides-vec4 FMA detection: a single `acc = acc + F1[i1] * F2[i2]`
+/// where BOTH indexed fields are vec4-loaded. Returns (acc, lhs, rhs).
+fn match_vec4_vector_fma(fbody: &[Statement], ctx: &Vec4LoopCtx) -> Option<(String, String, String)> {
+    use crate::ast::BinaryOpKind::{Add, Mul};
+    if fbody.len() != 1 {
+        return None;
+    }
+    let Statement::Assign(lhs, rhs) = &fbody[0] else {
+        return None;
+    };
+    let Expr::Identifier(acc) = lhs else {
+        return None;
+    };
+    let Expr::BinaryOp(Add, a, b) = rhs else {
+        return None;
+    };
+    // The additive operand must be the accumulator itself (vectorizing
+    // replaces `acc + p*q` with Fma(p, q, acc) — any other additive term
+    // would be dropped).
+    let mul = match (a.as_ref(), b.as_ref()) {
+        (m @ Expr::BinaryOp(Mul, _, _), other) => {
+            if matches!(other, Expr::Identifier(n) if n == acc) { m } else { return None; }
+        }
+        (other, m @ Expr::BinaryOp(Mul, _, _)) => {
+            if matches!(other, Expr::Identifier(n) if n == acc) { m } else { return None; }
+        }
+        _ => return None,
+    };
+    let Expr::BinaryOp(Mul, left, right) = mul else {
+        return None;
+    };
+    let field_of = |e: &Expr| -> Option<String> {
+        let Expr::Index(of, _) = e else { return None };
+        let Expr::Identifier(n) = of.as_ref() else { return None };
+        ctx.field_data.iter().find(|(f, _, _)| f == n).map(|(f, _, _)| f.clone())
+    };
+    let lhs_field = field_of(left)?;
+    let rhs_field = field_of(right)?;
+    Some((acc.clone(), lhs_field, rhs_field))
+}
+
+/// Vector-accumulator form (P3, plan vec4-projection-layout): the loop body
+/// is ONE componentwise GLSL Fma on `v4float`s — `acc_v = Fma(F1, F2, acc_v)`
+/// — instead of 4 scalar FMAs on extracted components. After the loop the 4
+/// lanes of the vector accumulator fold into the scalar accumulator and the
+/// ordinary subgroup-reduce store follows. Returns false when the body does
+/// not match (caller falls back to the unrolled form).
+fn emit_cooperative_vec4_fma(
+    lower: &mut FnLowerer,
+    ctx: &Vec4LoopCtx,
+    shape: &KernelShape,
+    post_loop: &[&Statement],
+) -> Result<bool, String> {
+    let Some((acc, lhs_field, rhs_field)) = match_vec4_vector_fma(ctx.fbody, ctx) else {
+        return Ok(false);
+    };
+    let ssbo = lower.ssbo_var.ok_or("cooperative vec4 without SSBO")?;
+    let sig = CoopLoopSig {
+        loop_var: lower.vars.get(ctx.item).map(|(v, _)| *v)
+            .ok_or_else(|| format!("loop var '{}' not pre-declared", ctx.item))?,
+        int_ty: lower.builder.lower_type(&crate::ast::Type::int())?,
+        bool_ty: lower.builder.lower_type(&crate::ast::Type::Bits(1))?,
+        groups: (ctx.inner_len / ctx.stride) as i64,
+    };
+    let v4_ty = ctx.field_data.iter().find(|(f, _, _)| *f == lhs_field)
+        .ok_or("lhs vec4 field lost")?.1.vector;
+
+    // Vector accumulator as a loop phi: zero on entry, the fused Fma value
+    // on the back edge. No per-iteration accumulator load/store.
+    let acc_backedge = lower.builder.gen_id();
+    let acc_zero = lower.builder.builder.constant_null(v4_ty);
+    let (bbs, acc_ids, cond_next, _cond0) = begin_structured_loop(
+        lower, &sig, &[(v4_ty, acc_zero, acc_backedge)],
+    )?;
+    let acc_phi = *acc_ids.first().ok_or("accumulator phi lost")?;
+    lower.const_vars.remove(ctx.item);
+    lower.vars.insert(ctx.item.to_string(), (sig.loop_var, crate::ast::Type::int()));
+    let prev_terminated = lower.terminated;
+    lower.terminated = false;
+
+    let (lhs_val, _) = emit_vec4_load(lower, ctx, &lhs_field, sig.loop_var, sig.int_ty, ssbo)?;
+    let (rhs_val, _) = emit_vec4_load(lower, ctx, &rhs_field, sig.loop_var, sig.int_ty, ssbo)?;
+    lower.builder.glsl_fma_with_id(acc_backedge, v4_ty, lhs_val, rhs_val, acc_phi);
+
+    end_structured_loop(lower, &sig, &bbs, cond_next)?;
+    lower.terminated = prev_terminated;
+
+    // Fold the vector accumulator into the scalar accumulator the store
+    // reads: acc = (e0 + e1) + (e2 + e3).
+    let elem_ty = lower.builder.lower_type(
+        &ctx.field_data.iter().find(|(f, _, _)| *f == lhs_field)
+            .ok_or("lhs vec4 field lost")?.1.elem)?;
+    let acc_final = acc_phi;
+    let mut comps = Vec::with_capacity(4);
+    for jj in 0u32..4 {
+        let comp = lower.builder.gen_id();
+        lower.builder.emit(Instruction::new(
+            spirv::Op::CompositeExtract, Some(elem_ty), Some(comp),
+            vec![Operand::IdRef(acc_final), Operand::LiteralBit32(jj)],
+        ));
+        comps.push(comp);
+    }
+    let add = |lower: &mut FnLowerer, a: Word, b: Word| -> Word {
+        let id = lower.builder.gen_id();
+        lower.builder.emit(Instruction::new(
+            spirv::Op::FAdd, Some(elem_ty), Some(id),
+            vec![Operand::IdRef(a), Operand::IdRef(b)],
+        ));
+        id
+    };
+    let sum01 = add(lower, comps[0], comps[1]);
+    let sum23 = add(lower, comps[2], comps[3]);
+    let total = add(lower, sum01, sum23);
+    let acc_ptr = lower.vars.get(&acc).map(|(p, _)| *p)
+        .ok_or_else(|| format!("accumulator '{}' lost", acc))?;
+    lower.builder.store(acc_ptr, total);
+
+    emit_coop_reduce_store(lower, post_loop, shape)?;
+    Ok(true)
 }
 
 /// Scalar cooperative path: substitute the loop var with `lane + t*32` and

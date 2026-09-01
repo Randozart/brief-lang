@@ -25,12 +25,15 @@ use crate::backend::spirv::lower::collect_state_fields;
 use crate::backend::spirv::SpirvBuilder;
 use crate::type_universe::TypeUniverse;
 
-/// One SSBO member: name, byte offset in the projection, element size,
-/// element count, and whether it is an array.
+/// One SSBO member: name, HOST byte offset (packed — the runner `state[]`
+/// layout and the S_ macros), DEVICE projection byte offset (the shared
+/// rule in `FnLowerer::projection_offsets` — vec4-eligible arrays are
+/// 16B-aligned), element size, element count, and whether it is an array.
 #[derive(Debug, Clone)]
 pub struct RunnerField {
     pub name: String,
     pub offset: u64,
+    pub proj_offset: u64,
     pub elem_bytes: u32,
     pub count: u64,
     pub is_array: bool,
@@ -63,9 +66,14 @@ pub fn ssbo_layout(
     let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
     let mut fields = collect_state_fields(items);
     fields.sort_by(|a, b| a.name.cmp(&b.name));
+    // Device offsets come from the ONE layout rule the kernel also uses
+    // (vec4-eligible arrays 16B-aligned) — they can never drift.
+    let proj_offsets = crate::backend::spirv::lower::FnLowerer::projection_offsets(
+        &mut sb, &fields,
+    )?;
     let mut out = Vec::with_capacity(fields.len());
     let mut offset: u64 = 0;
-    for f in fields {
+    for (fidx, f) in fields.into_iter().enumerate() {
         let (elem, count, is_array, is_float) = match &f.ty {
             Type::Vector(inner, dims) => {
                 let elems: u64 = dims
@@ -89,6 +97,7 @@ pub fn ssbo_layout(
         out.push(RunnerField {
             name: f.name.clone(),
             offset,
+            proj_offset: proj_offsets[fidx] as u64,
             elem_bytes: elem,
             count,
             is_array,
@@ -320,13 +329,14 @@ pub fn emit_runner(
     out.push_str("static BrievField fields[] = {\n");
     for f in &fields {
         out.push_str(&format!(
-            "    {{ \"{}\", {}, {}, {}, {}, {} }},\n",
+            "    {{ \"{}\", {}, {}, {}, {}, {}, {} }},\n",
             f.name,
             if f.is_array { 1 } else { 2 },
             f.offset,
             f.elem_bytes,
             f.count,
-            if f.is_array { 1 } else { 0 }
+            if f.is_array { 1 } else { 0 },
+            f.proj_offset
         ));
     }
     out.push_str("};\n");
@@ -508,6 +518,7 @@ mod runner_tests {
         RunnerField {
             name: name.to_string(),
             offset,
+            proj_offset: offset,
             elem_bytes: 8,
             count: 1,
             is_array: false,

@@ -12,6 +12,12 @@
 //   x @ i_end + 0    (K * 4 bytes)
 //   y @ x_end        (M * 4 bytes)
 //
+// 2026-09-01 (plan vec4-projection-layout): the HOST buffer keeps the packed
+// layout above; the DEVICE projection 16B-aligns vec4-eligible arrays (the
+// shared FnLowerer::projection_offsets rule), so the BrievField proj_offset
+// entries below shift x/y up — that is what makes x vec4-loadable in the
+// cooperative kernel.
+//
 // Usage: gemv_bench <kernel.spv> [M] [K] [coop]
 //   coop=1 → dispatch as cooperative row kernels: 32 lanes x M rows.
 //
@@ -71,11 +77,15 @@ int main(int argc, char** argv) {
     state = calloc(1, state_bytes);
     if (state == NULL) { fprintf(stderr, "oom\n"); return 2; }
 
+    // Device projection offsets: vec4-eligible arrays (a, x) aligned to 16B.
+    uint64_t proj_x = (off_x + 15) & ~(uint64_t)15;
+    uint64_t proj_y = (proj_x + K * 4 + 15) & ~(uint64_t)15;
+
     BrievField fields[] = {
-        { "a", 1, off_a, 4, M * K, 1 },
-        { "i", 2, off_i, 8, 1, 0 },
-        { "x", 1, off_x, 4, K, 1 },
-        { "y", 1, off_y, 4, M, 1 },
+        { "a", 1, off_a, 4, M * K, 1, 0 },
+        { "i", 2, off_i, 8, 1, 0, off_i },
+        { "x", 1, off_x, 4, K, 1, proj_x },
+        { "y", 1, off_y, 4, M, 1, proj_y },
     };
     BrievKernelDesc desc = { "gemv", spv, (uint32_t)spv_len, 4, fields };
 

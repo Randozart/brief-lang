@@ -141,6 +141,15 @@ impl SpirvBuilder {
     /// call happens). Requires an open function block — kernel lowering
     /// only ever calls this inside a function body.
     pub fn glsl_fma(&mut self, result_ty: Word, a: Word, b: Word, c: Word) -> Word {
+        let id = self.gen_id();
+        self.glsl_fma_with_id(id, result_ty, a, b, c);
+        id
+    }
+
+    /// `glsl_fma` with a caller-chosen result id — loop phis reserve the
+    /// back-edge id before the header is emitted, and the body must define
+    /// its value INTO that id.
+    pub fn glsl_fma_with_id(&mut self, result_id: Word, result_ty: Word, a: Word, b: Word, c: Word) {
         let set = match self.glsl_set {
             Some(s) => s,
             None => {
@@ -152,7 +161,7 @@ impl SpirvBuilder {
         self.builder
             .ext_inst(
                 result_ty,
-                None,
+                Some(result_id),
                 set,
                 spirv::GLOp::Fma as u32,
                 [
@@ -161,7 +170,7 @@ impl SpirvBuilder {
                     Operand::IdRef(c),
                 ],
             )
-            .expect("Fma emission inside a function block")
+            .expect("Fma emission inside a function block");
     }
 
     // ── Briev type lowering (typed, internally deduped by rspirv) ───────
