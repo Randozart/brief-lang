@@ -1,0 +1,25 @@
+// reduce.abv — two-stage partial-sum reduction: W work items each sum a
+// CHUNK-element stripe of x into part[i]; the host combines the W
+// partials. N = 16.7M f32 elements, W = 8192 stripes of 2048. This is
+// the bandwidth + cross-workgroup-combination pattern (the O6
+// tree-reduction rung's target) — the standard first stage of every
+// reduction/softmax/dot-product pipeline.
+//
+// Three fields (i/x/part) — the same shape as the verified GEMV/GEMM
+// lanes (see BUGS.md 2026-09-02: 4th-field stores are an open issue).
+const N: Int = 16777216;
+const W: Int = 8192;
+
+let i: Int = 0;
+let x: Float[16777216];
+let part: Float[8192];
+
+async node reduce [i < W][i == W] {
+    let acc: Float = 0;
+    foreach k in 0..2048 {
+        acc = acc + x[i * 2048 + k];
+    }
+    part[i] = acc;
+    i = i + 1;
+    term;
+};
