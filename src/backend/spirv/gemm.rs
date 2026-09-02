@@ -143,6 +143,28 @@ fn match_b_index(e: &Expr, k: &str, n: &str) -> Option<i64> {
 }
 
 impl GemmPlan {
+    /// The effective coopmat tile-rows for a plan: the configured R capped
+    /// at 8 and clamped down the power-of-two ladder until 16R divides M —
+    /// every strip row must stay inside the output (the plan gate
+    /// guarantees 64 | M, so the ladder always bottoms out at a legal R).
+    /// KERNEL AND RUNNER BOTH CALL THIS — they can never disagree on the
+    /// dispatch geometry. Cap 8: R=16 emitted correct-looking SPIR-V
+    /// (spirv-val clean) but miscomputed on the RTX 3060 while ALSO being
+    /// slower (min 24.4ms vs R=8's 16.4) — 256 accumulator regs/lane is
+    /// past the driver's comfortable fragment allocation (suspected
+    /// spill/reload of coopmat fragments); VERDICT: rejected, do not use
+    /// R=16. 2026-09-02 (plan 2026-09-02-tensor-tier-run, B-reuse rung).
+    pub(crate) fn coopmat_tile_rows(plan_m: i64) -> u32 {
+        let mut r = crate::config_tuning::ir_lowering()
+            .spirv_coopmat_tile_rows
+            .max(1)
+            .min(8);
+        while r > 1 && plan_m % (16 * r as i64) != 0 {
+            r /= 2;
+        }
+        r
+    }
+
     /// Recognize the canonical naive-GEMM body in the analyzed shape.
     /// Anything that does not match exactly returns None — the flat naive
     /// kernel (correct since M2.0) remains the fallback.
@@ -1079,8 +1101,9 @@ pub(crate) fn emit_coopmat(
     // Memory layout constant: RowMajorKHR = 0.
     let layout_row = builder.u32_const(0);
 
-    // Grid decode: one 16×64 output tile per workgroup. X-flattened
-    // workgroups: wgx = tile_m * tiles_x + tile_n — the ROW tile is the
+    // Grid decode: R 16-row strips × 64 cols of output per workgroup
+    // (R = coopmat_tile_rows — the B-reuse rung). X-flattened
+    // workgroups: wgx = tile_my * tiles_x + tile_n — the ROW band is the
     // MAJOR (dividend), the COL tile the MINOR (modulo). 2026-09-02: the
     // decode had them swapped (tile_n = UDiv, tile_m = UMod), so
     // tile_m wrapped every tiles_x workgroups and tile_n ran to
@@ -1090,28 +1113,41 @@ pub(crate) fn emit_coopmat(
     // and tile_n ≥ N/64 re-wrote earlier rows with B strips read past
     // the output width (garbage over correct tiles). Undo: swap the two
     // ops back.
+    let tile_rows = GemmPlan::coopmat_tile_rows(plan.m);
     let tiles_x = (plan.n / 64) as u32;
     let wgx = builtin_comp_u(builder, wgid, 0);
     let tiles_x_c = u32_const(builder, tiles_x);
-    let tile_m = u32_binop(builder, spirv::Op::UDiv, wgx, tiles_x_c);
+    let tile_my = u32_binop(builder, spirv::Op::UDiv, wgx, tiles_x_c);
     let tile_n = u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c);
     let s16 = u32_const(builder, 16);
     let s64 = u32_const(builder, 64);
-    let tm16 = u32_binop(builder, spirv::Op::IMul, tile_m, s16);
+    // The workgroup's FIRST 16-row strip: (tile_my * R) * 16.
+    let r_rows_c = u32_const(builder, tile_rows);
+    let band_m = u32_binop(builder, spirv::Op::IMul, tile_my, r_rows_c);
+    let band_m16 = u32_binop(builder, spirv::Op::IMul, band_m, s16);
     let tn64 = u32_binop(builder, spirv::Op::IMul, tile_n, s64);
     let nk = u32_const(builder, plan.k as u32);
-    let a_row_elems = u32_binop(builder, spirv::Op::IMul, tm16, nk);
+    // Per-strip A row base: (band_m16 + r*16) * K, r = 0..R.
+    let a_row_bases: Vec<Word> = (0..tile_rows)
+        .map(|r| {
+            let rc = u32_const(builder, (r * 16) as u32);
+            let row = u32_binop(builder, spirv::Op::IAdd, band_m16, rc);
+            u32_binop(builder, spirv::Op::IMul, row, nk)
+        })
+        .collect();
 
-    // f32 accumulator fragment, zero-initialized (OpConstantComposite with
-    // one scalar constituent fills the whole matrix). The accumulator is a
-    // LOOP PHI — the mma defines the pre-reserved back-edge id (coopmat
+    // f32 accumulator fragments, zero-initialized (OpConstantComposite with
+    // one scalar constituent fills the whole matrix). The accumulators are
+    // LOOP PHIs — the mma defines the pre-reserved back-edge id (coopmat
     // types allocate in Function/Private storage only; the phi carries the
-    // value across iterations without a Function variable).
+    // value across iterations without a Function variable). R strips ×
+    // 4 column fragments each.
     let zero_f = builder.float_const(32, 0.0);
     let acc_zero = builder.builder.constant_composite(cm_c32, vec![zero_f]);
 
-    let acc_backedges: Vec<Word> = (0..4).map(|_| builder.gen_id()).collect();
-    let acc_inits: Vec<Word> = (0..4).map(|_| acc_zero).collect();
+    let acc_count = tile_rows * 4;
+    let acc_backedges: Vec<Word> = (0..acc_count).map(|_| builder.gen_id()).collect();
+    let acc_inits: Vec<Word> = (0..acc_count).map(|_| acc_zero).collect();
     let acc_phis: Vec<(Word, Word, Word)> = acc_backedges
         .iter()
         .zip(acc_inits.iter())
@@ -1139,8 +1175,9 @@ pub(crate) fn emit_coopmat(
         id
     };
 
-    // A fragment: A[tm*16 + (0..15)][kt*16 + (0..15)] — pointer to the
-    // first element (half storage), stride K (in half elements), row-major.
+    // A fragments: A[band_m16 + r*16 + (0..15)][kt*16 + (0..15)] — pointer
+    // to the first element (half storage), stride K (in half elements),
+    // row-major. R strips per workgroup.
     let a_member_c = u32_const(builder, a_member);
     let b_member_c = u32_const(builder, b_member);
     let y_member_c = u32_const(builder, y_member);
@@ -1150,36 +1187,46 @@ pub(crate) fn emit_coopmat(
     // wrong-slice fingerprint on 4096^3).
     let s16c = u32_const(builder, 16);
     let kt16 = u32_binop(builder, spirv::Op::IMul, kt_u, s16c);
-    let a_off = u32_binop(builder, spirv::Op::IAdd, a_row_elems, kt16);
     let a_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
-    let a_ptr = builder.gen_id();
-    builder.emit(Instruction::new(
-        spirv::Op::AccessChain,
-        Some(a_elem_ptr),
-        Some(a_ptr),
-        vec![
-            Operand::IdRef(ssbo),
-            Operand::IdRef(a_member_c),
-            Operand::IdRef(a_off),
-        ],
-    ));
-    // A loads ONCE per panel — reused across the four B fragments.
-    let frag_a = builder.gen_id();
-    builder.emit(Instruction::new(
-        spirv::Op::CooperativeMatrixLoadKHR,
-        Some(cm_a16),
-        Some(frag_a),
-        vec![
-            Operand::IdRef(a_ptr),
-            Operand::IdRef(layout_row),
-            Operand::IdRef(k_stride),
-        ],
-    ));
+    // R A fragments — one per strip. Each is reused across the 4 B
+    // fragments of its strip.
+    let frag_as: Vec<Word> = a_row_bases
+        .iter()
+        .map(|row_base| {
+            let a_off = u32_binop(builder, spirv::Op::IAdd, *row_base, kt16);
+            let a_ptr = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::AccessChain,
+                Some(a_elem_ptr),
+                Some(a_ptr),
+                vec![
+                    Operand::IdRef(ssbo),
+                    Operand::IdRef(a_member_c),
+                    Operand::IdRef(a_off),
+                ],
+            ));
+            let frag_a = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::CooperativeMatrixLoadKHR,
+                Some(cm_a16),
+                Some(frag_a),
+                vec![
+                    Operand::IdRef(a_ptr),
+                    Operand::IdRef(layout_row),
+                    Operand::IdRef(k_stride),
+                ],
+            ));
+            frag_a
+        })
+        .collect();
 
-    // B fragments j=0..3: columns tn*64 + j*16 .. +16, stride N.
+    // B fragments j=0..3: columns tn*64 + j*16 .. +16, stride N. Loaded
+    // ONCE per workgroup per panel — the whole point of R > 1: each B
+    // fragment feeds R mma chains (B traffic ÷ R).
     let b_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
     let b_row = u32_binop(builder, spirv::Op::IMul, kt16, n_stride);
-    for (j, acc_in) in acc_phis_live.iter().enumerate() {
+    let mut frag_bs: Vec<Word> = Vec::with_capacity(4);
+    for j in 0..4 {
         let jmul = u32_const(builder, 16);
         let jidx = u32_const(builder, j as u32);
         let jcol = u32_binop(builder, spirv::Op::IMul, jmul, jidx);
@@ -1207,62 +1254,74 @@ pub(crate) fn emit_coopmat(
                 Operand::IdRef(n_stride),
             ],
         ));
+        frag_bs.push(frag_b);
+    }
 
-        // mma: acc_j = A × B_j + acc_j, INTO the phi's back-edge id.
-        builder.emit(Instruction::new(
-            spirv::Op::CooperativeMatrixMulAddKHR,
-            Some(cm_c32),
-            Some(acc_backedges[j]),
-            vec![
-                Operand::IdRef(frag_a),
-                Operand::IdRef(frag_b),
-                Operand::IdRef(*acc_in),
-            ],
-        ));
+    // mma: acc[r][j] = A_r × B_j + acc[r][j], INTO the phi's back-edge id.
+    for (r, frag_a) in frag_as.iter().enumerate() {
+        for (j, frag_b) in frag_bs.iter().enumerate() {
+            builder.emit(Instruction::new(
+                spirv::Op::CooperativeMatrixMulAddKHR,
+                Some(cm_c32),
+                Some(acc_backedges[r * 4 + j]),
+                vec![
+                    Operand::IdRef(*frag_a),
+                    Operand::IdRef(*frag_b),
+                    Operand::IdRef(acc_phis_live[r * 4 + j]),
+                ],
+            ));
+        }
     }
 
     end_structured_loop(builder, &sig, &bbs, kt_phi, kt_backedge, cond_next)?;
 
-    // Store: convert the f32 fragment to the field's f16 component
+    // Store: convert the f32 fragments to the field's f16 component
     // (OpFConvert is defined on cooperative matrices) and write with
-    // stride N at the tile corner.
+    // stride N at each strip's tile corner.
     let y_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
-    let c_row = u32_binop(builder, spirv::Op::IMul, tm16, n_stride);
-    for (j, &phi) in acc_phis_live.iter().enumerate() {
-        let frag_out = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::FConvert,
-            Some(cm_c16),
-            Some(frag_out),
-            vec![Operand::IdRef(phi)],
-        ));
-        let jm = u32_const(builder, 16);
-        let ji = u32_const(builder, j as u32);
-        let jcol = u32_binop(builder, spirv::Op::IMul, jm, ji);
-        let col_j = u32_binop(builder, spirv::Op::IAdd, tn64, jcol);
-        let c_off = u32_binop(builder, spirv::Op::IAdd, c_row, col_j);
-        let y_ptr = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::AccessChain,
-            Some(y_elem_ptr),
-            Some(y_ptr),
-            vec![
-                Operand::IdRef(ssbo),
-                Operand::IdRef(y_member_c),
-                Operand::IdRef(c_off),
-            ],
-        ));
-        builder.emit(Instruction::new(
-            spirv::Op::CooperativeMatrixStoreKHR,
-            None,
-            None,
-            vec![
-                Operand::IdRef(y_ptr),
-                Operand::IdRef(frag_out),
-                Operand::IdRef(layout_row),
-                Operand::IdRef(n_stride),
-            ],
-        ));
+    for (r, row_base) in a_row_bases.iter().enumerate() {
+        // Strip corner row in ELEMENTS: (band_m16 + r*16) * N — reuse the
+        // row base's row (÷K) via a fresh multiply by N.
+        let rc = u32_const(builder, (r * 16) as u32);
+        let row = u32_binop(builder, spirv::Op::IAdd, band_m16, rc);
+        let c_row = u32_binop(builder, spirv::Op::IMul, row, n_stride);
+        for j in 0..4 {
+            let phi = acc_phis_live[r * 4 + j];
+            let frag_out = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::FConvert,
+                Some(cm_c16),
+                Some(frag_out),
+                vec![Operand::IdRef(phi)],
+            ));
+            let jm = u32_const(builder, 16);
+            let ji = u32_const(builder, j as u32);
+            let jcol = u32_binop(builder, spirv::Op::IMul, jm, ji);
+            let col_j = u32_binop(builder, spirv::Op::IAdd, tn64, jcol);
+            let c_off = u32_binop(builder, spirv::Op::IAdd, c_row, col_j);
+            let y_ptr = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::AccessChain,
+                Some(y_elem_ptr),
+                Some(y_ptr),
+                vec![
+                    Operand::IdRef(ssbo),
+                    Operand::IdRef(y_member_c),
+                    Operand::IdRef(c_off),
+                ],
+            ));
+            builder.emit(Instruction::new(
+                spirv::Op::CooperativeMatrixStoreKHR,
+                None,
+                None,
+                vec![
+                    Operand::IdRef(y_ptr),
+                    Operand::IdRef(frag_out),
+                    Operand::IdRef(layout_row),
+                    Operand::IdRef(n_stride),
+                ],
+            ));
+        }
     }
 
     builder.builder.branch(exit_bb);

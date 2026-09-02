@@ -59,4 +59,5 @@ circt.clock_hz: 0;
 // when enabled, dot-product reductions use subgroup ops with vec4 loads
 // (32-lane workgroup, stride-128, OpGroupNonUniformFAdd).
 spirv_row_cooperative: 1;
-spirv_coopmat: 0;
+spirv_coopmat: 1;
+spirv_coopmat_tile_rows: 2;

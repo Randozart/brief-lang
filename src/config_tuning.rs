@@ -76,6 +76,22 @@ pub struct IrLoweringSettings {
     /// the extension, else the runtime falls back to CPU for that blob —
     /// the exact tiled kernel stays available with the knob off.
     pub spirv_coopmat: bool,
+    /// 2026-09-02 (plan 2026-09-02-tensor-tier-run, B-reuse rung): tile-ROWS
+    /// (16-row strips) per coopmat workgroup. R > 1 loads each B fragment
+    /// once and reuses it across R A fragments — B DRAM traffic ÷ R (the
+    /// tensor tier is B-traffic-bound: 10.5 GB total ≈ 29 ms floor at
+    /// ~360 GB/s; measured min 41 ms at R=1). Interleaved device A/B
+    /// (RTX 3060, 4096³, all rel 2.442e-04, 3 rounds): R=1 min ~41ms →
+    /// R=2 **13.2ms stable = 10.4 TFLOP/s** → R=4 bimodal (9.9ms best-ever
+    /// but 70-77ms in 2/3 rounds — register pressure × co-tenant clocks)
+    /// → R=8 28ms. R=2 is the measured-best STABLE shape and the default;
+    /// R=4's 9.9ms flash (13.9 TFLOP/s, past the ggml anchor's 12.6) says
+    /// parity is reachable on a quiet box — re-A/B when the machine is
+    /// idle. Capped at 8: R=16 was slower AND miscomputed on device
+    /// (VERDICT: rejected — suspected coopmat fragment spill past 256
+    /// acc regs/lane). Shapes not divisible by 16R clamp down the
+    /// power-of-two ladder (kernel + runner share the clamp).
+    pub spirv_coopmat_tile_rows: u32,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -156,6 +172,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_unroll: 16,
     spirv_row_cooperative: false,
     spirv_coopmat: false,
+    spirv_coopmat_tile_rows: 2,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -299,6 +316,14 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat),
+        // NB: field_int's second arg is the FIELD INDEX (0 for scalars),
+        // not a default — the default comes from DEFAULT_IR_LOWERING via
+        // unwrap_or. (Passing 8 here silently read index 8 = None = the
+        // R=8 default on every build, pinning the A/B to one config.)
+        spirv_coopmat_tile_rows: db
+            .field_int("spirv_coopmat_tile_rows", 0)
+            .map(|v| v.max(1) as u32)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_tile_rows),
     }
 }
 

@@ -63,6 +63,11 @@ pub struct RunnerKernel {
     /// kernel (LocalSize 32, 16x16 tile). Dispatch: workgroups = (M/16)*
     /// (N/16) = n/256, nx items = workgroups * 32.
     pub tensor: bool,
+    /// 2026-09-02 (B-reuse rung): the EFFECTIVE tile-rows the tensor blob
+    /// was built with — `GemmPlan::coopmat_tile_rows(plan.m)` — so the
+    /// runner's dispatch formula and the kernel's grid decode can never
+    /// disagree (a mismatch = out-of-range tiles = garbage output).
+    pub tensor_tile_rows: u32,
 }
 
 /// The SSBO layout EXACTLY as the kernel sees it (name-sorted, real element
@@ -504,7 +509,8 @@ pub fn build_kernels(
         let e = &entries[name];
         let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
         let cooperative = crate::backend::spirv::kernel::is_cooperative_shape(&e.shape);
-        let tiled = crate::backend::spirv::gemm::GemmPlan::match_stmts(&e.shape, program).is_some();
+        let plan = crate::backend::spirv::gemm::GemmPlan::match_stmts(&e.shape, program);
+        let tiled = plan.is_some();
         let tensor = tiled
             && crate::config_tuning::ir_lowering().spirv_coopmat
             && {
@@ -535,6 +541,14 @@ pub fn build_kernels(
             cooperative,
             tiled,
             tensor,
+            // The same clamp the kernel emitter used — one source of truth.
+            tensor_tile_rows: if tensor {
+                plan.as_ref()
+                    .map(|p| crate::backend::spirv::gemm::GemmPlan::coopmat_tile_rows(p.m))
+                    .unwrap_or(1)
+            } else {
+                1
+            },
         });
     }
     Ok(out)
@@ -637,16 +651,18 @@ fn emit_kernel_node(
 /// of the work-item id differs.
 fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
     if k.tensor {
-        // Tensor GEMM (16×64 output tile per workgroup): workgroups =
-        // (M/16) * (N/64) = n / (16*64), items = workgroups * 32 (the
-        // driver divides nx by the module's local_x = 32). 2026-09-02:
-        // this was the v1 16×16-tile formula (n/(16*16)) — 4×
-        // over-dispatch; the extra workgroups decoded out-of-range tiles
-        // (tile_n = wgx/tiles_x beyond N) and smeared garbage over
-        // correct tiles' outputs — the tensor tier's "zero/garbage y"
-        // device symptom. Undo: restore (16 * 16).
+        // Tensor GEMM (R 16-row strips × 64 cols per workgroup, R =
+        // k.tensor_tile_rows — the SAME clamp the kernel emitter used):
+        // workgroups = (M/(16R)) * (N/64) = n / (16R*64), items =
+        // workgroups * 32 (the driver divides nx by local_x = 32).
+        // 2026-09-02: this was the v1 16×16-tile formula (n/(16*16)) —
+        // 4× over-dispatch; the extra workgroups decoded out-of-range
+        // tiles and smeared garbage over correct tiles' outputs — the
+        // tensor tier's "zero/garbage y" device symptom. Undo: restore
+        // (16 * 16).
+        let r = k.tensor_tile_rows;
         return format!(
-            "      long long w_{ci} = (n_{ci} / (16 * 64)) * 32;\n      if (w_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, w_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
+            "      long long w_{ci} = (n_{ci} / (16 * {r} * 64)) * 32;\n      if (w_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, w_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
         );
     }
     if k.tiled {
