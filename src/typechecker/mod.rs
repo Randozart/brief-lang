@@ -118,6 +118,13 @@ pub struct TypecheckContext<'a> {
     /// (`type MyNum : #Int` → "MyNum" → "#Int"). Used to grant numeric-protocol
     /// members literal construction.
     type_protocols: HashMap<String, String>,
+    /// 2026-09-02 (plan fundamental-parent-membership): width metadata
+    /// (`spec Bits`/`MaxBits`, normalized to lowercase keys by the parser)
+    /// for typedefs NOT in the fresh typecheck universe. The
+    /// float-literal width-admission reads it when the universe has no
+    /// entry (`let acc: Float16 = 0.0;` — exact values only; the
+    /// precision contract narrows explicitly, never silently).
+    type_max_bits: HashMap<String, u64>,
     regular_bindings: HashMap<String, Vec<crate::ast::top::OperatorBinding>>,
     /// 2026-08-03 (P1.4): cross-variant op overrides from `proto` declarations
     /// (`proto C_String: #String { op Concat(#String) = cstring_concat(#Lh,#Rh) }`).
@@ -177,6 +184,7 @@ impl<'a> TypecheckContext<'a> {
             fn_param_types: HashMap::new(),
             current_output_type: None,
             type_protocols: HashMap::new(),
+            type_max_bits: HashMap::new(),
             variant_cross_ops: HashMap::new(),
             trait_assertions: HashMap::new(),
             trait_defs: HashMap::new(),
@@ -1617,10 +1625,43 @@ fn try_coerce_via_parse(
     // literals even without an explicit Parse op (`let v: MyNum = 0` where
     // `type MyNum : #Int`). A type is numeric if it carries Cast.Int,
     // Cast.UInt, or Cast.Float.
-    if matches!(form, "Decimal") && construction_accepts_numeric(target_ty, arg_ty, ctx) {
-        return true;
+    if matches!(form, "Decimal") {
+        // 2026-09-02 (plan fundamental-parent-membership): a FLOAT literal
+        // constructing a FLOAT-category target narrows by width — admit
+        // only when the value round-trips through the target width exactly
+        // (`let acc: Float16 = 0.0;` yes, `3.14159` no). This is the LIVE
+        // admission path for typedef literals (no Parse/Init op declared):
+        // without the gate the precision contract was unenforced — every
+        // f32 literal slipped through. Int literals keep the existing
+        // behavior (Int8-style sizing gates at the Constrained arm).
+        if let Some(f) = float_literal_expr(expr) {
+            if ctx.operand_implements_protocol(target_ty, "#Float")
+                && !float_literal_fits(target_ty, f, ctx.universe, &ctx.type_max_bits)
+            {
+                return false;
+            }
+        }
+        if construction_accepts_numeric(target_ty, arg_ty, ctx) {
+            return true;
+        }
     }
     false
+}
+
+/// The float literal carried by a numeric literal expression — `Expr::Float`
+/// directly, or the negated inner of `-3.25` (sign does not affect width
+/// exactness; the magnitude decides). 2026-09-02 (plan
+/// fundamental-parent-membership): lets the construction-path width gate
+/// see the value it is admitting.
+fn float_literal_expr(e: &Expr) -> Option<&Expr> {
+    match e {
+        Expr::Float(_) => Some(e),
+        Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
+            Expr::Float(_) => Some(inner.as_ref()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// 2026-08-17: does the target type's construction surface accept a NUMERIC
@@ -2378,6 +2419,7 @@ fn float_literal_fits(
     ty: &Type,
     expr: &Expr,
     universe: &crate::type_universe::TypeUniverse,
+    type_max_bits: &HashMap<String, u64>,
 ) -> bool {
     // Bit-rooted flexible form is not a float target.
     if matches!(ty, Type::Bits(_)) {
@@ -2388,12 +2430,18 @@ fn float_literal_fits(
     };
     // Target width from the type's OWN bits metadata (the MaxBits ladder —
     // the same key the casting graph's FloatWidth resolver reads).
+    // 2026-09-02 (plan fundamental-parent-membership): typedefs absent from
+    // the fresh typecheck universe fall back to the typechecker's collected
+    // `spec Bits`/`MaxBits` map — the gate must not silently admit every
+    // literal just because the universe cannot see the type.
     let bits = ty.universe_key().and_then(|k| universe.get(k)).and_then(|rt| {
         rt.properties.iter().find_map(|(k, pv)| match (k.as_str(), pv) {
             ("bits", crate::ast::PropertyValue::Int(n))
             | ("maxbits", crate::ast::PropertyValue::Int(n)) => Some(*n as u32),
             _ => None,
         })
+    }).or_else(|| {
+        ty.universe_key().and_then(|k| type_max_bits.get(k)).map(|b| *b as u32)
     });
     match bits {
         // 16-bit target: f32→f16→f32 round-trip must be exact.
@@ -3024,11 +3072,13 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
                     (t, Some(e @ Expr::Float(_))) => {
                         // Category gate first: only FLOAT-category targets
                         // admit float literals (a hypothetical `FakeInt16`
-                        // must not).
-                        let (cat, _) = ctx
-                            .casting_graph
-                            .type_to_protocol(ctx.universe, t);
-                        cat == "Float" && float_literal_fits(t, e, ctx.universe)
+                        // must not). 2026-09-02: membership derives through
+                        // the parent chain (fundamental-parent-membership
+                        // plan) — the old universe-only type_to_protocol
+                        // lookup returned "Data" for typedefs absent from
+                        // the fresh universe, so the gate could not fire.
+                        ctx.operand_implements_protocol(t, "#Float")
+                            && float_literal_fits(t, e, ctx.universe, &ctx.type_max_bits)
                     }
                     _ => false,
                 };
@@ -4171,6 +4221,11 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
     // accept empty list literals and have a compiler-scaffolded op surface.
     let mut all_coll_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut all_type_protocols: HashMap<String, String> = HashMap::new();
+    // 2026-09-02 (plan fundamental-parent-membership): `spec Bits`/`MaxBits`
+    // width metadata for typedefs absent from the fresh universe — the
+    // float-literal width-admission reads it (the parser normalizes the
+    // spec keys to lowercase; see parser/definitions.rs spec_key).
+    let mut all_type_max_bits: HashMap<String, u64> = HashMap::new();
     // 2026-08-03 (P1.4): cross-variant op overrides from proto declarations —
     // variant name → op name → binding fn (e.g. C_String → Concat →
     // cstring_concat). An op on a sub-protocol value prefers its own variant's
@@ -4267,6 +4322,17 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
             }
             if let Some(proto) = &td.protocol {
                 all_type_protocols.insert(td.name.clone(), proto.clone());
+            }
+            // 2026-09-02: record width metadata (`spec Bits` exact, else
+            // `spec MaxBits` ceiling) so float-literal admission can enforce
+            // the precision contract without a universe entry.
+            let iv = |key: &str| -> Option<u64> {
+                td.body.metadata.get(key).and_then(|pv| {
+                    if let crate::ast::PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
+                })
+            };
+            if let Some(bits) = iv("bits").or_else(|| iv("maxbits")) {
+                all_type_max_bits.insert(td.name.clone(), bits);
             }
         }
         // 2026-08-26 (Phase B2, plan 2026-08-26-async-phase-b2): cell
@@ -4377,6 +4443,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_type_members: &all_type_members,
         all_type_params: &all_type_params,
         all_type_protocols: &all_type_protocols,
+        all_type_max_bits: &all_type_max_bits,
         all_cross_ops: &all_cross_ops,
         all_coll_types: &all_coll_types,
         defined_fns: &defined_fns,
@@ -4409,6 +4476,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         mctx.type_params = all_type_params.clone();
         mctx.fn_param_types = fn_param_types.clone();
         mctx.type_protocols = all_type_protocols.clone();
+        mctx.type_max_bits = all_type_max_bits.clone();
         for (name, ty) in &fn_return_types {
             mctx.fn_return_types.insert(name.clone(), ty.clone());
         }
@@ -4852,6 +4920,7 @@ struct CheckEnv<'a> {
     all_type_members: &'a HashMap<String, Vec<TopLevel>>,
     all_type_params: &'a HashMap<String, Vec<String>>,
     all_type_protocols: &'a HashMap<String, String>,
+    all_type_max_bits: &'a HashMap<String, u64>,
     all_cross_ops: &'a HashMap<String, HashMap<String, String>>,
     /// 2026-08-15 (coll plan): `coll obj`/`coll struct` type names.
     all_coll_types: &'a std::collections::HashSet<String>,
@@ -4892,6 +4961,8 @@ fn make_typecheck_context<'a>(env: &CheckEnv<'a>, universe: &'a TypeUniverse) ->
     ctx.fn_param_types = env.fn_param_types.clone();
     ctx.fn_type_params = env.fn_type_params.clone();
     ctx.type_protocols = env.all_type_protocols.clone();
+    // 2026-09-02: width metadata for the float-literal admission gate.
+    ctx.type_max_bits = env.all_type_max_bits.clone();
     // 2026-08-22 (Phase 5): trait assertions power dyn coercions.
     ctx.trait_assertions = env.all_trait_assertions.clone();
     ctx.trait_defs = env.all_trait_defs.clone();
@@ -8391,5 +8462,50 @@ defn f(a: V4, b: V4) -> V4 { term a + b; };
         .expect_err("Bits parent must not derive Float/Int membership");
         let msg = format!("{}", err.first().unwrap());
         assert!(msg.contains("'+'") || msg.contains("invalid operation"), "{msg}");
+    }
+
+    /// A Float literal within the target width constructs the type — the
+    /// float twin of the int width admission, now firing for typedefs the
+    /// fresh universe cannot see (width from the collected `spec MaxBits`).
+    #[test]
+    fn float_literal_admission_derived_membership() {
+        check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = 0.0;
+"#)
+        .expect("exact f16 literal must construct");
+        check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = -2048.0;
+"#)
+        .expect("negated exact literal must construct");
+    }
+
+    /// The precision contract: a literal that loses mantissa bits in the
+    /// target width is rejected. Regression guard — before the gate fix the
+    /// construction path admitted EVERY f32 literal silently.
+    #[test]
+    fn float_literal_precision_violation_rejected() {
+        let err = check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = 3.14159265;
+"#)
+        .expect_err("mantissa-loss literal must be rejected");
+        let msg = format!("{}", err.first().unwrap());
+        assert!(msg.contains("MyHalf"), "{msg}");
+
+        let err = check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = 65536.0;
+"#)
+        .expect_err("overflow literal must be rejected");
+        assert!(format!("{}", err.first().unwrap()).contains("MyHalf"), "{err:?}");
+
+        let err = check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = 0.0001;
+"#)
+        .expect_err("mantissa-loss literal must be rejected");
+        assert!(format!("{}", err.first().unwrap()).contains("MyHalf"), "{err:?}");
     }
 }
