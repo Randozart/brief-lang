@@ -135,3 +135,44 @@ parent) · SPEC relationship grammar + arithmetic ·
 
 Protocol-table label sweep (`AddI64#`→`Add#` style, ~25 entries) · f16
 tensor device-fault hunt (vendor tooling needed) · f16 string/format paths.
+
+---
+
+## Result (2026-09-02, same session — all tracks landed)
+
+Commits, in order:
+1. `e7a4bf98` — shared CAST_CATEGORY_PROPS table + multi-level base walk (A1+A4)
+2. `ddaa6cc1` — typechecker declared_category_of + consumer migration (A2)
+3. `00e9febb` — f16 literal precision contract on the live path (A3)
+4. `4d60f845` — float_literal_admissible extraction (Praetor complexity)
+5. `68a47330` — float.bv de-hashtagged; FAdd16/FSub16/FMul16 deleted (A6)
+6. `3cbe9943` — shape-driven scalar Float16, `fadd half` end-to-end (B8)
+7. `417147b5` — interpreter f16 exactness test (B9)
+8. `8d4848c0` — SPIR-V Float16 capability scan for f16 state shapes
+9. `691791d5` — shared AST protocol derivation for glue/FFI + boundary (A5)
+
+**A0 baseline findings (empirical):** gemm_h.abv DID typecheck at HEAD
+(admission flowed through try_coerce_via_parse's numeric construction,
+which checked membership but never width) — and `3.14159265` into
+Float16 compiled: the precision contract was unenforced. Both fixed.
+
+**B10 answer:** pure membership-derived authorization suffices — gemm_h
+typechecks with ZERO declared ops. float.bv carries no arithmetic
+declarations at all.
+
+**Lexer note:** Float regex is `[0-9]+\.[0-9]+` — no exponent notation
+(`1.0e-8` is not a Float literal). Pre-existing gap; out of scope here.
+
+**Known remaining (pre-existing, blocked f16 surface — join the tensor
+device-fault ledger):** the tiled-f16 kernel body's Function-storage f16
+local still fails spirv-val (`OpStore` width mismatch — Vulkan forbids
+16-bit Function-storage variables; the coopmat tensor path skips body
+locals for exactly this reason). Execution was already blocked by the
+f16 tensor device fault; root-causing both needs the vendor-tooling
+escalation recorded in the M2.2 plan.
+
+**Final gates:** 2037 lib tests green · gemm_h.abv typechecks + builds ·
+f32 gemv spirv-val clean + `brievc run` executes (counter = 64) ·
+f16.ll accepted by llc -O2 and clang -O3 · Praetor: no new diagnostics
+in touched functions (emit_field_init_value improved 36 → 16 vs
+baseline).

@@ -17,6 +17,19 @@ They are lexed as distinct tokens, never as identifiers.
 > `#System`) are unchanged. See
 > `docs/plans/2026-08-15-fundamentals-as-types.md`.
 
+> **2026-09-02 (Fundamental-Parent Membership).** A type whose parent chain
+> reaches a fundamental DERIVES that category's membership — `type Float16 :
+> Float { }` is a `#Float` member with no `#Float` restatement, no declared
+> arithmetic ops, and no width-suffixed intrinsics. Category resolution
+> walks the parent chain at every hop (typechecker `declared_category_of`,
+> casting graph `type_to_protocol`, the AST-level
+> `derive_type_protocols` for glue/FFI), and all scalar lowering is
+> shape-driven: the operand's `(category, bits)` picks half/float/double
+> and the instruction (`fadd half`, OpFAdd 16, …). Explicit `#Cat`
+> declarations keep precedence for variants (`#String<C_String>`) and
+> non-fundamental protocols. See
+> `docs/plans/2026-09-02-fundamental-parent-membership.md`.
+
 The fundamental types in op signatures are **backend category directives**:
 
 ```briev

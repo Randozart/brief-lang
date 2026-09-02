@@ -53,7 +53,7 @@ check does not exist — the backend silently falls through to external call.
 | Category | Examples | Reason |
 |----------|----------|--------|
 | Primitive types | `Int`, `Float`, `Bool`, `Void` | Compiler needs these to type-check anything |
-| Arithmetic | `Add#`, `Sub#`, `Mul#`, `Div#`, `Rem#`, `Neg#`, `Abs#` | Operator sugar desugars to these; no stdlib needed |
+| Arithmetic | `Add#`, `Sub#`, `Mul#`, `Div#`, `Rem#`, `Neg#`, `Abs#` | Operator sugar desugars to these; no stdlib needed. 2026-09-02 (fundamental-parent-membership): these are SHAPE-INFERRED — one intrinsic per operation serves every width; the operand's `(category, bits)` picks the lowering (`fadd half` / `fadd float` / `add i64`). No width-suffixed arithmetic intrinsics exist or may be added (FAddF64#/AddI64#-style protocol-table labels are typecheck-era names, never consumed by codegen). |
 | Comparison | `Eq#`, `Neq#`, `Lt#`, `Gt#`, `Le#`, `Ge#` | Same — operators desugar to these |
 | Bitwise | `BitAnd#`, `BitOr#`, `BitXor#`, `Shl#`, `Shr#`, `BitNot#` | Same |
 | Logical | `Not#` | Unary, no short-circuit concern |

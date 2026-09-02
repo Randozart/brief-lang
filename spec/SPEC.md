@@ -629,6 +629,17 @@ The relationship list after `:` may contain:
 - Parent-to-child conversion requires proof or checked conversion.
 - Overrides may not strengthen preconditions or weaken postconditions.
 
+> **2026-09-02 (fundamental-parent membership):** when the parent (or any
+> ancestor in the chain) is a fundamental (`Float`, `Int`, `String`, …),
+> the child DERIVES that category's membership — protocol op bindings,
+> cast paths, literal admission, and width semantics all follow from the
+> declaration; no `#Float` restatement and no per-width arithmetic
+> declarations are needed. `type Float16 : Float { spec MaxBits: 16; };`
+> is a complete float-typed declaration: its arithmetic lowers
+> shape-driven (`fadd half`) from `(Float, 16)`. A literal is admitted
+> only when it round-trips through the declared width exactly — the
+> precision contract narrows explicitly, never silently.
+
 ### 8.6 `trait`
 
 A trait declares reusable behavioral requirements and defaults. It has no target-specific storage meaning.
