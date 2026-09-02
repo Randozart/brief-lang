@@ -143,6 +143,21 @@ fn match_b_index(e: &Expr, k: &str, n: &str) -> Option<i64> {
 }
 
 impl GemmPlan {
+    /// Tier gate: the tensor path needs enough workgroups to be worth it
+    /// AND to be reliable on this driver. Measured 2026-09-02 (sentinel
+    /// probe, RTX 3060, driver with the known Y-dispatch defect): dispatches
+    /// of 2-7 workgroups nondeterministically LOSE workgroups' stores (rows
+    /// hold the host sentinel; the missing band varies with launch count);
+    /// 1 workgroup and >= 8 are reliable. Small GEMMs fall to the general
+    /// naive tier, which is faster there anyway (64^3: 0.019ms naive vs
+    /// 0.022ms tensor). Kernel and runner both call this — one tier
+    /// decision. Undo: delete the workgroup-count check.
+    pub(crate) fn tensor_tier_eligible(&self) -> bool {
+        let r = Self::coopmat_tile_rows(self.m);
+        let workgroups = (self.m / (16 * r as i64)) * (self.n / 64);
+        workgroups >= 8
+    }
+
     /// The effective coopmat tile-rows for a plan: the configured R capped
     /// at 8 and clamped down the power-of-two ladder until 16R divides M —
     /// every strip row must stay inside the output (the plan gate

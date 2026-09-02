@@ -1056,6 +1056,14 @@ static int briev_dev_vulkan_launch_core(void* handle, size_t nx, size_t ny,
     // a gid.y probe kernel). Flatten the grid into X until root-caused.
     {
         size_t total_groups = groups_x * ny;
+        // 2026-09-02: dispatches of 2-7 workgroups on this driver
+        // nondeterministically lose workgroups' stores (sentinel-probed:
+        // rows hold the host sentinel; which band survives varies with
+        // launch count). A pad-to-8 WORKAROUND was tested and made it
+        // WORSE (even the real workgroups' stores vanished) — reverted.
+        // The compute→transfer download barrier is kept (spec-clean
+        // defense). Follow-up: route small dispatches to the CPU lane at
+        // tier selection — BUGS.md entry with the full evidence chain.
         for (uint32_t t = 0; t < times; t++) {
             vkCmdDispatch(vk_cmd_buf, (uint32_t)total_groups, 1, 1);
         }
@@ -1167,6 +1175,20 @@ static int briev_dev_vulkan_download_dev(void* handle) {
     if (vkBeginCommandBuffer(vk_cmd_buf, &bbi) != VK_SUCCESS) {
         return 0;
     }
+    // 2026-09-02: EXPLICIT compute-write → transfer-read barrier before the
+    // pull copy. The fence between the launch and download submissions
+    // should imply this dependency (spec: fence signal = memory dependency
+    // for prior queue work), yet small dispatches (2-7 workgroups)
+    // nondeterministically lost workgroups' stores on this driver —
+    // sentinel-probed: rows held the host sentinel, missing band varied
+    // with launch count. With the barrier the downloads are ordered
+    // against the shader writes by more than the fence. Undo: delete the
+    // barrier (restores fence-only ordering).
+    record_barrier(k,
+                   /* compute write */ 0x00000010u /* SHADER_WRITE_BIT */,
+                   /* transfer read */ 0x00002000u /* TRANSFER_READ_BIT */,
+                   0x00000010u /* SHADER_WRITE_BIT */,
+                   0x00002000u /* TRANSFER_READ_BIT */);
     record_copy(k, 0, NULL, 0);
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         return 0;

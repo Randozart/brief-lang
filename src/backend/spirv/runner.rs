@@ -513,6 +513,7 @@ pub fn build_kernels(
         let tiled = plan.is_some();
         let tensor = tiled
             && crate::config_tuning::ir_lowering().spirv_coopmat
+            && plan.as_ref().map_or(false, |p| p.tensor_tier_eligible())
             && {
                 // f16 operands (same shape_of check as the kernel hook —
                 // rule 19: through the casting graph, never a name match).

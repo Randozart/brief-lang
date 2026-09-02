@@ -5439,3 +5439,36 @@ resident-safety gate could not see kernel array accesses. Found by the
 Track B gate's own negative test (a defn reading a[j] was invisible).
 Fixed with a Foreget arm (list + body walked like Guarded); regression
 tests in accel.rs resident_gate_tests (foreach_body_reads_reach_read_buffers).
+
+## 2026-09-02 — driver: small-dispatch store loss (2-7 workgroups), RTX 3060
+
+**Symptom**: GPU kernels dispatched with 2-7 workgroups nondeterministically
+lose some (or all) workgroups' stores. The host view holds the pre-launch
+sentinel; WHICH workgroup's stores survive varies with launch count
+(128³ 2-wg: band 1 landed, band 0 sentinel; 192³ 3-wg: band 2 landed).
+1 workgroup and >= 8 workgroups are reliable — which is why every
+pre-tensor verified run (all >= 8 workgroups) never saw it.
+
+**Evidence chain** (sentinel probes, f16-exact 123.0 seed):
+- 128/192/256/320³ shapes fail; 64³, 512³, 1024³, 4096³ pass — mapped to
+  workgroup counts 2-7 fail, 1 and 8+ pass, across BOTH the tensor tier
+  and the plain naive tier (the kernel is not the variable).
+- Deterministic per (blob, launch count), not a race across runs of the
+  same configuration; survives 5-20 launches.
+- A compute-write→transfer-read barrier before the download copy: no
+  effect. Fence-only ordering was already spec-sufficient.
+- A pad-to-8-workgroups workaround: WORSE — even the real workgroups'
+  stores vanished. Reverted.
+- The same driver already has one diagnosed dispatch defect: the Y
+  dimension of vkCmdDispatch never takes effect (gid.y probe kernel,
+  2026-08-31; grid flattened into X as the workaround).
+
+**Status**: DRIVER-LEVEL, unresolved (no profiler on this box — ncu
+absent; vendor tooling escalation recorded in the M2.2 plan). Mitigations
+shipped: (1) the tensor tier is gated to >= 8 real workgroups
+(`GemmPlan::tensor_tier_eligible` — kernel and runner share the gate), so
+small GEMMs take the general naive tier; (2) an explicit
+compute-write→transfer-read barrier on the download (spec-clean defense).
+**Follow-up**: route ALL sub-8-workgroup dispatches to the CPU lane at
+tier selection (small shapes are CPU-competitive anyway), and re-verify
+against a different vendor/driver when available.

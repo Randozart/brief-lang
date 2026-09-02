@@ -93,7 +93,9 @@ pub fn emit_kernel(
             })
     };
     let gemm_tensor = gemm_plan.as_ref().map_or(false, |plan| {
-        crate::config_tuning::ir_lowering().spirv_coopmat && {
+        crate::config_tuning::ir_lowering().spirv_coopmat
+            && plan.tensor_tier_eligible()
+            && {
             let (ae, be, ye) = (
                 field_elem(&plan.a_field),
                 field_elem(&plan.b_field),
