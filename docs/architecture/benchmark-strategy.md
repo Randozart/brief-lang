@@ -165,3 +165,30 @@ that keeps the machinery general while the race stays honest:
 5. **Watch the under-served side.** Over-tuning shows up as small /
    irregular shapes degrading while the benchmark shape wins. Shape-robust
    guards (the 256³ dispatch quirk) are generality work, not cleanup.
+
+## GPU Benchmark Portfolio (2026-09-02)
+
+The GPU lane's benchmark set, chosen so no single access pattern (or
+workload family) dominates the tuning signal — the anti-overfit doctrine
+applied to the benchmark suite itself:
+
+| benchmark | pattern | what it measures | status |
+|-----------|---------|------------------|--------|
+| `gemv.abv` + `gemv_bench` | row reduction, co-op rows | memory + subgroup ops | ✅ ledger (M1, 0.199ms) |
+| `gemm.abv` + `gemm_bench` | tiled matmul f32 | shared-mem staging, compute | ✅ ledger (M2.1) |
+| `gemm_h.abv` + `gemm_h_bench` | tensor matmul f16 | coopmat fragments, fp32 accumulate | ✅ ledger (14.3 TFLOP/s, past anchor) |
+| `saxpy.abv` + `saxpy_bench` | pure elementwise | achieved DRAM bandwidth | ⚠️ correctness gate OPEN (BUGS.md: 4th-field store visibility) |
+| `reduce.abv` + `reduce_bench` | two-stage reduction | bandwidth + combination | ✅ 0.771ms / 69 GB/s — latency-bound; O6 target |
+| `nbody_force.bv` | N-body central force | non-AI compute generality | ✅ pre-existing |
+| `pairs.abv` | 2D dispatch infra | grid geometry | ✅ infra |
+| softmax, stencil | transcendentals + local windows | planned — different eligibility surfaces | 📝 next |
+
+Doctrine notes:
+- Every entry gates on correctness BEFORE timing; the C harness is
+  seed → launch → download → double-reference compare.
+- The generated runner's field table is the layout authority for every
+  harness (the 256³ lesson: harness offsets derived from args, blob
+  arrays literal-sized — mismatch reads as a "correctness failure").
+- Benchmarks exist to find flaws: reduce exposed the serial-FADD
+  latency bound (O6's target); saxpy exposed the 4th-field store
+  visibility issue (BUGS.md, open).
