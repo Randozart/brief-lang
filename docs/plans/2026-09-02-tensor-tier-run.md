@@ -48,3 +48,41 @@ general-syntax performance parity). Resume context:
 Every row: fingerprint (device, spv size, shape, warmup/iters),
 correctness gate BEFORE timing, batched and sync rows, VERDICT against
 the threshold. A losing rung is a VERDICT entry.
+
+---
+
+## Result (2026-09-02, same session — the tier is CORRECT on device)
+
+**The M2.2 blocker is resolved.** Root cause found by bisecting against
+the naive reference (doctrine step 2 in action):
+
+1. **The coopmat grid decode had tile_m/tile_n swapped** (gemm.rs) —
+   X-flatten is row-MAJOR: `tile_m = wgx / tiles_x; tile_n = wgx %
+   tiles_x`. The swapped decode computed only 64 of 256 tile-rows —
+   exactly the "~25% y-fill" the M2.2 session attributed to
+   driver/NVVM. It was never the driver.
+2. **The runner's work-count used the v1 formula** (n/(16·16)) — 4×
+   over-dispatch for the 16×64-tile kernel; out-of-range tile_n values
+   smeared garbage over correct outputs. Fixed: (n/(16·64))·32.
+3. Runtime bisect leftovers restored (the features2 probe call and the
+   app-info had been left commented from crash isolation — diagnosed by
+   `nm` on the built archive object showing the symbol missing).
+
+**Verdict row**: 4096³, rel 2.442e-04 (identical to the naive bound —
+two independent implementations agree), min 41.2ms = **6.85 TFLOP/s** —
+beats the f32 tiled tier (5.25), 0.54× the ggml anchor. spirv-val
+vulkan1.3 clean; `brievc run` counter = 16777216 both tiers; 2039 lib
+tests green. The knob stays OFF in the committed config (opt-in
+strategy, per doctrine).
+
+**Next perf rungs** (each measured, VERDICT-disciplined):
+- A-panel shared-memory reuse across the 4 warp fragments (each
+  workgroup re-reads its A strip from DRAM per k-panel today).
+- Occupancy: 16384 workgroups × 32 lanes underfills the 3060 — bigger
+  tiles per workgroup or multi-tile workgroups.
+- The features2 probe reads 0 for 16bit/coop on this driver while
+  create + kernels work (NVIDIA under-enforcement) — diagnostic-only,
+  but the probe's request-what-is-supported contract is not yet met;
+  investigate the chain traversal before trusting it on OTHER vendors.
+- The 256³ small-shape quirk (pre-existing, both runtimes) — generality
+  work per doctrine step 5.
