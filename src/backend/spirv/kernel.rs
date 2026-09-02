@@ -154,19 +154,25 @@ pub fn emit_kernel(
 
     let mut collected: Vec<(String, Type)> = Vec::new();
     collect_locals(&shape.kernel_stmts, &mut collected);
+    // 2026-09-02: Vulkan forbids 16-bit-typed variables in Function
+    // storage outright — 16-bit floats are a STORAGE format, not a compute
+    // format. Widen f16 locals to f32: the body computes in f32 (the
+    // constant pool and the widened SSBO loads are f32), and Assign
+    // coerces back to the member shape at the SSBO boundary. This mirrors
+    // the tensor path's fp32-accumulate semantics and makes the tiled-f16
+    // kernel spirv-val clean (the OpStore width mismatch). Undo: restore
+    // raw `ty` in the tuple below.
     let local_vars: Vec<(String, Word, Type)> = collected
         .into_iter()
         .map(|(name, ty)| {
-            let elem = builder.lower_type(&ty)?;
+            let storage_ty = match builder.shape_of(&ty) {
+                Ok(crate::casting::graph::SpirvShape::Float { bits: 16 }) => Type::float(),
+                _ => ty,
+            };
+            let elem = builder.lower_type(&storage_ty)?;
             let ptr = builder.ptr_class(StorageClass::Function, elem);
             let var = builder.gen_id();
-            builder.instr(
-                spirv::Op::Variable,
-                Some(ptr),
-                Some(var),
-                vec![Operand::StorageClass(StorageClass::Function)],
-            );
-            Ok((name, var, ty))
+            Ok((name, var, storage_ty))
         })
         .collect::<Result<Vec<_>, String>>()?;
 
@@ -180,9 +186,9 @@ pub fn emit_kernel(
     );
     for (_, var, ty) in &local_vars {
         // 2026-09-01 (M2.2): the tensor kernel uses none of the .abv body's
-        // locals — and Vulkan forbids 16-bit-typed variables in Function
-        // storage (the body's `acc: Float16` would land here). Skip them on
-        // the tensor path.
+        // locals — it synthesizes its own accumulator fragments. Skip them
+        // on the tensor path. (Since 2026-09-02 the locals are f32-widened,
+        // so the non-tensor path emits legal Function-storage variables.)
         if gemm_tensor {
             continue;
         }

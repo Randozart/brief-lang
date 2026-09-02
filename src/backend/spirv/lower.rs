@@ -189,22 +189,22 @@ impl<'a> FnLowerer<'a> {
                 // DECIMAL initializer (`let acc: Float = 0;`) needs the zero
                 // materialized as the float-typed constant - storing an i64
                 // zero into a float variable is an OpStore type mismatch.
-                let declared_float = ty
-                    .as_ref()
-                    .map(|t| self.builder.is_float_type(t).unwrap_or(false))
-                    .unwrap_or(false);
+                // 2026-09-02: the CONSTANT WIDTH follows the RECORDED
+                // (Function-storage) type, not the AST annotation — an f16
+                // local widens to f32, so its constants are f32 too. Undo:
+                // read `ty` from the AST for the bits decision.
+                let Some((var, recorded_ty)) = self.vars.get(name.as_str()).cloned() else {
+                    return self.err(format!("local '{}' was not pre-declared", name));
+                };
+                let declared_float = self.builder.is_float_type(&recorded_ty).unwrap_or(false);
                 let (val, _ty) = match (declared_float, e) {
                     (true, Expr::Decimal(n)) => {
-                        let bits = self.builder.float_bits_of(ty.as_ref().unwrap())?;
+                        let bits = self.builder.float_bits_of(&recorded_ty)?;
                         let c = self.builder.float_const(bits, *n as f64);
-                        (c, ty.clone().unwrap())
+                        (c, recorded_ty)
                     }
                     _ => self.emit_expr(e)?,
                 };
-                let Some((var, _)) = self.vars.get(name.as_str()) else {
-                    return self.err(format!("local '{}' was not pre-declared", name));
-                };
-                let var = *var;
                 self.builder.store(var, val);
                 Ok(())
             }
@@ -212,8 +212,14 @@ impl<'a> FnLowerer<'a> {
                 self.err("uninitialized let is not supported in kernels")
             }
             Statement::Assign(lhs, rhs) => {
-                let (val, _ty) = self.emit_expr(rhs)?;
-                let (ptr, _pty) = self.lhs_addr(lhs)?;
+                let (val, vty) = self.emit_expr(rhs)?;
+                let (ptr, pty) = self.lhs_addr(lhs)?;
+                // 2026-09-02: the STORE COERCES to the destination shape —
+                // an f32-widened local storing into an f16 SSBO member
+                // converts (OpFConvert); same-shape stores pass through.
+                // The old raw OpStore was a type mismatch (spirv-val)
+                // whenever the widths differed.
+                let val = self.coerce_value(val, &vty, &pty)?;
                 self.builder.emit(Instruction::new(
                     spirv::Op::Store,
                     None,
@@ -603,26 +609,56 @@ impl<'a> FnLowerer<'a> {
 
     /// Resolve an assignment target to a storage POINTER id.
     /// Identifiers → Function var; `field[idx]` → SSBO AccessChain.
-    fn lhs_addr(&mut self, lhs: &Expr) -> Result<(Word, String), String> {
+    /// Resolve an assignment target to `(pointer, pointee_type)`. 2026-09-02:
+    /// the pointee type now travels with the pointer — the Assign store
+    /// coerces the value to it (an f32-widened local into an f16 SSBO
+    /// member).
+    fn lhs_addr(&mut self, lhs: &Expr) -> Result<(Word, Type), String> {
         match lhs {
             Expr::Identifier(name) => {
-                let Some((var, _ty)) = self.vars.get(name) else {
+                let Some((var, ty)) = self.vars.get(name) else {
                     return self.err(format!("assignment to unknown '{}'", name));
                 };
-                Ok((*var, name.clone()))
+                Ok((*var, ty.clone()))
             }
             Expr::Index(obj, idx) => {
                 let Some(field_name) = field_name_of(obj) else {
                     return self.err("only direct state-field indexing is supported");
                 };
                 let (idx_val, _) = self.emit_expr(idx)?;
-                let (elem_ptr, _) = self.state_field_elem_ptr(field_name, idx_val)?;
-                Ok((elem_ptr, field_name.to_string()))
+                let (elem_ptr, ety) = self.state_field_elem_ptr(field_name, idx_val)?;
+                Ok((elem_ptr, ety))
             }
             other => self.err(format!(
                 "unsupported assignment target ({:?})",
                 std::mem::discriminant(other)
             )),
+        }
+    }
+
+    /// Convert a value to the destination shape (2026-09-02). Identity when
+    /// the type ids match; otherwise the scalar cast opcode from
+    /// `cast_opcode` (float width changes → OpFConvert). Undo: delete and
+    /// restore raw OpStore in Assign.
+    fn coerce_value(&mut self, id: Word, src: &Type, dst: &Type) -> Result<Word, String> {
+        if self.type_id(src)? == self.type_id(dst)? {
+            return Ok(id);
+        }
+        let src_shape = self.builder.shape_of(src)?;
+        let dst_shape = self.builder.shape_of(dst)?;
+        match Self::cast_opcode(&src_shape, &dst_shape)? {
+            None => Ok(id),
+            Some(op) => {
+                let dst_ty_id = self.type_id(dst)?;
+                let res = self.builder.gen_id();
+                self.builder.emit(Instruction::new(
+                    op,
+                    Some(dst_ty_id),
+                    Some(res),
+                    vec![Operand::IdRef(id)],
+                ));
+                Ok(res)
+            }
         }
     }
 
@@ -684,9 +720,7 @@ impl<'a> FnLowerer<'a> {
                 // kernel's bounds guard) — AccessChain + Load.
                 if self.state_fields.iter().any(|f| &f.name == name) {
                     let (ptr, fty) = self.state_field_scalar_ptr(name)?;
-                    let tid = self.type_id(&fty)?;
-                    let loaded = self.builder.load(tid, ptr);
-                    return Ok((loaded, fty));
+                    return self.load_widened(ptr, fty);
                 }
                 self.err(format!("unknown identifier '{}' in kernel", name))
             }
@@ -701,9 +735,7 @@ impl<'a> FnLowerer<'a> {
                 }
                 let (idx_val, _) = self.emit_expr(idx)?;
                 let (ptr, ety) = self.state_field_elem_ptr(fname, idx_val)?;
-                let tid = self.type_id(&ety)?;
-                let loaded = self.builder.load(tid, ptr);
-                Ok((loaded, ety))
+                self.load_widened(ptr, ety)
             }
             Expr::BinaryOp(kind, l, r) => self.emit_binop(kind, l, r),
             // 2026-08-31 (plan abv-gpu-by-default): `as` casts between scalar
@@ -1125,6 +1157,32 @@ impl<'a> FnLowerer<'a> {
             vec![Operand::IdRef(lid), Operand::IdRef(rid)],
         ));
         Ok((res, Type::Bits(1)))
+    }
+
+    /// Load a scalar and widen 16-bit floats to f32 (2026-09-02): 16-bit
+    /// floats are a STORAGE format — compute happens in f32 (Function
+    /// storage forbids 16-bit variables; the constant pool is f32), so the
+    /// load OpFConverts at the boundary. Other types load as-is. Undo:
+    /// restore the raw `builder.load` at the two SSBO load sites.
+    fn load_widened(&mut self, ptr: Word, ty: Type) -> Result<(Word, Type), String> {
+        let tid = self.type_id(&ty)?;
+        let loaded = self.builder.load(tid, ptr);
+        if matches!(
+            self.builder.shape_of(&ty)?,
+            crate::casting::graph::SpirvShape::Float { bits: 16 }
+        ) {
+            let dst = Type::float();
+            let dst_id = self.type_id(&dst)?;
+            let res = self.builder.gen_id();
+            self.builder.emit(Instruction::new(
+                spirv::Op::FConvert,
+                Some(dst_id),
+                Some(res),
+                vec![Operand::IdRef(loaded)],
+            ));
+            return Ok((res, dst));
+        }
+        Ok((loaded, ty))
     }
 
     /// Zero-width mismatches are a lowering bug; identical types pass through.
