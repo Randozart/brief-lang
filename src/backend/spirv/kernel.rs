@@ -39,6 +39,26 @@ pub fn emit_kernel(
     // ── Module globals: state SSBO + invocation-id builtins. Ids thread
     // into the body lowerer so nothing is created twice.
     let state_fields = collect_state_fields(items);
+    // 2026-09-02 (plan fundamental-parent-membership): an f16 shape anywhere
+    // in the state surface requires the Float16 + 16-bit-storage
+    // capabilities BEFORE the SSBO types are lowered — the tiled f16 path
+    // (coopmat knob OFF) emits OpTypeFloat 16 members and previously
+    // failed spirv-val ("requires the Float16 capability"). Shape-driven
+    // via the casting graph, never name-matched. Undo: delete the scan
+    // (restores the capability gap on tiled-f16 kernels).
+    for f in &state_fields {
+        let elem = match &f.ty {
+            Type::Vector(inner, _) => Some((**inner).clone()),
+            other => Some(other.clone()),
+        };
+        if let Some(elem) = elem {
+            if let Ok(crate::casting::graph::SpirvShape::Float { bits: 16 }) = builder.shape_of(&elem) {
+                builder.builder.capability(rspirv::spirv::Capability::Float16);
+                builder.builder.capability(rspirv::spirv::Capability::StorageBuffer16BitAccess);
+                break;
+            }
+        }
+    }
     let (ssbo_var, global_id_var, local_id_var, workgroup_id_var, vec4_fields, state_fields_sorted) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
         warm.materialize_consts(items)?;
