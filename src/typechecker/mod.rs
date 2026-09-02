@@ -235,11 +235,52 @@ impl<'a> TypecheckContext<'a> {
         }
     }
 
-    /// Resolve the protocol hashword a custom type declares (`MyNum : #Int` →
-    /// `"#Int"`), walking the `type_parents` chain until a declaration is
-    /// found. None for primordials and protocol-less types. 2026-08-03: the
-    /// operator-resolution fix — a subtype inherits its parent's protocol.
-    fn declared_protocol_of(&self, type_name: &str) -> Option<&str> {
+    /// Resolve the protocol CATEGORY a custom type declares or derives —
+    /// the bare name ("Float", "Int", …), never the hashword spelling.
+    /// 2026-09-02 (plan fundamental-parent-membership): the walk consults
+    /// the universe at EVERY hop, so a parent chain reaching a fundamental
+    /// derives its category — `type Float16 : Float` is a #Float member
+    /// with no `#Float` restatement (fundamentals are seeded in the fresh
+    /// typecheck universe; user typedefs continue the walk via
+    /// `type_parents`). Explicit `type_protocols` declarations keep
+    /// precedence, and a declared `<Variant>` is stripped here — callers
+    /// wanting the variant re-read `type_protocols` directly. Undo: drop
+    /// the universe check per hop and restore `declared_protocol_of`.
+    fn declared_category_of(&self, type_name: &str) -> Option<String> {
+        let mut current = type_name;
+        let mut visited: Vec<String> = Vec::new();
+        loop {
+            if let Some(p) = self.type_protocols.get(current) {
+                return Some(
+                    Self::protocol_category_of(p).to_string(),
+                );
+            }
+            // Fundamental ancestor? Its universe entry carries the category
+            // (Cast.Float on the `Float` primordial, Cast.Int on `Int`, …).
+            if let Some(rt) = self.universe.get(current) {
+                for (prop, cat) in crate::type_universe::CAST_CATEGORY_PROPS {
+                    if rt.properties.contains_key(*prop) {
+                        return Some(cat.to_string());
+                    }
+                }
+            }
+            if visited.iter().any(|v| v == current) {
+                return None;
+            }
+            visited.push(current.to_string());
+            match self.type_parents.get(current) {
+                Some(parent) => current = parent.as_str(),
+                None => return None,
+            }
+        }
+    }
+
+    /// The RAW protocol string a type (or a parent) declares —
+    /// `#String<C_String>` stays spelled out. 2026-09-02: exists ONLY for
+    /// the variant cross-op lookup in `protocol_binding_for`; category
+    /// resolution goes through `declared_category_of` (which derives from
+    /// fundamental ancestors too). Undo: inline back into its sole caller.
+    fn declared_protocol_raw(&self, type_name: &str) -> Option<&str> {
         let mut current = type_name;
         loop {
             if let Some(p) = self.type_protocols.get(current) {
@@ -377,10 +418,16 @@ impl<'a> TypecheckContext<'a> {
             Type::Applied(n, _) => n.as_str(),
             _ => return None,
         };
-        let proto = self.declared_protocol_of(name)?;
+        // 2026-09-02 (plan fundamental-parent-membership): the category
+        // derives from the declaration OR the parent chain reaching a
+        // fundamental — `type Float16 : Float` binds the Float category's
+        // ops with no `#Float` restatement. The raw declaration is still
+        // consulted for the VARIANT cross-op path (`CStr :
+        // #String<C_String>` prefers its variant's own Concat).
+        let category = self.declared_category_of(name)?;
+        let raw_proto = self.declared_protocol_raw(name);
         // 2026-08-03: `+` is string concat for #String/#Blob operands — resolve
         // the Concat binding (and the variant's Concat cross-op) for "+".
-        let category = Self::protocol_category_of(proto);
         let effective_op = if op_name == "Add" && (category == "String" || category == "Blob") {
             "Concat"
         } else {
@@ -389,7 +436,7 @@ impl<'a> TypecheckContext<'a> {
         // 2026-08-03 (P1.4): a sub-protocol value (e.g. CStr: #String<C_String>)
         // prefers its VARIANT's own cross-op override (zero cast) over the base
         // binding. This is "adopt whatever operations are most convenient."
-        if let Some(variant) = Self::protocol_variant_of(proto) {
+        if let Some(variant) = raw_proto.and_then(Self::protocol_variant_of) {
             if let Some(fn_name) = self.variant_cross_ops.get(variant)
                 .and_then(|ops| ops.get(effective_op))
             {
@@ -398,7 +445,7 @@ impl<'a> TypecheckContext<'a> {
         }
         // 2026-08-03: strip a `<variant>` suffix so a #String<C_String> type
         // resolves the base #String protocol binding (Concat, Extract, ...).
-        protocol_binding(Self::protocol_category_of(proto), effective_op)
+        protocol_binding(&category, effective_op)
     }
 
     /// Does a declared operator parameter cover the operand type?
@@ -450,13 +497,17 @@ impl<'a> TypecheckContext<'a> {
         {
             return true;
         }
-        // Typechecker record: the type (or a parent) declares the protocol.
+        // Typechecker record: the type (or a parent) declares the protocol,
+        // or derives it from a fundamental ancestor. 2026-09-02 (plan
+        // fundamental-parent-membership): `declared_category_of` consults
+        // the universe at every hop, so `Float16 : Float` implements #Float
+        // with no `#Float` restatement.
         let name = match operand {
             Type::Custom(n) => n.as_str(),
             Type::Applied(n, _) => n.as_str(),
             _ => return false,
         };
-        self.declared_protocol_of(name) == Some(hw)
+        self.declared_category_of(name).as_deref() == Some(hw.trim_start_matches('#'))
     }
 
     /// 2026-07-31 (A6): For `&collection <- value`, find the collection's
@@ -8276,5 +8327,69 @@ mod float16_join_tests {
         assert!(!f32_fits_f16(1.0e-8));
         // The smallest f16 subnormal IS exact.
         assert!(f32_fits_f16(2.0f32.powi(-24)));
+    }
+}
+
+#[cfg(test)]
+mod fundamental_parent_membership_tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let mut items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&mut items, &universe)
+    }
+
+    /// 2026-09-02 (plan fundamental-parent-membership): a bare fundamental
+    /// parent confers its category — `MyInt : Int` binds the Int category's
+    /// protocol ops (`+` → AddI64#) with no `#Int` restatement. The
+    /// typechecker derives the category by walking `type_parents` into the
+    /// fresh universe's seeded primordials. Undo: revert
+    /// `declared_category_of` to the protocols-only walk.
+    #[test]
+    fn bare_fundamental_parent_confers_protocol_ops() {
+        check(r#"
+type MyInt : Int { };
+defn f(a: MyInt, b: MyInt) -> MyInt { term a + b; };
+"#)
+        .expect("derived #Int membership must authorize +");
+    }
+
+    /// The walk continues through user typedefs until it reaches the
+    /// fundamental — multi-level chains derive too.
+    #[test]
+    fn multi_level_chain_reaches_the_fundamental() {
+        check(r#"
+type MyInt : Int { };
+type MyDerived : MyInt { };
+defn f(a: MyDerived, b: MyDerived) -> MyDerived { term a + b; };
+"#)
+        .expect("chain MyDerived:MyInt:Int must derive #Int");
+    }
+
+    /// Explicit declarations keep precedence and still work — no regression
+    /// for the existing hashword spelling.
+    #[test]
+    fn explicit_hashword_declaration_still_binds() {
+        check(r#"
+type MyNum : #Int { };
+defn f(a: MyNum, b: MyNum) -> MyNum { term a + b; };
+"#)
+        .expect("explicit #Int declaration must keep binding");
+    }
+
+    /// No membership creep: a Bits-parented type derives no numeric
+    /// category, so undeclared arithmetic stays an error.
+    #[test]
+    fn bits_parent_gains_no_numeric_membership() {
+        let err = check(r#"
+type V4 : Bits { spec MaxBits: 128; };
+defn f(a: V4, b: V4) -> V4 { term a + b; };
+"#)
+        .expect_err("Bits parent must not derive Float/Int membership");
+        let msg = format!("{}", err.first().unwrap());
+        assert!(msg.contains("'+'") || msg.contains("invalid operation"), "{msg}");
     }
 }
