@@ -637,10 +637,16 @@ fn emit_kernel_node(
 /// of the work-item id differs.
 fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
     if k.tensor {
-        // Tensor GEMM: workgroups = n/(16*16), nx items = workgroups*32
-        // (the driver divides nx by the module's local_x = 32).
+        // Tensor GEMM (16×64 output tile per workgroup): workgroups =
+        // (M/16) * (N/64) = n / (16*64), items = workgroups * 32 (the
+        // driver divides nx by the module's local_x = 32). 2026-09-02:
+        // this was the v1 16×16-tile formula (n/(16*16)) — 4×
+        // over-dispatch; the extra workgroups decoded out-of-range tiles
+        // (tile_n = wgx/tiles_x beyond N) and smeared garbage over
+        // correct tiles' outputs — the tensor tier's "zero/garbage y"
+        // device symptom. Undo: restore (16 * 16).
         return format!(
-            "      long long w_{ci} = (n_{ci} / (16 * 16)) * 32;\n      if (w_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, w_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
+            "      long long w_{ci} = (n_{ci} / (16 * 64)) * 32;\n      if (w_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, w_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
         );
     }
     if k.tiled {

@@ -96,6 +96,9 @@ int main(int argc, char** argv) {
     const uint64_t N = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
     const uint64_t K = argc > 4 ? strtoull(argv[4], NULL, 10) : 4096;
     const int iters = argc > 5 ? atoi(argv[5]) : 20;
+    // 0 = naive tier (M*N work items). The TENSOR tier's geometry differs
+    // — mirror the generated runner: (M*N / 256) * 32 work items.
+    uint64_t dispatch_override = argc > 6 ? strtoull(argv[6], NULL, 10) : 0;
 
     FILE* f = fopen(argv[1], "rb");
     if (f == NULL) { perror("spv"); return 2; }
@@ -140,8 +143,9 @@ int main(int argc, char** argv) {
            (unsigned long long)M, (unsigned long long)N, (unsigned long long)K,
            WARMUP, iters);
 
-    // Dispatch: the flat naive kernel — one work item per output element.
-    uint64_t dispatch_n = M * N;
+    // Dispatch: naive = one work item per output element; a nonzero
+    // override mirrors the generated runner's tier geometry.
+    uint64_t dispatch_n = dispatch_override != 0 ? dispatch_override : M * N;
 
     // Warm-up + download (the state after warm-up holds real outputs).
     for (int w = 0; w < WARMUP; w++) {

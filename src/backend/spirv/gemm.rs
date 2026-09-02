@@ -1079,12 +1079,22 @@ pub(crate) fn emit_coopmat(
     // Memory layout constant: RowMajorKHR = 0.
     let layout_row = builder.u32_const(0);
 
-    // Grid decode: one 16×64 output tile per workgroup.
+    // Grid decode: one 16×64 output tile per workgroup. X-flattened
+    // workgroups: wgx = tile_m * tiles_x + tile_n — the ROW tile is the
+    // MAJOR (dividend), the COL tile the MINOR (modulo). 2026-09-02: the
+    // decode had them swapped (tile_n = UDiv, tile_m = UMod), so
+    // tile_m wrapped every tiles_x workgroups and tile_n ran to
+    // workgroups/tiles_x — only tiles_x/… of the tile-rows were ever
+    // computed (256 tile-rows → 64 = 25% of the output: THE "~25% y-fill
+    // fault" of the M2.2 session, misread then as a driver/NVVM issue),
+    // and tile_n ≥ N/64 re-wrote earlier rows with B strips read past
+    // the output width (garbage over correct tiles). Undo: swap the two
+    // ops back.
     let tiles_x = (plan.n / 64) as u32;
     let wgx = builtin_comp_u(builder, wgid, 0);
     let tiles_x_c = u32_const(builder, tiles_x);
-    let tile_n = u32_binop(builder, spirv::Op::UDiv, wgx, tiles_x_c);
-    let tile_m = u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c);
+    let tile_m = u32_binop(builder, spirv::Op::UDiv, wgx, tiles_x_c);
+    let tile_n = u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c);
     let s16 = u32_const(builder, 16);
     let s64 = u32_const(builder, 64);
     let tm16 = u32_binop(builder, spirv::Op::IMul, tile_m, s16);
