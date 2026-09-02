@@ -1223,6 +1223,38 @@ mod tests {
         assert_eq!(v.as_i64(), Some(0xABC + 0xF * 5 + 0xFF * 11));
     }
 
+    /// 2026-09-02 (plan fundamental-parent-membership): Float16 arithmetic
+    /// runs in the reference interpreter through the dynamic f64 model —
+    /// exact f16-representable inputs (guaranteed by the typechecker's
+    /// literal-exactness gate) yield exact results. The interpreter has no
+    /// type-directed narrowing for ANY width (Int8 is i64 too — the
+    /// deliberate dynamic model); the compiled backend rounds to f16 at
+    /// storage. For add/sub/mul of f16-exact values the two agree
+    /// bit-for-bit (f64 compute of f16-exact operands is exact; a single
+    /// final rounding in the backend lands on the same value).
+    #[test]
+    fn float16_arithmetic_is_exact_in_the_reference() {
+        let program = parse_program(
+            "type Float16 : Float { spec MaxBits: 16; spec Alignment: 2; };\n\
+             defn add16() -> Float16 {\n\
+               let a: Float16 = 1.5;\n\
+               let b: Float16 = 2.25;\n\
+               term a + b;\n\
+             };\n\
+             defn mul16() -> Float16 {\n\
+               let a: Float16 = 1.5;\n\
+               let b: Float16 = 2.0;\n\
+               term a * b;\n\
+             };\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let v = interp.call_function("add16", &[]).unwrap();
+        assert_eq!(v.as_f64(), Some(3.75), "1.5 + 2.25 must be exactly 3.75");
+        let v = interp.call_function("mul16", &[]).unwrap();
+        assert_eq!(v.as_f64(), Some(3.0), "1.5 * 2.0 must be exactly 3.0");
+    }
+
     #[test]
     fn trap_statement_aborts_interpreter() {
         // 2026-08-13 (layout-keywords plan Phase 4): `trap;` raises the abort
