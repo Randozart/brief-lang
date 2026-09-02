@@ -1634,18 +1634,34 @@ fn try_coerce_via_parse(
         // without the gate the precision contract was unenforced — every
         // f32 literal slipped through. Int literals keep the existing
         // behavior (Int8-style sizing gates at the Constrained arm).
-        if let Some(f) = float_literal_expr(expr) {
-            if ctx.operand_implements_protocol(target_ty, "#Float")
-                && !float_literal_fits(target_ty, f, ctx.universe, &ctx.type_max_bits)
-            {
-                return false;
-            }
+        if !float_literal_admissible(target_ty, expr, ctx) {
+            return false;
         }
         if construction_accepts_numeric(target_ty, arg_ty, ctx) {
             return true;
         }
     }
     false
+}
+
+/// The float-literal width gate for numeric construction — true when the
+/// expression may construct the target. Non-float literals pass untouched;
+/// a FLOAT literal constructs a FLOAT-category target only when it
+/// round-trips through the target width exactly. 2026-09-02 (plan
+/// fundamental-parent-membership); extracted from try_coerce_via_parse to
+/// keep its complexity at the house bound.
+fn float_literal_admissible(
+    target_ty: &Type,
+    expr: &Expr,
+    ctx: &TypecheckContext,
+) -> bool {
+    let Some(f) = float_literal_expr(expr) else {
+        return true;
+    };
+    if !ctx.operand_implements_protocol(target_ty, "#Float") {
+        return true;
+    }
+    float_literal_fits(target_ty, f, ctx.universe, &ctx.type_max_bits)
 }
 
 /// The float literal carried by a numeric literal expression — `Expr::Float`
