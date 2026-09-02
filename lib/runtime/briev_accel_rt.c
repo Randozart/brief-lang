@@ -98,6 +98,9 @@ typedef struct BrievDeviceDriver {
                         int full_sync, const size_t* dirty, uint32_t n_dirty);
     // Pull the device working set into the staging window (device residency
     // download). NULL → the staging window is the source of truth already.
+    // 2026-09-02: optional human-readable DEVICE name (vkGetPhysicalDevice-
+    // Properties.deviceName) for run diagnostics — NULL → the static
+    // driver `name` ("vulkan").
     int (*download_dev)(void* kernel);
     // 2026-09-01 (plan smallm-splitk): `times` identical dispatches in ONE
     // submission (one record, one submit, one fence wait) — the per-launch
@@ -107,6 +110,9 @@ typedef struct BrievDeviceDriver {
     // runtime falls back to `times` sequential launch_dev2d calls.
     int (*launch_dev2d_batch)(void* kernel, size_t nx, size_t ny, uint32_t times,
                               int full_sync, const size_t* dirty, uint32_t n_dirty);
+    // 2026-09-02: optional real device name (vkGetPhysicalDeviceProperties.
+    // deviceName). NULL → the static driver `name` is the best answer.
+    const char* (*device_name)(void);
 } BrievDeviceDriver;
 
 extern BrievDeviceDriver briev_dev_vulkan;
@@ -220,10 +226,18 @@ int briev_accel_available(void) {
     return (g_init_done && g_driver != NULL) ? 1 : 0;
 }
 
-/// The active driver name, or "cpu".
+/// The active DEVICE name (e.g. "NVIDIA GeForce RTX 3060"), or the driver
+/// name, or "cpu". 2026-09-02: the device op when the driver provides it —
+/// run diagnostics should name the GPU, not the API.
 const char* briev_accel_device_name(void) {
     if (!g_init_done || g_driver == NULL) {
         return "cpu";
+    }
+    if (g_driver->device_name != NULL) {
+        const char* n = g_driver->device_name();
+        if (n != NULL) {
+            return n;
+        }
     }
     return g_driver->name;
 }

@@ -184,6 +184,9 @@ static void (*vkDestroyInstance)(VkInstance, const void*) = NULL;
 static int (*vkEnumeratePhysicalDevices)(VkInstance, uint32_t*, VkPhysicalDevice*) = NULL;
 static void (*vkGetPhysicalDeviceQueueFamilyProperties)(VkPhysicalDevice, uint32_t*, void*) = NULL;
 static void (*vkGetPhysicalDeviceFeatures)(VkPhysicalDevice, void*) = NULL;
+static void (*vkGetPhysicalDeviceFeatures2)(VkPhysicalDevice, void*) = NULL;
+static void (*vkGetPhysicalDeviceProperties)(VkPhysicalDevice, void*) = NULL;
+static char vk_device_name[256] = "vulkan";
 static void (*vkGetPhysicalDeviceMemoryProperties)(VkPhysicalDevice, void*) = NULL;
 static int (*vkCreateDevice)(VkPhysicalDevice, const void*, const void*, VkDevice*) = NULL;
 static int (*vkEnumerateDeviceExtensionProperties)(VkPhysicalDevice, const char*, uint32_t*, void*) = NULL;
@@ -239,6 +242,12 @@ static int load_vulkan_symbols(void) {
     LOAD(vkEnumeratePhysicalDevices);
     LOAD(vkGetPhysicalDeviceQueueFamilyProperties);
     LOAD(vkGetPhysicalDeviceFeatures);
+    // 2026-09-02: features2 probing — enable a pNext feature only when the
+    // DEVICE reports it (the old code requested 16-bit storage only when
+    // the coopmat extension was present, coupling two unrelated features,
+    // and never probed shaderFloat16 at all).
+    LOAD(vkGetPhysicalDeviceFeatures2);
+    LOAD(vkGetPhysicalDeviceProperties);
     LOAD(vkGetPhysicalDeviceMemoryProperties);
     LOAD(vkCreateDevice);
     LOAD(vkEnumerateDeviceExtensionProperties);
@@ -356,6 +365,21 @@ static int briev_dev_vulkan_init(void) {
     }
     VkInstanceCreateInfo ici = {0};
     ici.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    // 2026-09-02: declare apiVersion 1.2 — WITHOUT pApplicationInfo the
+    // loader treats the instance as 1.0, and the core-1.1
+    // vkGetPhysicalDeviceFeatures2 silently no-ops (probe returned all
+    // zeros; vkCreateDevice then rejected the all-zero feature chain with
+    // the coopmat extension enabled, res=-8).
+    // VkApplicationInfo field ORDER matches the ABI exactly: sType, pNext,
+    // pApplicationName, applicationVersion, pEngineName, engineVersion,
+    // apiVersion (the versions come LAST — a reordered struct hands the
+    // driver a bogus pointer and crashes in strlen).
+    struct { uint32_t sType; const void* pNext; const char* pApplicationName;
+             uint32_t applicationVersion; const char* pEngineName;
+             uint32_t engineVersion; uint32_t apiVersion; } app = {0};
+    app.sType = 0u; /* VK_STRUCTURE_TYPE_APPLICATION_INFO */
+    app.apiVersion = (1u << 22) | (2u << 12); /* VK_MAKE_API_VERSION(0,1,2,0) */
+    ici.pApplicationInfo = &app;
     if (vkCreateInstance(&ici, NULL, &vk_instance) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] vkCreateInstance failed\n");
         goto fail;
@@ -369,8 +393,31 @@ static int briev_dev_vulkan_init(void) {
     VkPhysicalDevice devices[8];
     if (pdc > 8) { pdc = 8; }
     vkEnumeratePhysicalDevices(vk_instance, &pdc, devices);
-    // First device with a compute-capable queue family wins.
+    // 2026-09-02: prefer a device that exposes VK_KHR_cooperative_matrix
+    // (the tensor-capable device) over blind devices[0] — a box with a
+    // compute-capable iGPU listed first must not shadow the dGPU the
+    // tensor kernels target. Ties (both/neither) keep enumeration order.
     vk_physical_device = devices[0];
+    {
+        VkPhysicalDevice best = VK_NULL_HANDLE;
+        for (uint32_t di = 0; di < pdc; di++) {
+            uint32_t en = 0;
+            static char eprops[64][264];
+            if (vkEnumerateDeviceExtensionProperties(devices[di], NULL, &en, NULL) == 0 && en > 0) {
+                if (en > 64) { en = 64; }
+                if (vkEnumerateDeviceExtensionProperties(devices[di], NULL, &en, eprops) == 0) {
+                    for (uint32_t ei = 0; ei < en; ei++) {
+                        if (strncmp(eprops[ei], "VK_KHR_cooperative_matrix", 256) == 0) {
+                            best = devices[di];
+                            break;
+                        }
+                    }
+                }
+            }
+            if (best != VK_NULL_HANDLE) { break; }
+        }
+        if (best != VK_NULL_HANDLE) { vk_physical_device = best; }
+    }
     struct { uint32_t queueFamilyCount; struct { uint32_t queueFlags; uint32_t queueCount;
              uint32_t timestampValidBits; uint32_t minImageTransferGranularity[3]; } families[16]; } qprops;
     memset(&qprops, 0, sizeof(qprops));
@@ -401,6 +448,20 @@ static int briev_dev_vulkan_init(void) {
     qci.queueFamilyIndex = vk_queue_family_index;
     qci.queueCount = 1;
     qci.pQueuePriorities = &queue_priority;
+    // 2026-09-02: record the REAL device name for diagnostics (the run
+    // harness prints it) — the old code reported the static driver name.
+    {
+        // VkPhysicalDeviceProperties carries the huge Limits/Sparse
+        // sub-structs — give the driver the full room it writes and read
+        // deviceName at its documented offset (5 words in: apiVersion,
+        // driverVersion, vendorID, deviceID, deviceType).
+        unsigned char props[4096];
+        memset(props, 0, sizeof(props));
+        vkGetPhysicalDeviceProperties(vk_physical_device, props);
+        memcpy(vk_device_name, props + 20, sizeof(vk_device_name) - 1);
+        vk_device_name[sizeof(vk_device_name) - 1] = '\0';
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] device: %s\n", vk_device_name);
+    }
     // 2026-08-31: enable every SUPPORTED feature — the kernels use Int64/
     // Float64, and a NULL pEnabledFeatures means ALL OFF (the pipeline then
     // fails with no message). Features the device lacks stay off.
@@ -434,9 +495,6 @@ static int briev_dev_vulkan_init(void) {
              uint32_t vulkanMemoryModelDeviceScope;
              uint32_t vulkanMemoryModelAvailabilityVisibilityChains; }
         vmm_features = {0};
-    vmm_features.sType = 1000211000u;
-    vmm_features.vulkanMemoryModel = 1u;
-    vmm_features.vulkanMemoryModelDeviceScope = 1u;
     // VkPhysicalDevice16BitStorageAccessFeatures { sType=1000146000 } —
     // Float16 state arrays live in the SSBO (M2.2 tensor operands). The
     // FEATURES are core-promoted (Vulkan 1.1+): they chain without enabling
@@ -446,23 +504,49 @@ static int briev_dev_vulkan_init(void) {
              uint32_t uniformAndStorageBuffer16BitAccess;
              uint32_t storagePushConstant16;
              uint32_t storageInputOutput16; } f16_storage_features = {0};
-    f16_storage_features.sType = 1000146000u;
-    f16_storage_features.storageBuffer16BitAccess = 1u;
-    f16_storage_features.uniformAndStorageBuffer16BitAccess = 1u;
     // VkPhysicalDeviceFloat16Int8FeaturesKHR { sType=1000083000 } — the mma
     // is arithmetic over f16 fragments (shaderFloat16).
     struct { uint32_t sType; void* pNext; uint32_t shaderFloat16;
              uint32_t shaderInt8; } f16int8_features = {0};
-    f16int8_features.sType = 1000083000u;
-    f16int8_features.shaderFloat16 = 1u;
-    f16_storage_features.pNext = dev_ext_count > 0 ? &f16int8_features : NULL;
-    vmm_features.pNext = &f16_storage_features;
     // VkPhysicalDeviceCooperativeMatrixFeaturesKHR { sType=1000246000,
     // pNext, cooperativeMatrix } — chained via pNext.
     struct { uint32_t sType; void* pNext; uint32_t cooperativeMatrix; } coop_features = {0};
+    vmm_features.sType = 1000211000u;
+    f16_storage_features.sType = 1000146000u;
+    f16int8_features.sType = 1000083000u;
+    coop_features.sType = 1000246000u;
+    // 2026-09-02: PROBE the pNext feature structs against the device —
+    // vkGetPhysicalDeviceFeatures2 fills each struct's fields with the
+    // SUPPORTED values, which are then requested verbatim. The old code
+    // set everything to 1 unconditionally and gated the 16-bit-storage
+    // chain on the coopmat extension — two unrelated features (16-bit
+    // storage serves BOTH kernel tiers; shaderFloat16 only the tensor
+    // mma). Undo: restore the unconditional sets and the
+    // dev_ext_count-ternary.
+    {
+        // Probe ROOT is VkPhysicalDeviceFeatures2 { sType=1000059000 } —
+        // NOT the vmm struct (wrong sType = driver-side failure). The
+        // pNext CHAIN must be wired before the call — with a NULL pNext
+        // the driver fills nothing and the create-request ends up
+        // all-zero (res=-8 with the coopmat ext enabled).
+        struct { uint32_t sType; void* pNext;
+                 struct { uint32_t robustBufferAccess; uint32_t f[54]; } features; } probe = {0};
+        probe.sType = 1000059000u;
+        probe.pNext = &f16_storage_features;
+        f16_storage_features.pNext = &f16int8_features;
+        f16int8_features.pNext = &coop_features;
+        coop_features.pNext = NULL;
+        vkGetPhysicalDeviceFeatures2(vk_physical_device, &probe);
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] probe: 16bit=%u uniform16=%u f16=%u coop=%u\n",
+            f16_storage_features.storageBuffer16BitAccess,
+            f16_storage_features.uniformAndStorageBuffer16BitAccess,
+            f16int8_features.shaderFloat16, coop_features.cooperativeMatrix);
+    }
+    vmm_features.vulkanMemoryModel = 1u;
+    vmm_features.vulkanMemoryModelDeviceScope = 1u;
+    vmm_features.pNext = &f16_storage_features;
+    f16_storage_features.pNext = &f16int8_features;
     if (dev_ext_count > 0) {
-        coop_features.sType = 1000246000u;
-        coop_features.cooperativeMatrix = 1u;
         f16int8_features.pNext = &coop_features;
     } else {
         f16int8_features.pNext = NULL;
@@ -475,9 +559,12 @@ static int briev_dev_vulkan_init(void) {
     dci.pNext = &vmm_features;
     dci.enabledExtensionCount = dev_ext_count;
     dci.ppEnabledExtensionNames = dev_extensions;
-    if (vkCreateDevice(vk_physical_device, &dci, NULL, &vk_device) != VK_SUCCESS) {
-        if (verbose) fprintf(stderr, "[briev_accel/vulkan] vkCreateDevice failed\n");
-        goto fail;
+    {
+        int crc = vkCreateDevice(vk_physical_device, &dci, NULL, &vk_device);
+        if (crc != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] vkCreateDevice failed res=%d\n", crc);
+            goto fail;
+        }
     }
     vk_coopmat_enabled = dev_ext_count > 0;
     vkGetDeviceQueue(vk_device, vk_queue_family_index, 0, &vk_queue);
@@ -1087,6 +1174,12 @@ static int briev_dev_vulkan_download_dev(void* handle) {
     return 1;
 }
 
+/// 2026-09-02: the REAL device name captured at init (run diagnostics name
+/// the GPU, not the API). "vulkan" until init succeeds.
+static const char* briev_dev_vulkan_device_name(void) {
+    return vk_device_name;
+}
+
 BrievDeviceDriver briev_dev_vulkan = {
     "vulkan",
     0,  // capabilities: host-visible buffer copies, no zero-copy
@@ -1101,4 +1194,6 @@ BrievDeviceDriver briev_dev_vulkan = {
     briev_dev_vulkan_launch_dev2d,
     briev_dev_vulkan_download_dev,
     briev_dev_vulkan_launch_dev2d_batch,
+    // 2026-09-02: the real GPU name for run diagnostics.
+    briev_dev_vulkan_device_name,
 };
