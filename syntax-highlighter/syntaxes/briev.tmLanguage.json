@@ -389,6 +389,10 @@
           "name": "constant.numeric.float.briev"
         },
         {
+          "name": "constant.numeric.float.briev",
+          "match": "\\b[0-9]+[eE][+-]?[0-9]+\\b"
+        },
+        {
           "match": "\\b0x[0-9a-fA-F]+\\b|\\b[0-9]+\\b",
           "name": "constant.numeric.integer.briev"
         }

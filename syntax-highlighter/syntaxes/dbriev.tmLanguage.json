@@ -1,7 +1,10 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "Data Briev",
-  "fileTypes": ["dbv", "dbvl"],
+  "fileTypes": [
+    "dbv",
+    "dbvl"
+  ],
   "firstLineMatch": "^//",
   "patterns": [
     {
@@ -246,6 +249,10 @@
         {
           "name": "constant.numeric.float.briev",
           "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.briev",
+          "match": "\\b[0-9]+[eE][+-]?[0-9]+\\b"
         },
         {
           "name": "constant.numeric.integer.briev",

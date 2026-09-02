@@ -8523,5 +8523,23 @@ let x: MyHalf = 0.0001;
 "#)
         .expect_err("mantissa-loss literal must be rejected");
         assert!(format!("{}", err.first().unwrap()).contains("MyHalf"), "{err:?}");
+
+        // 2026-09-02 (plan exponent-notation): the subnormal boundary —
+        // unwritable before exponent literals — is now exercised. f16
+        // subnormals start at 2^-24: 6.0e-8 underflows (rejected);
+        // 2^-24 = 5.9604644775390625e-8 is the smallest EXACT f16 value
+        // (admitted).
+        let err = check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = 6.0e-8;
+"#)
+        .expect_err("subnormal-underflow literal must be rejected");
+        assert!(format!("{}", err.first().unwrap()).contains("MyHalf"), "{err:?}");
+
+        check(r#"
+type MyHalf : Float { spec MaxBits: 16; };
+let x: MyHalf = 5.9604644775390625e-8;
+"#)
+        .expect("the smallest exact f16 subnormal (2^-24) must be admitted");
     }
 }

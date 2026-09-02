@@ -16,6 +16,7 @@ let score: Float = 95.5;
 let x = 42;          // Inferred: Int
 let s = "hello";     // Inferred: String
 let b = true;        // Inferred: Bool
+let f = 1.5e-8;      // Inferred: Float (exponent form, C-style: 1e5 works too)
 ```
 
 **Without Initial Value:**

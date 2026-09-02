@@ -1780,6 +1780,9 @@ From highest to lowest:
 Normative numeric forms are:
 
 - decimal integers and floats;
+- float exponent form, C-style maximal munch: `1.0e-8`, `1e5`, `65536e-16` —
+  the exponent (`e`/`E`, optional `+`/`-`) binds to the literal, never the
+  surrounding expression; `1e + 5` (spaced) remains arithmetic;
 - hexadecimal `0x`;
 - binary `0b`;
 - octal `0o`;

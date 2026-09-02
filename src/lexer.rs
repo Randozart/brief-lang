@@ -487,7 +487,15 @@ ExclaimArrow,
     #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
     Integer(i64),
 
-    #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse().ok())]
+    // 2026-09-02 (plan exponent-notation): floats carry an optional
+    // decimal exponent, C-style maximal munch — `1.0e-8`, and the BARE
+    // form `1e5` (dot optional when an exponent follows; logos
+    // longest-match picks it over Decimal). Fallbacks: `1e` fails the
+    // exponent regex (digits required) → Decimal + Ident; `0x1e5` stays
+    // hex (the bare regex cannot cross the `x`). f64::parse handles both
+    // forms natively — no parser change.
+    #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", |lex| lex.slice().parse().ok())]
+    #[regex(r"[0-9]+[eE][+-]?[0-9]+", |lex| lex.slice().parse().ok())]
     Float(f64),
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
@@ -731,6 +739,60 @@ mod tests {
             assert_ne!(kw.status, VocabStatus::Removed);
             assert_ne!(kw.status, VocabStatus::Reserved);
         }
+    }
+
+    /// 2026-09-02 (plan exponent-notation): float literals carry an
+    /// optional decimal exponent — dot form and the C-style bare form —
+    /// each a SINGLE Float token (maximal munch).
+    #[test]
+    fn exponent_float_literals_are_single_tokens() {
+        for (src, want) in [
+            ("1.0e-8", 1.0e-8),
+            ("1.0e+8", 1.0e8),
+            ("1.0E5", 1.0e5),
+            ("2.5e0", 2.5),
+            ("1e5", 1.0e5),
+            ("1e-8", 1.0e-8),
+            ("1e+8", 1.0e8),
+            ("1E5", 1.0e5),
+            ("65536e-16", 65536e-16),
+        ] {
+            let mut lexer = Token::lexer(src);
+            match lexer.next() {
+                Some(Ok(Token::Float(v))) => assert_eq!(
+                    v, want,
+                    "'{src}' must lex as Float({want}), got Float({v})"
+                ),
+                other => panic!("'{src}' must lex as a single Float token, got {other:?}"),
+            }
+            assert_eq!(lexer.next(), None, "'{src}' must consume the whole input");
+        }
+    }
+
+    /// The fallbacks stay exactly as before the exponent change.
+    #[test]
+    fn exponent_fallbacks_unchanged() {
+        // `1e` — no digits after the exponent marker → Decimal + Ident.
+        let toks: Vec<Token> = Token::lexer("1e").filter_map(|t| t.ok()).collect();
+        assert_eq!(toks.len(), 2, "1e must stay Decimal + Ident: {toks:?}");
+        // Spaced `1e + 5` is arithmetic, never a literal (maximal munch
+        // requires digits right after e/+-).
+        let toks: Vec<Token> = Token::lexer("1e + 5").filter_map(|t| t.ok()).collect();
+        assert_eq!(
+            toks,
+            vec![Token::Integer(1), Token::Identifier("e".into()), Token::Plus, Token::Integer(5)],
+            "1e + 5 must stay 1e, +, 5"
+        );
+        // `1.0-8` is subtraction.
+        let toks: Vec<Token> = Token::lexer("1.0-8").filter_map(|t| t.ok()).collect();
+        assert_eq!(toks.len(), 3, "1.0-8 must stay 1.0, -, 8: {toks:?}");
+        // Hex keeps the digits: 0x1e5 is one hex token.
+        let toks: Vec<Token> = Token::lexer("0x1e5").filter_map(|t| t.ok()).collect();
+        assert_eq!(toks.len(), 1, "0x1e5 must stay a single hex token: {toks:?}");
+        // Identifier adjacency: `1.0expr` → Float + Ident (regex needs
+        // digits after e; longest match on the dot form).
+        let toks: Vec<Token> = Token::lexer("1.0expr").filter_map(|t| t.ok()).collect();
+        assert_eq!(toks.len(), 2, "1.0expr must stay Float + Ident: {toks:?}");
     }
 
     #[test]
