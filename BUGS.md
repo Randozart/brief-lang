@@ -5417,3 +5417,25 @@ comments describing surface syntax) uses `Bit<N>`; bare `Bits` only for
 the flexible width-0 form; `Type::Bits(N)` only inside compiler-internal
 code. A doc sweep for remaining user-visible `Bits<N>` aliases is
 deferred (they parse by design).
+
+## Tree-revert hazard executed — self-inflicted, 2026-09-01
+
+While fixing pre-existing broken test files (briv_compiler typos in 9
+tests/ files — broken at HEAD before this session), a git checkout was
+used to revert the failed fix attempt and it ALSO reverted three
+uncommitted Track A files (pipeline.rs run field, main.rs flag wiring,
+compile.rs webstack initializer). The edits were redone by hand. AGENTS.md
+rule 8 exists precisely for this; recorded so the cost is remembered.
+Rule: revert changes with targeted per-file checkout only, never a bare
+tree-wide checkout while other work is in flight.
+
+## Vacuous buffer contracts for cooperative kernels — FIXED 2026-09-01
+
+collect_stmt_buffers had NO Foreach arm: the buffer walk skipped foreach
+bodies, so every cooperative kernel's read_buffers/write_buffers were
+EMPTY since the cooperative rung landed. Consequences: the eligibility
+array_is_flat checks were vacuous (no buffers to check), and the Track B
+resident-safety gate could not see kernel array accesses. Found by the
+Track B gate's own negative test (a defn reading a[j] was invisible).
+Fixed with a Foreget arm (list + body walked like Guarded); regression
+tests in accel.rs resident_gate_tests (foreach_body_reads_reach_read_buffers).

@@ -177,3 +177,26 @@ glslang or DXC), (d) per-workgroup-write tracing via a debug y-fill
 (pre-store y-fill to detect which workgroups RAN vs never stored).
 
 Revived example: `examples/gpu/gemm_h.abv` (typechecks end-to-end now).
+
+## P2 fault fingerprint (2026-09-01, y-fill sentinel trace)
+
+The y-fill experiment (harness pre-fills y with f16 sentinel 0x7BFF; the
+post-run pattern shows stored vs never-touched outputs) is decisive:
+
+- Rows 0..1026 of 4096: fully stored, values correct (f16-quantized want).
+  Zero sentinels.
+- Rows 1027..4095: 100% sentinel — never stored by anyone.
+- Identical footprint across the 16x16 and 16x64 variants and across
+  256^3/4096^3 (the 256^3 case SEGFAULTs the host outright).
+
+The boundary: ~8.4MB into the y region, workgroup ~2^12. The SPIR-V is
+validator-clean; every access is provably in-bounds; the f32 coopmat
+kernel (identical structure, f32 fragments) ran the FULL 4096^3 correctly
+at the same dispatch shape. Conclusion: the fault is in the DRIVER/NVVM
+f16 fragment path (16-bit storage interaction or shaderFloat16 lowering),
+not in our loop logic.
+
+Escalation path (needs vendor tooling, not source work): NVIDIA
+nsight-compute capture of the f16 submission; a DXC-compiled equivalent
+(glslang on this box lacks coopmat); a minimal reproducer for the driver
+vendor. The knob stays OFF; Float16 GEMMs keep the exact tiled kernel.

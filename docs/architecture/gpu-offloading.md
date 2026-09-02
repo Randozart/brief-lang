@@ -139,3 +139,74 @@ backend, never a glue change.
    work-item counter.
 4. **Probe overhead**: bounded by `accel_probe_k` full-map runs, once per
    process; Gpu-decision bodies skip the probe.
+
+---
+
+## 2026-09-01 — The GPU backend after the breakthrough day
+
+Measured on RTX 3060 (the canonical device for every number below):
+
+### Kernel synthesis tiers (automatic — the shape decides, never a keyword)
+
+| tier | trigger | M1 GEMV | 4096³ GEMM |
+|---|---|---|---|
+| work-item (flat) | eligible body | 0.89ms | 6717ms |
+| cooperative rows + vec4 | bare counter, K%32==0 | 0.245ms | — |
+| tiled GEMM (shared mem) | counter decomposed (m=i/N, n=i%N), M/N/K%64 | — | 25.3ms |
+| tensor (coopmat, f16) | Float16 fields + device gate | **FAULTED on device** — knob off | — |
+
+ggml-cuda same-GPU anchors: GEMV 0.213ms (we win batched: 0.205ms), GEMM
+10.9ms / 12.6 TFLOP/s (our tiled: 42%; the gap IS tensor cores — their
+number on a SIMT-peak card is an fp16/tf32 path).
+
+### `brievc run x.abv` (Track A)
+
+The RT (lib/runtime/briev_accel_rt.c) is compiled into brievc by build.rs
+(cc/ar probe-gated; the RT dlopens libvulkan at init — no link-time
+dependency). `run` reuses the SPIR-V backend's kernels + `prepare_run`
+(runner.rs — the run program shares ssbo_layout and dispatch geometry
+with the C runner: one source of truth) and drives the node phase machine
+in-process over FFI (src/gpu_rt.rs). Observable outputs: first+last
+element of each written field. The two-pass floor exists because the
+first resident launch takes the full-copy fallback (lazy staging alloc)
+and never seeds.
+
+### Resident-launch soundness gate for `.bv` (Track B)
+
+The resident path leaves results in VRAM between launches — the staging
+window is stale by design. `analyze_resident_safety` (accel.rs) proves
+all-readers-are-kernels per array field: every reader/writer in the
+program must be an eligible accel kernel body (host partitions, non-accel
+txns, defns, contracts are walked; top-level initializers are the seed
+and are excluded). Kernel-pinned programs emit
+`briev_accel_launch_resident` + `briev_accel_download_written` (pull only
+is_write fields); anything else keeps the exact full-copy path. The gate
+is all-or-nothing per program: mixed resident/full-copy is unsound
+(full-copy packs the stale staging into VRAM). CPU-fallback coherence:
+`briev_accel_invalidate_resident` clears the seed after any CPU body.
+
+### The buffer-contract Foreach fix (found BY the gate's negative test)
+
+collect_stmt_buffers had no Foreach arm — cooperative kernels'
+read/write_buffers were EMPTY since the cooperative rung landed, making
+the eligibility array_is_flat checks vacuous. Fixed; regression tests in
+accel.rs (resident_gate_tests).
+
+### The f16 tensor fault (open — vendor-level)
+
+Float16 joins the Float category (`type Float16 : Float, #Float`), f16
+shapes are on the kernel surface, and the tensor emitter produces
+spirv-val-clean kernels — but the device path faults: writes stop at
+~8.4MB into y (row 1027 of 4096; y-fill sentinel trace), workgroup ~2^12,
+variant- and size-independent (256³ SEGFAULTs). The f32 coopmat kernel
+(identical structure) ran 4096³ fully correct — the fault is in the
+driver/NVVM f16 fragment path. `spirv_coopmat: 0` (off) until a vendor
+tooling investigation (nsight-compute, DXC cross-compile) lands. Full
+fingerprint: docs/plans/2026-09-01-m2-tensor-cores.md.
+
+### Terminology
+
+Canonical type spelling is `Bit<N>` (BUGS.md "Bits tripwire"); the
+de-hashtag purge (fundamentals + protocols bare, hashword mechanisms
+stay) is planned in docs/plans/2026-09-01-float16-float-join-and-purge.md
+— Float16 : Float already landed as the first bare fundamental join.

@@ -1486,61 +1486,17 @@ pub fn analyze_resident_safety(
     for item in items {
         match item {
             TopLevel::Transaction(t) => {
-                let entry = accel.get(&t.name);
-                let eligible = entry.map_or(false, |e| e.shape.eligible);
-                if eligible {
-                    // The kernel part is GPU-side; the PARTITIONED-OUT host
-                    // statements run on the host between launches.
-                    let shape = &entry.unwrap().shape;
-                    for stmt in &shape.host_stmts {
-                        collect_host_array_accesses(
-                            std::slice::from_ref(stmt),
-                            info,
-                            &t.name,
-                            &mut host_touch,
-                            &mut blocker,
-                        );
-                    }
-                } else {
-                    // A non-accel (or ineligible) txn body is host code.
-                    for stmt in &t.body {
-                        collect_host_array_accesses(
-                            std::slice::from_ref(stmt),
-                            info,
-                            &t.name,
-                            &mut host_touch,
-                            &mut blocker,
-                        );
-                    }
-                }
-                // Contracts run on the host around the body.
-                // Contracts are Exprs — the expr-level walker applies.
-                collect_host_expr_accesses(
-                    &t.contract.pre_condition,
-                    info,
-                    &format!("{}[pre]", t.name),
-                    &mut host_touch,
-                    &mut blocker,
-                );
-                collect_host_expr_accesses(
-                    &t.contract.post_condition,
-                    info,
-                    &format!("{}[post]", t.name),
-                    &mut host_touch,
-                    &mut blocker,
-                );
+                walk_txn_host_accesses(t, accel, info, &mut host_touch, &mut blocker);
             }
             TopLevel::Definition(d) => {
                 // Conservative: defns may be called from any host context.
-                for stmt in &d.body {
-                    collect_host_array_accesses(
-                        std::slice::from_ref(stmt),
-                        info,
-                        &format!("defn {}", d.name),
-                        &mut host_touch,
-                        &mut blocker,
-                    );
-                }
+                collect_host_array_accesses(
+                    &d.body,
+                    info,
+                    &format!("defn {}", d.name),
+                    &mut host_touch,
+                    &mut blocker,
+                );
             }
             _ => {}
         }
@@ -1551,6 +1507,41 @@ pub fn analyze_resident_safety(
         resident_ok: blocker.is_none(),
         blocker,
     }
+}
+
+/// Host-side accesses of one transaction: eligible kernels contribute their
+/// PARTITIONED-OUT host statements; anything else is host code wholesale.
+/// Contracts are always host-side (they run around the body).
+fn walk_txn_host_accesses(
+    t: &crate::ast::top::Transaction,
+    accel: &HashMap<String, AccelEntry>,
+    info: &ProgramInfo,
+    host_touch: &mut dyn FnMut(&str, &str, &mut Option<(String, String)>),
+    blocker: &mut Option<(String, String)>,
+) {
+    let entry = accel.get(&t.name);
+    let eligible = entry.map_or(false, |e| e.shape.eligible);
+    let host_stmts: &[Statement] = if eligible {
+        &entry.unwrap().shape.host_stmts
+    } else {
+        &t.body
+    };
+    collect_host_array_accesses(host_stmts, info, &t.name, host_touch, blocker);
+    // Contracts are Exprs — the expr-level walker applies.
+    collect_host_expr_accesses(
+        &t.contract.pre_condition,
+        info,
+        &format!("{}[pre]", t.name),
+        host_touch,
+        blocker,
+    );
+    collect_host_expr_accesses(
+        &t.contract.post_condition,
+        info,
+        &format!("{}[post]", t.name),
+        host_touch,
+        blocker,
+    );
 }
 
 /// Host-side array-access walker: reuses the kernel buffer walkers (they
@@ -1595,5 +1586,197 @@ fn collect_host_expr_accesses(
     collect_expr_buffers(expr, info, &mut reads, &mut writes, &mut scalars);
     for f in reads.iter().chain(writes.iter()) {
         host_touch(f, ctx_name, blocker);
+    }
+}
+
+#[cfg(test)]
+mod resident_gate_tests {
+    //! Track B regression tests (plan gpu-backend-hardening): the
+    //! all-readers-are-kernels gate + the buffer-contract Foreach walk.
+    //! The Foreach arm in collect_stmt_buffers was MISSING — every
+    //! cooperative kernel's read/write_buffers were empty and the
+    //! array_is_flat eligibility checks were vacuous. These tests pin both.
+
+    use super::*;
+    use crate::ast::{BinaryOpKind, Type};
+
+    fn build_info(src_state: &[(&str, u64)]) -> ProgramInfo {
+        // Minimal items: state decls only (the walker needs array_types).
+        let items: Vec<TopLevel> = src_state
+            .iter()
+            .map(|(name, count)| {
+                crate::ast::TopLevel::StateDecl(crate::ast::StateDecl {
+                    name: name.to_string(),
+                    ty: Type::Vector(
+                        Box::new(Type::Custom("Float".into())),
+                        vec![Dimension::Anonymous(*count as usize)],
+                    ),
+                    span: None,
+                })
+            })
+            .collect();
+        ProgramInfo::build(&items)
+    }
+
+    fn f32_idx(field: &str, idx: &str) -> Expr {
+        Expr::Index(
+            Box::new(Expr::Identifier(field.into())),
+            Box::new(Expr::Identifier(idx.into())),
+        )
+    }
+
+    /// A minimal Definition with a foreach body over the named fields.
+    fn make_defn(name: &str, read_fields: &[&str]) -> TopLevel {
+        let body: Vec<Statement> = read_fields
+            .iter()
+            .map(|f| {
+                Statement::Foreach {
+                    item: "j".into(),
+                    list: Box::new(Expr::Range {
+                        start: Box::new(Expr::Decimal(0)),
+                        end: Box::new(Expr::Decimal(64)),
+                        inclusive: false,
+                    }),
+                    body: vec![Statement::Assign(
+                        Expr::Identifier("s".into()),
+                        f32_idx(f, "j"),
+                    )],
+                }
+            })
+            .collect();
+        TopLevel::Definition(crate::ast::Definition {
+            name: name.into(),
+            type_params: vec![],
+            parameters: vec![],
+            output_type: Some(crate::ast::OutputType::Single(Type::Custom("Float".into()))),
+            outputs: vec![],
+            contract: crate::ast::Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                span: None,
+                explicit: false,
+                post_authority: false,
+            },
+            body,
+            metadata: Default::default(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
+            doc: None,
+        })
+    }
+
+    /// An eligible kernel entry over the given arrays.
+    fn kernel_entry(reads: &[&str], writes: &[&str]) -> AccelEntry {
+        let mut shape = crate::analysis::accel::KernelShape {
+            index_var: String::new(),
+            count_expr: None,
+            kernel_stmts: Vec::new(),
+            host_stmts: Vec::new(),
+            read_buffers: Vec::new(),
+            write_buffers: Vec::new(),
+            scalar_ins: Vec::new(),
+            eligible: false,
+            reasons: Vec::new(),
+            work_cols: None,
+            reduction: None,
+        };
+        shape.eligible = true;
+        shape.read_buffers = reads.iter().map(|s| s.to_string()).collect();
+        shape.write_buffers = writes.iter().map(|s| s.to_string()).collect();
+        AccelEntry {
+            shape,
+            decision: AccelDecision::Gpu,
+            forced: true,
+            mode: AccelMode::Force,
+        }
+    }
+
+    /// THE regression: a cooperative kernel's foreach body reads must land
+    /// in read_buffers. Before the Foreach arm, read_buffers was EMPTY and
+    /// the flatness checks were vacuous.
+    #[test]
+    fn foreach_body_reads_reach_read_buffers() {
+        let info = build_info(&[("a", 4096)]);
+        let body = vec![Statement::Assign(
+            Expr::Identifier("acc".into()),
+            Expr::BinaryOp(
+                BinaryOpKind::Add,
+                Box::new(Expr::Identifier("acc".into())),
+                Box::new(f32_idx("a", "k")),
+            ),
+        )];
+        // Wrap in the foreach the partitioner would keep in kernel_stmts.
+        let stmts = vec![Statement::Foreach {
+            item: "k".into(),
+            list: Box::new(Expr::Range {
+                start: Box::new(Expr::Decimal(0)),
+                end: Box::new(Expr::Decimal(64)),
+                inclusive: false,
+            }),
+            body,
+        }];
+        let (reads, _writes, _scalars) = collect_buffers(&stmts, &info);
+        assert_eq!(reads, vec!["a".to_string()],
+            "foreach-body reads MUST reach read_buffers (the vacuous-contracts bug)");
+    }
+
+    /// The gate: a program whose defn reads a kernel array forces full-copy.
+    #[test]
+    fn host_defn_read_blocks_resident() {
+        let universe = crate::type_universe::TypeUniverse::new();
+        // State decls + a defn that reads `a`.
+        let state = |name: &str, count: u64| {
+            crate::ast::TopLevel::StateDecl(crate::ast::StateDecl {
+                name: name.into(),
+                ty: Type::Vector(
+                    Box::new(Type::Custom("Float".into())),
+                    vec![Dimension::Anonymous(count as usize)],
+                ),
+                span: None,
+            })
+        };
+        let items = vec![
+            state("a", 4096),
+            state("x", 64),
+            state("y", 64),
+            make_defn("peek", &["a"]),
+        ];
+        let info = ProgramInfo::build(&items);
+        // A kernel entry touching a/x/y.
+        let mut accel = std::collections::HashMap::new();
+        accel.insert("gemv".to_string(), kernel_entry(&["a", "x"], &["y"]));
+        let verdict = analyze_resident_safety(&items, &accel, &info, &universe);
+        assert!(!verdict.resident_ok, "defn array read must force full-copy");
+        assert_eq!(
+            verdict.blocker.as_ref().map(|(f, _)| f.as_str()),
+            Some("a"),
+            "the blocker names the field"
+        );
+    }
+
+    /// The gate: a program with NO host-side array access is resident-ok.
+    #[test]
+    fn kernel_only_program_is_resident_ok() {
+        let universe = crate::type_universe::TypeUniverse::new();
+        let state = |name: &str, count: u64| {
+            crate::ast::TopLevel::StateDecl(crate::ast::StateDecl {
+                name: name.into(),
+                ty: Type::Vector(
+                    Box::new(Type::Custom("Float".into())),
+                    vec![Dimension::Anonymous(count as usize)],
+                ),
+                span: None,
+            })
+        };
+        let items = vec![state("a", 4096), state("x", 64), state("y", 64)];
+        let info = ProgramInfo::build(&items);
+        let mut accel = std::collections::HashMap::new();
+        accel.insert("gemv".to_string(), kernel_entry(&["a", "x"], &["y"]));
+        let verdict = analyze_resident_safety(&items, &accel, &info, &universe);
+        assert!(verdict.resident_ok, "kernel-only program goes resident");
+        assert!(verdict.blocker.is_none());
     }
 }
