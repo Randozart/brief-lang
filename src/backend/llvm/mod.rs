@@ -182,6 +182,49 @@ pub(crate) fn float_to_llvm_hex(f: f64) -> String {
     format!("{}", bits)
 }
 
+/// IEEE-754 binary16 encoding of an f32 value as an LLVM half literal
+/// (`0xHXXXX`), round-to-nearest-even. 2026-09-02 (plan
+/// fundamental-parent-membership): Float16 state slots store native `half`
+/// literals. The typechecker's f32_fits_f16 gate admits exact values only,
+/// but the encoder rounds correctly for any input (overflow → Inf,
+/// underflow → ±0) so a future caller cannot produce garbage. Undo:
+/// delete with the Float16 half-slot support in emit_field_init_value.
+pub(crate) fn f32_to_f16_hex(v: f64) -> String {
+    let bits = (v as f32).to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 0xff) as i32;
+    let mant = bits & 0x007f_ffff;
+    let h: u16 = if exp == 255 {
+        // Inf / NaN — preserve quietness in the top mantissa bit.
+        if mant == 0 { sign | 0x7c00 } else { sign | 0x7e00 | ((mant >> 13) as u16 & 0x03ff) }
+    } else {
+        let unbiased = exp - 127;
+        if unbiased > 15 {
+            sign | 0x7c00 // overflow → Inf
+        } else if unbiased >= -14 {
+            // Normal: round the 23-bit mantissa to 10 bits (RNE).
+            let mut m = mant >> 13;
+            let rem = mant & 0x1fff;
+            if rem > 0x1000 || (rem == 0x1000 && (m & 1) == 1) { m += 1; }
+            let mut e = (unbiased + 15) as u16;
+            if m == 0x800 { m = 0; e += 1; } // mantissa carry bumps the exponent
+            if e >= 31 { sign | 0x7c00 } else { sign | (e << 10) | m as u16 }
+        } else if unbiased >= -25 {
+            // Subnormal (RNE, including the round-up-to-min-normal boundary).
+            let combined = 0x0080_0000u32 | mant;
+            let d = (-(unbiased + 1)) as u32;
+            let mut f10 = combined >> d;
+            let rem = combined & ((1u32 << d) - 1);
+            let half = 1u32 << (d - 1);
+            if rem > half || (rem == half && (f10 & 1) == 1) { f10 += 1; }
+            if f10 >= 0x400 { sign | (1 << 10) } else { sign | f10 as u16 }
+        } else {
+            sign // underflow → ±0
+        }
+    };
+    format!("0xH{:04X}", h)
+}
+
 // 2026-06-29: For Float64 literals (f64), bitcast directly to i64 bits
 // without truncating through f32. Used by Expr::Float64 emission.
 pub(crate) fn float64_to_llvm_hex(f: f64) -> String {
@@ -1405,17 +1448,20 @@ impl LlvmBackend {
             }
         }
         // 2026-07-26: Derive %State field type from protocol + maxbits.
-        // Float types get native float/double. Exact integer types (Int8..Int128)
+        // Float types get native half/float/double. Exact integer types (Int8..Int128)
         // get native iN width. Everything else (flexible Int, Bool, Ptr, String)
         // stores as i64 — adapt_to_i64/ensure_typed_value handle conversion.
-        let llvm_ty = if let Some(ref universe) = self.ctx.type_universe {
+        // 2026-09-02 (plan fundamental-parent-membership): float slots are
+        // WIDTH-driven via float_category_bits (casting-graph membership +
+        // bits metadata) — Half/Float16 get `half` slots (the old max_bits
+        // ladder gave Half a 32-bit float slot) and bare-parent float
+        // typedefs resolve through the base chain. Primordial behavior is
+        // unchanged (Float → float, Float64/Double → double).
+        let llvm_ty = if let Some(bits) = self.float_category_bits(ty) {
+            Self::float_spelling(bits).to_string()
+        } else if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
-                let is_float = rt.properties.contains_key("Cast.Float");
-                if is_float {
-                    if rt.max_bits <= 32 { "float".to_string() }
-                    else if rt.max_bits <= 64 { "double".to_string() }
-                    else { "i64".to_string() }
-                } else if rt.min_bits == rt.max_bits && rt.max_bits > 0 {
+                if rt.min_bits == rt.max_bits && rt.max_bits > 0 {
                     // Exact integer types get native iN width.
                     let bits = if rt.max_bits <= 8 { 8 }
                         else if rt.max_bits <= 16 { 16 }

@@ -8544,3 +8544,40 @@ fn test_mmio_pin_reads_volatile_and_skips_dispatch() {
     assert!(!ir.contains("@txn_sensor"),
         "value-pin must not event-dispatch to a nonexistent body txn:\n{ir}");
 }
+
+/// 2026-09-02 (plan fundamental-parent-membership): Float16 arithmetic
+/// lowers through the shape-driven binop path — `fadd fast half` from
+/// (Float category, bits 16), never an integer add. The typedef is the
+/// stdlib's de-hashtagged form: bare `Float` parent, no hashword, no
+/// width-suffixed intrinsics; the universe resolves it via the base-chain
+/// walk. Undo evidence: before the emit_binary_op migration this program
+/// emitted an integer add (name-equality float detection).
+#[test]
+fn test_f16_binop_emits_fadd_half() {
+    let src = r#"
+type Float16 : Float { spec MaxBits: 16; spec Alignment: 2; };
+let a: Float16 = 0.0;
+let b: Float16 = 0.0;
+let y: Float16 = 0.0;
+txn add16 [y < 100][y <= 100] {
+    y = a + b;
+}
+"#;
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    let items = p.parse_program().unwrap();
+    let mut universe = crate::type_universe::TypeUniverse::new();
+    crate::backend::register_types::register_typedefs(&items, &mut universe, 64).unwrap();
+    let mut backend = LlvmBackend::new().with_type_universe(universe);
+    let ir = backend.generate(&items, None);
+    assert!(
+        ir.contains("fadd fast half"),
+        "Float16 add must emit fadd fast half:\n{}",
+        &ir[..ir.len().min(3000)]
+    );
+    assert!(
+        !ir.contains("add nuw nsw half"),
+        "Float16 add must never take the integer path:\n{}",
+        &ir[..ir.len().min(3000)]
+    );
+}

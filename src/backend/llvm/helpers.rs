@@ -1282,6 +1282,28 @@ impl LlvmBackend {
         self.is_protocol_member(ty, "#Float")
     }
 
+    /// Float-category width of a type — `Some(bits)` when the type is a
+    /// #Float member, read from its bits/maxbits universe metadata
+    /// (16 → half, 32 → float, 64 → double; other widths fall through to
+    /// the float spelling — the double branch is split off first). `None`
+    /// for non-float types. 2026-09-02 (plan fundamental-parent-membership):
+    /// the shape-driven replacement for emit_binary_op's type-name equality
+    /// (rule 19) — Half, Float16, and every future float width flow the one
+    /// path. Undo: restore the name matches in emit_binary_op.
+    pub(super) fn float_category_bits(&self, ty: &Type) -> Option<u64> {
+        if !self.is_protocol_member(ty, "#Float") {
+            return None;
+        }
+        let universe = self.ctx.type_universe.as_ref()?;
+        let rt = ty.universe_key().and_then(|k| universe.get(k))?;
+        rt.properties.iter().find_map(|(k, pv)| match (k.as_str(), pv) {
+            ("bits", crate::ast::PropertyValue::Int(n))
+            | ("maxbits", crate::ast::PropertyValue::Int(n)) => Some(*n as u64),
+            _ => None,
+        })
+        .or(Some(rt.max_bits))
+    }
+
     /// 2026-08-01 (B1): Central #String operand check — a Briev String value
     /// is a `ptr` to a length-prefixed `[len: i64][bytes]` buffer (bits model).
     /// This is the single decision point every #String op default uses (Eq/Ne
@@ -2082,6 +2104,61 @@ impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
     // Section 9: Utility Methods (added 2026-07-14 for AST compat)
     // ═══════════════════════════════════════════════════════════════
+
+    /// Width spelling for a Float-category bit width — the shared
+    /// half/float/double(/i64-fallback) ladder. 2026-09-02 (plan
+    /// fundamental-parent-membership): was repeated at the slot-derivation
+    /// site and inside emit_binary_op.
+    pub(crate) fn float_spelling(bits: u64) -> &'static str {
+        if bits <= 16 { "half" }
+        else if bits <= 32 { "float" }
+        else if bits <= 64 { "double" }
+        else { "i64" }
+    }
+
+    /// Mixed float/int binop operands: convert the integer side to the
+    /// float width (sitofp) so both fcmp/fadd sides agree. Returns None
+    /// when no conversion is needed (same-category operands, non-float
+    /// ops). Ptr sides are left alone — the pointer arms handle them.
+    /// 2026-09-02 (plan fundamental-parent-membership): the category
+    /// protocol AUTHORIZES `y < 100`-style mixed comparisons (`y:
+    /// Float16`, contract literals), and both the config templates and
+    /// the fallback arms otherwise emit raw-mixed fcmp/fadd (invalid
+    /// IR) — masked for Float32 by the folded-contract path taking those
+    /// programs. Undo: delete and restore the unconverted operands.
+    pub(crate) fn adapt_mixed_float_operands(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        l: &TypedRegister,
+        r: &TypedRegister,
+    ) -> Option<(TypedRegister, TypedRegister)> {
+        let l_fbits = self.float_category_bits(&l.ty);
+        let r_fbits = self.float_category_bits(&r.ty);
+        let mixed = l_fbits.is_some() != r_fbits.is_some();
+        if !mixed {
+            return None;
+        }
+        let width = Self::float_spelling(l_fbits.or(r_fbits).unwrap_or(32));
+        let fty = if l_fbits.is_some() { l.ty.clone() } else { r.ty.clone() };
+        let lc = if l_fbits.is_some() || matches!(l.ty, Type::Ptr(_)) {
+            l.clone()
+        } else {
+            let t = self.fun.gen_reg();
+            let src_ty = self.llvm_type(&l.ty);
+            writeln!(out, "{}{} = sitofp {} {} to {}", indent, t, src_ty, l.name, width).ok();
+            TypedRegister { name: t, ty: fty.clone() }
+        };
+        let rc = if r_fbits.is_some() || matches!(r.ty, Type::Ptr(_)) {
+            r.clone()
+        } else {
+            let t = self.fun.gen_reg();
+            let src_ty = self.llvm_type(&r.ty);
+            writeln!(out, "{}{} = sitofp {} {} to {}", indent, t, src_ty, r.name, width).ok();
+            TypedRegister { name: t, ty: fty }
+        };
+        Some((lc, rc))
+    }
 
     /// Box a typed register to i64 for uniform state storage.
     /// Handles Float64(double)→bitcast→i64, Float(float)→bitcast→i32→zext→i64,

@@ -5394,20 +5394,31 @@ impl LlvmBackend {
                 }
             }
         }
-        let is_float = l.ty == Type::float()
-            || r.ty == Type::float()
-            || l.ty == Type::float64()
-            || r.ty == Type::float64();
-        let is_double = l.ty == Type::float64() || r.ty == Type::float64();
+        // 2026-09-02 (plan fundamental-parent-membership): float-ness and
+        // width derive from (protocol, metadata) — float_category_bits —
+        // never type-name equality (rule 19). Float16 emits `fadd half`
+        // through the same path as Float32/Float64; the old name matches
+        // (`ty == Type::float()` / `Type::float64()`) are gone. Result type
+        // follows the float operand (LHS-first, mirroring
+        // arithmetic_result_ty's result = lhs). Non-16/32/64 float widths
+        // emit the float spelling — the 64 case is split off as double
+        // first. Undo: restore the name matches and the fixed ret types.
+        let l_fbits = self.float_category_bits(&l.ty);
+        let r_fbits = self.float_category_bits(&r.ty);
+        if std::env::var("BRIEV_BINOP_DEBUG").is_ok() {
+            eprintln!("BINOP l.ty={:?} r.ty={:?} l_fbits={:?} r_fbits={:?}", l.ty, r.ty, l_fbits, r_fbits);
+        }
+        let is_float = l_fbits.is_some() || r_fbits.is_some();
+        let is_double = l_fbits == Some(64) || r_fbits == Some(64);
         // 2026-07-17: Correct float type width — use "float" for Float (32-bit)
         // and "double" for Float64 (64-bit). The old code always used "double"
         // for all float operations, producing invalid IR when operands were
         // actually 32-bit float values loaded from constants or state fields.
         let int_ty = self.binop_int_type();
-        let ty_str = if is_double {
+        let ty_str: &str = if is_double {
             "double"
         } else if is_float {
-            "float"
+            Self::float_spelling(l_fbits.or(r_fbits).unwrap_or(32))
         } else {
             &int_ty
         };
@@ -5415,10 +5426,27 @@ impl LlvmBackend {
         let mut ret_ty = if is_double {
             Type::float64()
         } else if is_float {
-            Type::float()
+            if l_fbits.is_some() { l.ty.clone() } else { r.ty.clone() }
         } else {
             Type::int()
         };
+        // 2026-09-02 (plan fundamental-parent-membership): mixed float/int
+        // operands convert the integer side to the float width BEFORE the
+        // config-template dispatch (see adapt_mixed_float_operands) — the
+        // category protocol AUTHORIZES `y < 100`-style mixed comparisons
+        // (`y: Float16`, contract literals), and both the templates and
+        // the fallback arms otherwise emit raw-mixed fcmp/fadd (invalid
+        // IR).
+        let l_owned;
+        let r_owned;
+        let (l, r): (&TypedRegister, &TypedRegister) =
+            if let Some((lc, rc)) = self.adapt_mixed_float_operands(out, indent, l, r) {
+                l_owned = lc;
+                r_owned = rc;
+                (&l_owned, &r_owned)
+            } else {
+                (l, r)
+            };
         // 2026-07-18: Phase 0 — try config-driven dispatch first.
         // The OP_CONFIG maps (op_name, type_name, bytes) → LLVM IR template.
         // If the config has an entry, fill the template and skip hardcoded matches.

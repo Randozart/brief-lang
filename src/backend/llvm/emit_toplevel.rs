@@ -1,6 +1,6 @@
 use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
-use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, llvm_type_byte_size, protocol_llvm_type, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, f32_to_f16_hex, llvm_type_byte_size, protocol_llvm_type, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -2312,6 +2312,46 @@ impl LlvmBackend {
 
     /// 2026-08-01 (B4): tag_strings removed — a String is an untagged ptr to
     /// [len][bytes] under the bits model; no static-tag bit is ever set.
+    /// Emit an init store for a FLOAT literal at the field slot's width —
+    /// half (f16 RNE hex), float (native), double (native), or the legacy
+    /// boxed-i64 dance for anything else. 2026-09-02 (plan
+    /// fundamental-parent-membership): extracted from emit_field_init_value
+    /// — the Neg arm duplicated this whole chain; the Float16 half arm made
+    /// a third copy unjustifiable (rule 17). Undo: inline back.
+    fn emit_float_literal_store(&mut self, out: &mut String, indent: &str,
+        f: f64, slot: (&str, &str))
+    {
+        let (ty, gep) = slot;
+        if ty == "half" {
+            writeln!(out, "{}store half {}, ptr {}, align 2", indent, f32_to_f16_hex(f), gep).ok();
+            return;
+        }
+        if ty == "float" {
+            let bits_reg = self.fun.gen_reg();
+            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, float_to_llvm_hex(f)).ok();
+            writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
+            return;
+        }
+        if ty == "double" {
+            // 2026-08-01: a Float64 field's slot is `double` — emit the
+            // literal at double width. The old else-branch boxed the
+            // FLOAT32 into the double slot (4 garbage low bytes →
+            // corrupted values, e.g. 3.25 → 5.33e-315).
+            let bits_reg = self.fun.gen_reg();
+            writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, float64_to_llvm_hex(f)).ok();
+            writeln!(out, "{}store double {}, ptr {}, align 8", indent, bits_reg, gep).ok();
+            return;
+        }
+        // Boxed fallback (legacy non-native float slots).
+        let bits_reg = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, float_to_llvm_hex(f)).ok();
+        let boxed = self.fun.gen_reg();
+        writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
+        let zext = self.fun.gen_reg();
+        writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
+    }
+
     fn emit_field_init_value(&mut self, out: &mut String, indent: &str,
         init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize)
     {
@@ -2329,58 +2369,14 @@ impl LlvmBackend {
                 writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, n, gep, self.align_of(ty)).ok();
             }
             Some(Expr::Float(f)) => {
-                // 2026-07-17: State fields are always i64. Box float via
-                // bitcast to i32 + zext to i64 before storing.
-                let h = float_to_llvm_hex(f);
-                if ty == "float" {
-                    let bits_reg = field_reg("b");
-                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                    writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
-                } else if ty == "double" {
-                    // 2026-08-01: a Float64 field's slot is `double` — emit the
-                    // literal at double width. The old else-branch boxed the
-                    // FLOAT32 into the double slot (4 garbage low bytes →
-                    // corrupted values, e.g. 3.25 → 5.33e-315).
-                    let bits_reg = field_reg("b");
-                    writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, float64_to_llvm_hex(f)).ok();
-                    writeln!(out, "{}store double {}, ptr {}, align 8", indent, bits_reg, gep).ok();
-                } else {
-                    let bits_reg = field_reg("b");
-                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                    let boxed = field_reg("z");
-                    writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
-                    let zext = field_reg("x");
-                    writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
-                    writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
-                }
+                self.emit_float_literal_store(out, indent, f, (ty, gep));
             }
             // 2026-07-14: Float and Float32 unified to Expr::Float(f64).
             // Negative values handled via Expr::UnaryOp(UnaryOpKind::Neg, Expr::Float(f)).
             Some(Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, ref inner)) => {
                 match inner.as_ref() {
                     Expr::Float(f) => {
-                        // 2026-07-19: Native float fields store directly.
-                        let h = float_to_llvm_hex(-*f);
-                        if ty == "float" {
-                            let h = float_to_llvm_hex(-*f);
-                            let bits_reg = field_reg("b");
-                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                            writeln!(out, "{}store float {}, ptr {}, align 4", indent, bits_reg, gep).ok();
-                        } else if ty == "double" {
-                            // 2026-08-01: Float64 field — emit at double width
-                            // (mirrors the Expr::Float arm above).
-                            let bits_reg = field_reg("b");
-                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, float64_to_llvm_hex(-*f)).ok();
-                            writeln!(out, "{}store double {}, ptr {}, align 8", indent, bits_reg, gep).ok();
-                        } else {
-                            let bits_reg = field_reg("b");
-                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                            let boxed = field_reg("z");
-                            writeln!(out, "{}{} = bitcast float {} to i32", indent, boxed, bits_reg).ok();
-                            let zext = field_reg("x");
-                            writeln!(out, "{}{} = zext i32 {} to i64", indent, zext, boxed).ok();
-                            writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, zext, gep, self.align_of("i64")).ok();
-                        }
+                        self.emit_float_literal_store(out, indent, -*f, (ty, gep));
                     }
                     Expr::Decimal(n) => {
                         writeln!(out, "{}store i64 -{}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
@@ -2952,10 +2948,18 @@ impl LlvmBackend {
         hi: i64,
     ) -> Option<usize> {
         // Extract the integer width from the LLVM type ("i8"/"i16"/"i32"/"i64").
-        let bits: u32 = field_llvm_ty
+        // 2026-09-02 (plan fundamental-parent-membership): range metadata is
+        // INTEGER-only in LLVM — a float storage type ("half"/"float"/
+        // "double") must skip it entirely; the old `or(Some(64))` default
+        // laundered non-integer types into malformed `!{ half ... }` nodes
+        // once Float16 state slots resolved natively. Undo: restore the
+        // or(Some(64)) fallback.
+        let Some(bits): Option<u32> = field_llvm_ty
             .strip_prefix('i')
             .and_then(|s| s.parse().ok())
-            .or(Some(64))?;
+        else {
+            return None;
+        };
         // The range bounds must be representable in `bits`. For a signed load
         // width N, LLVM interprets range bounds as that integer type; hi must
         // fit. If the bound exceeds the width (e.g. 256 in i8), the range is
@@ -4536,8 +4540,18 @@ fn probe_ok_checks(
                         // verifier. A bound that doesn't fit the width (e.g.
                         // 300 in i8) is clamped to the width's max (the load
                         // physically can't exceed it).
-                        let bits: u32 = ty.strip_prefix('i')
-                            .and_then(|s| s.parse().ok()).unwrap_or(64);
+                        // 2026-09-02 (plan fundamental-parent-membership):
+                        // range metadata is INTEGER-only — float storage
+                        // ("half"/"float"/"double") skips the range reload and
+                        // falls back to @llvm.assume (the old unwrap_or(64)
+                        // emitted malformed `!{ half ... }` nodes once Float16
+                        // slots resolved natively).
+                        let bits: Option<u32> = ty.strip_prefix('i')
+                            .and_then(|s| s.parse().ok());
+                        let Some(bits) = bits else {
+                            writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
+                            return;
+                        };
                         let max_signed = if bits >= 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 };
                         let rhi = bound.min(max_signed);
                         let idx_val = idx;

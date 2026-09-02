@@ -289,8 +289,15 @@ fn is_operation_identity(name: &str) -> bool {
 /// Phase 3 will replace this with proper hashword category dispatch.
 pub(crate) fn template_for_op(op_name: &str, llvm_ty: &str, bytes: u64) -> Option<String> {
     let is_float = matches!(llvm_ty, "float" | "double" | "half" | "bfloat" | "fp128");
+    // 2026-09-02 (plan fundamental-parent-membership): each float width
+    // templates at its own spelling — half folded to float before (invalid
+    // IR on half registers); half/bfloat now reach this path since Float16
+    // state slots resolve natively. Undo: restore the half/bfloat → float
+    // fold.
     let float_llvm = match llvm_ty {
-        "float" | "half" | "bfloat" => "float",
+        "half" => "half",
+        "bfloat" => "bfloat",
+        "float" => "float",
         "double" => "double",
         _ if bytes <= 4 => "float",
         _ => "double",
