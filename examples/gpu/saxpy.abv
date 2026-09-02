@@ -1,0 +1,63 @@
+// saxpy.abv — z[i] = ALPHA * x[i] + y[i], N = 16.7M f32 elements: the
+// classic memory-bound GPU benchmark (2 loads, 1 store, 1 FMA — measures
+// achieved DRAM bandwidth, not math throughput).
+//
+// Correctness observable: a 256-sample checksum (z values are exact
+// integers here — ALPHA*x doubles the 0.5-multiples and y is integral),
+// summed in f32 by a report node and printed via println!. The C harness
+// computes the same sum. The destination is a separate `z` so every pass
+// is idempotent (resident launches push only scalars/dirty between runs —
+// an accumulating y += form would make the result pass-count-dependent).
+//
+// Replaces benchmarks/gpu/saxpy.bv, which counted work items but
+// performed no math (found 2026-09-02, GPU-portfolio sweep).
+const N: Int = 16777216;
+const ALPHA: Float = 2.0;
+const SAMPLE: Int = 65536;
+
+let i: Int = 0;
+let s: Int = 0;
+// Phase machine (the nbody pattern): contracts with `phase` are the
+// reactor's dependence edges — z's array-level RW overlap alone did NOT
+// order check after saxpy (see BUGS.md 2026-09-02).
+let phase: Int = 0;
+let x: Float[16777216];
+let y: Float[16777216];
+let z: Float[16777216];
+let sum16: Float[16];
+
+async node saxpy [phase == 0 && i < N][true] {
+    z[i] = ALPHA * x[i] + y[i];
+    i = i + 1;
+    term;
+};
+
+async node saxpy_done [phase == 0 && i == N][phase == 1] {
+    phase = 1;
+    s = 0;
+    term;
+};
+
+// 16 work items x 16 samples each = the 256-sample checksum; the report
+// prints constant indices (scalar reads are constants-only in v1).
+async node check [phase == 1 && s < 16][true] {
+    let part: Float = 0;
+    foreach t in 0..16 {
+        part = part + z[(s * 16 + t) * SAMPLE];
+    }
+    sum16[s] = part;
+    s = s + 1;
+    term;
+};
+
+async node check_done [phase == 1 && s == 16][phase == 2] {
+    phase = 2;
+    term;
+};
+
+async node report [phase == 2][true] {
+    endprogram println!(sum16[0] + sum16[1] + sum16[2] + sum16[3]
+        + sum16[4] + sum16[5] + sum16[6] + sum16[7]
+        + sum16[8] + sum16[9] + sum16[10] + sum16[11]
+        + sum16[12] + sum16[13] + sum16[14] + sum16[15]);
+};
