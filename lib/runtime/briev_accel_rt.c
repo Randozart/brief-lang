@@ -246,6 +246,44 @@ static uint64_t proj_size(const BrievKernelDesc* k) {
 
 /// Pack the kernel's fields from the host %State into a flat projection
 /// (kernel field order), launch, then unpack written fields back.
+/// Pull ONLY the kernel-written fields VRAM→staging→host (plan
+/// gpu-backend-hardening Track B): the resident launch's outputs become
+/// visible in host state without re-copying read-only inputs. Fields with
+/// is_write=0 are skipped (their staging is stale by design and unused).
+int briev_accel_download_written(uint32_t idx, void* state) {
+    if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
+        || g_kernels[idx] == NULL || !g_resident_seeded[idx]) {
+        return 0;
+    }
+    void* mapped = g_driver->mapped(g_kernels[idx]);
+    if (mapped == NULL) {
+        return 0;
+    }
+    if (g_driver->download_dev != NULL) {
+        g_driver->download_dev(g_kernels[idx]);
+    }
+    const BrievKernelDesc* k = &g_descs[idx];
+    for (uint32_t i = 0; i < k->n_fields; i++) {
+        const BrievField* f = &k->fields[i];
+        if (!f->is_write) {
+            continue;
+        }
+        size_t n = (size_t)(f->count * f->elem_bytes);
+        memcpy((uint8_t*)state + f->host_offset, mapped + f->proj_offset, n);
+    }
+    return 1;
+}
+
+/// CPU-fallback coherence (Track B): after a CPU accel body writes HOST
+/// state, the VRAM working set is stale — clear the seed so the next
+/// resident launch re-pushes ALL fields from the host. The .bv wrapper's
+/// accel_cpu block calls this.
+void briev_accel_invalidate_resident(void) {
+    for (uint32_t i = 0; i < g_n_kernels && i < 32; i++) {
+        g_resident_seeded[i] = 0;
+    }
+}
+
 int briev_accel_launch(uint32_t idx, void* state, uint64_t work_n) {
     if (!briev_accel_available() || idx >= g_n_kernels || g_kernels == NULL
         || g_kernels[idx] == NULL) {

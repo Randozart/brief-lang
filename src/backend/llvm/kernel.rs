@@ -424,6 +424,11 @@ pub(crate) fn emit_accel_descriptors(
     ));
     out.push_str("declare i32 @briev_accel_init(ptr, i32)\n");
     out.push_str("declare i32 @briev_accel_launch(i32, ptr, i64)\n");
+    // 2026-09-01 (Track B): resident launches for kernel-pinned .bv programs
+    // + CPU-fallback coherence.
+    out.push_str("declare i32 @briev_accel_launch_resident(i32, ptr, i64)\n");
+    out.push_str("declare i32 @briev_accel_download_written(i32, ptr)\n");
+    out.push_str("declare void @briev_accel_invalidate_resident()\n");
     out.push_str("declare i32 @briev_accel_available()\n");
     out.push_str("declare i32 @briev_accel_probe(ptr, ptr, ptr, i64, i64, double, double, ptr)\n");
     (out, idx_of)

@@ -133,6 +133,9 @@ pub struct CompilerContext {
     /// program (no live reactive nodes) omits it, so `render_frame` must not
     /// call it (an undefined `@reactor_tick` fails llc).
     pub has_reactor_tick: bool,
+    /// 2026-09-01 (Track B): the whole program's accel kernels may use the
+    /// resident launch path (all-readers-are-kernels proven per field).
+    pub accel_resident_ok: bool,
 
     // MMIO & Schema
     pub mmio_fields: HashMap<String, u64>,
@@ -427,6 +430,7 @@ impl CompilerContext {
             idx_to_field_name: HashMap::new(),
             collection_iterables: std::collections::HashSet::new(),
             has_reactor_tick: false,
+            accel_resident_ok: false,
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,

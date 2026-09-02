@@ -138,11 +138,11 @@ pub struct AccelEntry {
 }
 
 /// State-field facts extracted from the program.
-struct ProgramInfo {
+pub(crate) struct ProgramInfo {
     /// All state field names (scalar + array).
     state_fields: HashSet<String>,
     /// Array state field name → its full `Type::Vector` type.
-    array_types: HashMap<String, Type>,
+    pub(crate) array_types: HashMap<String, Type>,
     /// `const Name = expr;` values (compile-time).
     consts: HashMap<String, Expr>,
     /// `const Name: Type = ...;` declared types.
@@ -836,6 +836,16 @@ fn collect_stmt_buffers(
                 collect_stmt_buffers(s, info, reads, writes, scalars);
             }
         }
+        // 2026-09-01 (Track B find): Foreach bodies were INVISIBLE to the
+        // buffer walk — every cooperative kernel's read/write_buffers were
+        // empty (the eligibility flatness checks were vacuous). The foreach
+        // list (a range — no state access) and body are walked like Guarded.
+        Statement::Foreach { list, body, .. } => {
+            collect_expr_buffers(list, info, reads, writes, scalars);
+            for s in body {
+                collect_stmt_buffers(s, info, reads, writes, scalars);
+            }
+        }
         _ => {}
     }
 }
@@ -1406,5 +1416,184 @@ mod tests {
         items.push(txn_with("mix", pre_lt("i", Expr::Identifier("nb".into())), body));
         let map = analyze(&items, &HashMap::new(), Some(&universe()));
         assert_eq!(entry(&map, "mix").shape.work_cols, None);
+    }
+}
+
+/// Resident-launch safety verdict (plan gpu-backend-hardening Track B).
+///
+/// The resident path leaves results in VRAM between launches — the staging
+/// window holds stale array data by design (only scalars are dirty-pushed).
+/// A program may use resident launches only when EVERY array field any
+/// kernel touches is KERNEL-PINNED: all of its readers and writers in the
+/// whole program are eligible accel kernel bodies. Any host-side access (a
+/// non-accel node body, an accel txn's partitioned-out host statements, a
+/// contract, a defn) forces the full-copy path for the WHOLE program —
+/// mixed resident/full-copy is unsound (a full-copy launch packs the stale
+/// staging into VRAM and unpacks it back over host state).
+pub struct ResidentVerdict {
+    /// Every eligible accel kernel may emit resident launches.
+    pub resident_ok: bool,
+    /// The first host-side array access that forced full-copy, as
+    /// (field, where) evidence for the diagnostic.
+    pub blocker: Option<(String, String)>,
+}
+
+/// Compute the verdict: walk every non-kernel statement context in the
+/// program (host partitions of accel bodies, non-accel txns, defns,
+/// contracts — top-level `let` initializers are EXCLUDED: they are the
+/// seed the first resident launch pushes, not between-launch reads) and
+/// flag any state-ARRAY access on a field a kernel touches. Scalars are
+/// safe by the dirty-sync design (pushed before every launch; the host
+/// copy is the authority for counters).
+/// Build the program info for the resident-safety walk (pub(crate) entry —
+/// the info type is internal to this module's walkers).
+pub(crate) fn build_program_info(items: &[TopLevel]) -> ProgramInfo {
+    ProgramInfo::build(items)
+}
+
+pub fn analyze_resident_safety(
+    items: &[TopLevel],
+    accel: &HashMap<String, AccelEntry>,
+    info: &ProgramInfo,
+    universe: &TypeUniverse,
+) -> ResidentVerdict {
+    // The arrays any eligible kernel touches — only these matter.
+    let mut kernel_arrays: HashSet<String> = HashSet::new();
+    for entry in accel.values() {
+        if !entry.shape.eligible {
+            continue;
+        }
+        for f in entry
+            .shape
+            .read_buffers
+            .iter()
+            .chain(entry.shape.write_buffers.iter())
+        {
+            kernel_arrays.insert(f.clone());
+        }
+    }
+    if kernel_arrays.is_empty() {
+        return ResidentVerdict { resident_ok: false, blocker: None };
+    }
+
+    let mut blocker: Option<(String, String)> = None;
+    let mut host_touch = |field: &str, ctx_name: &str, blocker: &mut Option<(String, String)>| {
+        if kernel_arrays.contains(field) && blocker.is_none() {
+            *blocker = Some((field.to_string(), ctx_name.to_string()));
+        }
+    };
+
+    for item in items {
+        match item {
+            TopLevel::Transaction(t) => {
+                let entry = accel.get(&t.name);
+                let eligible = entry.map_or(false, |e| e.shape.eligible);
+                if eligible {
+                    // The kernel part is GPU-side; the PARTITIONED-OUT host
+                    // statements run on the host between launches.
+                    let shape = &entry.unwrap().shape;
+                    for stmt in &shape.host_stmts {
+                        collect_host_array_accesses(
+                            std::slice::from_ref(stmt),
+                            info,
+                            &t.name,
+                            &mut host_touch,
+                            &mut blocker,
+                        );
+                    }
+                } else {
+                    // A non-accel (or ineligible) txn body is host code.
+                    for stmt in &t.body {
+                        collect_host_array_accesses(
+                            std::slice::from_ref(stmt),
+                            info,
+                            &t.name,
+                            &mut host_touch,
+                            &mut blocker,
+                        );
+                    }
+                }
+                // Contracts run on the host around the body.
+                // Contracts are Exprs — the expr-level walker applies.
+                collect_host_expr_accesses(
+                    &t.contract.pre_condition,
+                    info,
+                    &format!("{}[pre]", t.name),
+                    &mut host_touch,
+                    &mut blocker,
+                );
+                collect_host_expr_accesses(
+                    &t.contract.post_condition,
+                    info,
+                    &format!("{}[post]", t.name),
+                    &mut host_touch,
+                    &mut blocker,
+                );
+            }
+            TopLevel::Definition(d) => {
+                // Conservative: defns may be called from any host context.
+                for stmt in &d.body {
+                    collect_host_array_accesses(
+                        std::slice::from_ref(stmt),
+                        info,
+                        &format!("defn {}", d.name),
+                        &mut host_touch,
+                        &mut blocker,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let _ = universe;
+    ResidentVerdict {
+        resident_ok: blocker.is_none(),
+        blocker,
+    }
+}
+
+/// Host-side array-access walker: reuses the kernel buffer walkers (they
+/// filter on `info`'s state-field set) and reports ONLY array fields.
+fn collect_host_array_accesses(
+    stmts: &[Statement],
+    info: &ProgramInfo,
+    ctx_name: &str,
+    host_touch: &mut dyn FnMut(&str, &str, &mut Option<(String, String)>),
+    blocker: &mut Option<(String, String)>,
+) {
+    for s in stmts {
+        // collect_stmt_buffers has no Foreach arm (kernel bodies are walked
+        // with their own machinery) — descend into foreach bodies here so a
+        // host-side `foreach j in 0..K { s = s + a[j]; }` is not invisible.
+        if let Statement::Foreach { list, body, .. } = s {
+            collect_host_expr_accesses(list, info, ctx_name, host_touch, blocker);
+            collect_host_array_accesses(body, info, ctx_name, host_touch, blocker);
+            continue;
+        }
+        let mut reads: HashSet<String> = HashSet::new();
+        let mut writes: HashSet<String> = HashSet::new();
+        let mut scalars: HashSet<String> = HashSet::new();
+        collect_stmt_buffers(s, info, &mut reads, &mut writes, &mut scalars);
+        for f in reads.iter().chain(writes.iter()) {
+            host_touch(f, ctx_name, blocker);
+        }
+    }
+}
+
+/// Expr-level variant for contracts (pre/post are bare expressions).
+fn collect_host_expr_accesses(
+    expr: &Expr,
+    info: &ProgramInfo,
+    ctx_name: &str,
+    host_touch: &mut dyn FnMut(&str, &str, &mut Option<(String, String)>),
+    blocker: &mut Option<(String, String)>,
+) {
+    let mut reads: HashSet<String> = HashSet::new();
+    let mut writes: HashSet<String> = HashSet::new();
+    let mut scalars: HashSet<String> = HashSet::new();
+    collect_expr_buffers(expr, info, &mut reads, &mut writes, &mut scalars);
+    for f in reads.iter().chain(writes.iter()) {
+        host_touch(f, ctx_name, blocker);
     }
 }

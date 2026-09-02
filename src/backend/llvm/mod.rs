@@ -2271,6 +2271,20 @@ impl LlvmBackend {
                 .map(|(i, k)| ((*k).clone(), i as u32))
                 .collect();
         }
+        // 2026-09-01 (Track B): resident-launch soundness gate — the whole
+        // program goes resident only when every array any kernel touches is
+        // kernel-pinned (all-readers-are-kernels). Mixed resident/full-copy
+        // is unsound (full-copy packs the stale staging into VRAM).
+        {
+            let info = crate::analysis::accel::build_program_info(items);
+            self.ctx.accel_resident_ok = crate::analysis::accel::analyze_resident_safety(
+                items,
+                &analysis.accel,
+                &info,
+                self.ctx.type_universe.as_ref().unwrap_or(&crate::type_universe::TypeUniverse::new()),
+            )
+            .resident_ok;
+        }
         // 2026-08-26 (async Phase C): consume frontend segmentation — spawn
         // targets lower to segment continuations over the C task table.
         let defn_param_pairs: HashMap<String, Vec<(String, Type)>> = items

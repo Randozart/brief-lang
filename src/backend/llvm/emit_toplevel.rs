@@ -3939,7 +3939,15 @@ impl LlvmBackend {
         writeln!(out, "  br i1 %use, label %accel_gpu, label %accel_cpu").ok();
         writeln!(out, "accel_gpu:").ok();
         let work = self.emit_work_item_count(out, name);
-        writeln!(out, "  %r = call i32 @briev_accel_launch(i32 {}, ptr %state, i64 {})", idx, work).ok();
+        // 2026-09-01 (Track B): kernel-pinned programs use the RESIDENT path
+        // (push dirty scalars, dispatch, pull written fields back) instead of
+        // the full-copy launch (pack ALL fields, push, pull, unpack ALL).
+        if self.ctx.accel_resident_ok {
+            writeln!(out, "  %r = call i32 @briev_accel_launch_resident(i32 {}, ptr %state, i64 {})", idx, work).ok();
+            writeln!(out, "  %dl = call i32 @briev_accel_download_written(i32 {}, ptr %state)", idx).ok();
+        } else {
+            writeln!(out, "  %r = call i32 @briev_accel_launch(i32 {}, ptr %state, i64 {})", idx, work).ok();
+        }
         // 2026-08-06 (Design A): the accel node is a NATIVE counted loop over
         // the counter (`[i < N]`, `i = i + 1`). One GPU dispatch covers all N
         // work-items, so fast-forward the counter to N — the loop's `i < N`
@@ -3953,6 +3961,10 @@ impl LlvmBackend {
         writeln!(out, "  ret void").ok();
         writeln!(out, "accel_cpu:").ok();
         writeln!(out, "  call void @txn_{}_cpu(ptr %state)", name).ok();
+        // Track B coherence: the CPU body wrote HOST state — the VRAM
+        // working set is stale. Clear the seed so the next resident launch
+        // re-pushes ALL fields from the host.
+        writeln!(out, "  call void @briev_accel_invalidate_resident()").ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
         // Probe-decision bodies (not forced) get the auto-tuning probe

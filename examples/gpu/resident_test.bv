@@ -1,0 +1,18 @@
+// resident-launch gate test: a pure kernel-pinned GEMV node.
+const M: Int = 64;
+const K: Int = 64;
+
+let i: Int = 0;
+let a: Float[4096];
+let x: Float[64];
+let y: Float[64];
+
+async node gemv [i < M][i == M] {
+    let acc: Float = 0;
+    foreach k in 0..K {
+        acc = acc + a[i * K + k] * x[k];
+    }
+    y[i] = acc;
+    i = i + 1;
+    term;
+};
