@@ -1010,55 +1010,62 @@ impl CastingGraph {
 
         // Resolve protocol category from universe properties.
         // 2026-07-30: Queries Cast.<Category> properties instead of matching type names.
-        // Checking order: Float → UInt → Int → String → Bool → Char → Data → Bit (universal fallback).
         let key = ty.universe_key().and_then(|k| universe.get(k));
-        let rt = match key {
-            Some(rt) => rt,
-            None => return ("Data".to_string(), String::new()),
+        let Some(rt) = key else {
+            return ("Data".to_string(), String::new());
         };
 
-        if rt.properties.contains_key("Cast.Float") {
-            // 2026-08-03: the Float CATEGORY is width-parametric — the LLVM
-            // type is derived from the type's `bits` metadata by the
-            // FloatWidth resolver (protocol-owned width semantics). No variant
-            // is named here, and no type names are matched.
-            ("Float".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.UInt") {
-            ("UInt".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.Int") {
-            ("Int".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.String") {
-            ("String".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.Bool") {
-            ("Bool".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.Char") {
-            ("Char".to_string(), String::new())
-        } else if rt.properties.contains_key("Cast.Blob") {
-            ("Blob".to_string(), String::new())
-        } else {
+        // 2026-09-02 (plan fundamental-parent-membership): category
+        // resolution is ONE walk — Cast.* properties at every hop (the
+        // shared CAST_CATEGORY_PROPS table), then the declared base chain.
+        // The walk LOOPS through universe entries so multi-level fundamental
+        // chains (`MyHalf : Float16 : Float`) resolve to the fundamental's
+        // category instead of collapsing to Data (the old code read one
+        // level of rt.base, and its Cast.* order was an inline copy of
+        // operators::protocol_category). Variants survive the walk: a base
+        // `#String<C_String>` carries C_String to the resolved lane. Never
+        // matches type names (rule 18). Undo: restore the single-level
+        // base read and the inline Cast.* if-chain.
+        let mut current = rt;
+        let mut visited: Vec<String> = Vec::new();
+        loop {
+            for (prop, cat) in crate::type_universe::CAST_CATEGORY_PROPS {
+                if current.properties.contains_key(*prop) {
+                    return (cat.to_string(), String::new());
+                }
+            }
             // 2026-08-01 (B2): no Cast. property (the normalizer no longer
             // injects them) — follow the type's declared `base` parent
             // (`type Latin1String: #String` ⇒ base "String"). This makes
             // subtypes resolve to their protocol category so the casting
             // graph's lanes (e.g. #Bit → #String encoding door with a
-            // CastFrom(#Bit) override) apply to them. General: walks the
-            // base chain, never matches specific type names (rule #18).
+            // CastFrom(#Bit) override) apply to them.
             // 2026-08-03: variant bases (`type CStr: #String<C_String>` ⇒
-            // base "#String<C_String>") now resolve to (category, variant) —
-            // previously the variant form fell through to (Bit, "").
-            if let Some((cat, var)) = Self::parse_protocol_base(&rt.base) {
-                match cat.as_str() {
-                    // 2026-08-15 (fundamentals): Data and Bit are base
-                    // categories too. A type whose base is Data resolves to
-                    // Data (the universal parent).
-                    "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob"
-                    | "Data" | "Bit" => {
-                        return (cat, var);
-                    }
-                    _ => return ("Data".to_string(), String::new()),
+            // base "#String<C_String>") resolve to (category, variant).
+            let Some((cat, var)) = Self::parse_protocol_base(&current.base) else {
+                return ("Data".to_string(), String::new());
+            };
+            match cat.as_str() {
+                // 2026-08-15 (fundamentals): Data and Bit are base
+                // categories too. A type whose base is Data resolves to
+                // Data (the universal parent).
+                "Float" | "UInt" | "Int" | "String" | "Bool" | "Char" | "Blob"
+                | "Data" | "Bit" => {
+                    return (cat, var);
                 }
+                _ => {}
             }
-            ("Data".to_string(), String::new())
+            // The base names another universe type — follow its
+            // (protocol, metadata). A declaration cycle (`A : B, B : A`)
+            // must not spin: visited-set guard.
+            if visited.contains(&cat) {
+                return ("Data".to_string(), String::new());
+            }
+            visited.push(cat.clone());
+            match universe.get(&cat) {
+                Some(next) => current = next,
+                None => return ("Data".to_string(), String::new()),
+            }
         }
     }
 

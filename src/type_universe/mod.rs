@@ -16,6 +16,23 @@ pub use validate::*;
 use crate::ast::Type;
 use std::collections::HashMap;
 
+/// The canonical `Cast.<Prop>` → protocol-category table, in priority order
+/// (Float → UInt → Int → String → Bool → Char → Blob). 2026-09-02 (plan
+/// fundamental-parent-membership): this mapping appeared inline three times
+/// (operators::protocol_category, casting::graph::type_to_protocol, and the
+/// typechecker's new declared_category_of) — one table, all sites iterate it.
+/// `Data`/`Bit` are deliberately absent: Data is the universal fallback and
+/// Bit the leaf bit type, both handled by their own rules at each site.
+pub const CAST_CATEGORY_PROPS: &[(&str, &str)] = &[
+    ("Cast.Float", "Float"),
+    ("Cast.UInt", "UInt"),
+    ("Cast.Int", "Int"),
+    ("Cast.String", "String"),
+    ("Cast.Bool", "Bool"),
+    ("Cast.Char", "Char"),
+    ("Cast.Blob", "Blob"),
+];
+
 /// Resolved metadata for a single type in the universe.
 /// CTD and ALU are set by the primordial, llvm_type by the normalizer.
 /// Properties, fields, and ops are all stored here — the flat property bag

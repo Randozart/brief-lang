@@ -130,19 +130,12 @@ pub fn protocol_category(universe: &TypeUniverse, ty: &Type) -> Option<String> {
     }
     let key = ty.universe_key()?;
     let rt = universe.get(key)?;
-    // Cast. properties (primordial seeding) — checking order mirrors the
-    // casting graph: Float → UInt → Int → String → Bool → Char → Blob.
+    // Cast. properties (primordial seeding) — the shared priority table
+    // (mirrors the casting graph). 2026-09-02: centralized as
+    // CAST_CATEGORY_PROPS (was inline here AND in graph.rs).
     let props = &rt.properties;
-    for (prop, cat) in [
-        ("Cast.Float", "Float"),
-        ("Cast.UInt", "UInt"),
-        ("Cast.Int", "Int"),
-        ("Cast.String", "String"),
-        ("Cast.Bool", "Bool"),
-        ("Cast.Char", "Char"),
-        ("Cast.Blob", "Blob"),
-    ] {
-        if props.contains_key(prop) {
+    for (prop, cat) in crate::type_universe::CAST_CATEGORY_PROPS {
+        if props.contains_key(*prop) {
             return Some(cat.to_string());
         }
     }
