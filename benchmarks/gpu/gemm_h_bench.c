@@ -99,6 +99,12 @@ int main(int argc, char** argv) {
     // 0 = naive tier (M*N work items). The TENSOR tier's geometry differs
     // — mirror the generated runner: (M*N / 256) * 32 work items.
     uint64_t dispatch_override = argc > 6 ? strtoull(argv[6], NULL, 10) : 0;
+    // batch=1: the steady-state loop as ONE batched submission (times =
+    // iters) — no idle gap between launches, so the GPU never drops to
+    // idle clocks mid-measurement (per-launch fence wake ~33us + DVFS
+    // ramp otherwise dominate; 2026-09-02 investigation: clocks pulsed
+    // 1837/139MHz with GPU_IDLE throttle between fence-waited launches).
+    int batch = argc > 7 ? atoi(argv[7]) : 0;
 
     FILE* f = fopen(argv[1], "rb");
     if (f == NULL) { perror("spv"); return 2; }
@@ -182,17 +188,29 @@ int main(int argc, char** argv) {
            max_rel <= 5e-3 ? "OK" : "FAIL");
 
     // Steady-state perf.
-    double sum = 0, mn = 1e30, mx = 0;
-    for (int it = 0; it < iters; it++) {
+    if (batch) {
         *(int64_t*)(state + off_i) = 0;
-        double t1 = now_ms();
-        int ok = briev_accel_launch_resident(0, state, dispatch_n);
-        double dt = now_ms() - t1;
-        if (!ok) { fprintf(stderr, "dispatch failed\n"); return 1; }
-        sum += dt; if (dt < mn) mn = dt; if (dt > mx) mx = dt;
+        double t0 = now_ms();
+        if (!briev_accel_launch_resident_batch(0, state, dispatch_n, 1, iters)) {
+            fprintf(stderr, "batch dispatch failed\n"); return 1;
+        }
+        double wall = now_ms() - t0;
+        double per = wall / iters;
+        printf("GPU  per-call %.3f ms  %.2f GFLOP/s  (batched x%d)\n",
+               per, 2.0 * (double)M * N * K / (per * 1e6), iters);
+    } else {
+        double sum = 0, mn = 1e30, mx = 0;
+        for (int it = 0; it < iters; it++) {
+            *(int64_t*)(state + off_i) = 0;
+            double t1 = now_ms();
+            int ok = briev_accel_launch_resident(0, state, dispatch_n);
+            double dt = now_ms() - t1;
+            if (!ok) { fprintf(stderr, "dispatch failed\n"); return 1; }
+            sum += dt; if (dt < mn) mn = dt; if (dt > mx) mx = dt;
+        }
+        printf("GPU  avg %.3f ms  min %.3f ms  max %.3f ms  %.2f GFLOP/s\n",
+               sum / iters, mn, mx, 2.0 * (double)M * N * K / ((sum / iters) * 1e6));
     }
-    printf("GPU  avg %.3f ms  min %.3f ms  max %.3f ms  %.2f GFLOP/s\n",
-           sum / iters, mn, mx, 2.0 * (double)M * N * K / ((sum / iters) * 1e6));
 
     briev_accel_shutdown();
     return 0;

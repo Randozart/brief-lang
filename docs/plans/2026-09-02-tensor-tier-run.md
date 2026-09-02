@@ -137,3 +137,22 @@ small-shape quirk.
 **Remaining perf rungs**: A-panel DRAM staging across k-panels ·
 occupancy shaping (LocalSize search) · quiet-box confirmation of the
 R=4 promotion question.
+
+## Clean-window re-A/B + the DVFS finding (2026-09-02, night)
+
+- GPU idle window: R=1 42.5ms stable · R=2 13.3ms stable · R=4 9.6ms
+  best-mode, bimodal 66-83ms otherwise. The R=4 bimodality survived a
+  quiet box — systematic, not co-tenant.
+- Mechanism probed: clocks PULSE 1837↔139MHz with GPU_IDLE throttle
+  flags even during one-shot batched submission; power 8-44W/170W, 44°C.
+  Not thermal, not power-capped — the driver drops to idle between
+  submissions and the DVFS ramp lands inside short kernels.
+- Anchor methodology verified: ggml_gemm_bench is sync-per-iter — our
+  sync mins are the comparable numbers (R=2 0.82×, R=4 good-mode 1.11×
+  the anchor).
+- gemm_h_bench gained batched mode (arg 7) for sustained rows.
+
+**Open**: why sustained (batched) runs settle 2.5× above burst mins
+(R=2 33ms, R=4 18ms) — persistence mode / clock pinning (root/NVML)
+is the next lever; it likely recovers the burst rate for deployment
+loops, which is where an LLM server actually lives.
