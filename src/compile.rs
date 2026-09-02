@@ -1469,6 +1469,22 @@ fn codegen(
                 opts.int_bits,
                 &analysis.accel,
             )?;
+            // `brievc run x.abv` (Track A): drive the linked GPU runtime
+            // in-process — no runner .c file, no cc round trip.
+            if opts.run {
+                let prog = briev_compiler::backend::spirv::runner::prepare_run(
+                    items,
+                    universe,
+                    opts.int_bits,
+                    &kernels,
+                )?;
+                let counters = briev_compiler::gpu_rt::run_program(&prog)?;
+                for (k, c) in kernels.iter().zip(counters.iter()) {
+                    println!("[run] node '{}' finished: counter = {}", k.name, c);
+                }
+                output = String::new();
+                return Ok((output, ".spv"));
+            }
             let runner =
                 briev_compiler::backend::spirv::runner::emit_runner(items, universe, opts.int_bits, &kernels)?;
             let runner_path = out_path.replace(".spv", "_runner.c");
@@ -2029,6 +2045,7 @@ node go [done == false][done == true] {
     /// compile_view unit tests.
     fn webstack_opts(file_path: &str) -> BuildOptions {
         BuildOptions {
+            run: false,
             config_dir: None,
             file_path: file_path.to_string(),
             emit_ir_only: false,

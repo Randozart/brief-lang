@@ -24,6 +24,12 @@ fn main() {
 
     let result = match args[1].as_str() {
         "build" => run_build(&args[2..]),
+        "run" => {
+            // brievc run x.abv — compile + drive the GPU runtime in-process.
+            let mut run_args: Vec<String> = vec!["--run".into()];
+            run_args.extend(args[2..].iter().cloned());
+            run_build(&run_args)
+        }
         "check" => run_check(&args[2..]),
         "derive" => run_derive(&args[2..]),
         "accept" => run_accept(&args[2..]),
@@ -219,6 +225,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut emit_beast = Vec::new();
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
+    let mut run_flag = false;
     let mut stdlib_path: Option<String> = None;
     let mut disable_plugins = Vec::new();
     let mut enable_plugins = Vec::new();
@@ -292,6 +299,9 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             i += 2;
         } else if arg == "--no-std" {
             no_stdlib = true;
+            i += 1;
+        } else if arg == "--run" {
+            run_flag = true;
             i += 1;
         } else if arg == "--stdlib-path" {
             let val = args.get(i + 1).ok_or("--stdlib-path requires a path argument")?;
@@ -398,6 +408,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     };
 
     Ok(compile::BuildOptions {
+        run: run_flag,
         config_dir,
         file_path,
         emit_ir_only,
@@ -445,6 +456,7 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
 
     let opts = compile::BuildOptions {
+        run: false,
         config_dir: None,
         file_path: file_path.clone(),
         emit_ir_only: false,

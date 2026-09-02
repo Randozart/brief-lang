@@ -24,6 +24,7 @@ use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type, UnaryOpKind};
 use crate::backend::spirv::lower::collect_state_fields;
 use crate::backend::spirv::SpirvBuilder;
 use crate::type_universe::TypeUniverse;
+use std::collections::HashMap;
 
 /// One SSBO member: name, HOST byte offset (packed — the runner `state[]`
 /// layout and the S_ macros), DEVICE projection byte offset (the shared
@@ -671,4 +672,113 @@ fn dispatch_geometry_stmt(k: &RunnerKernel, kidx: usize, ci: &str) -> String {
     format!(
         "      if (n_{ci} > 0 && !briev_accel_launch_resident({kidx}, state, n_{ci})) {{ fprintf(stderr, \"briev: dispatch failed\\n\"); return 1; }}\n"
     )
+}
+
+/// The in-process run program (plan gpu-backend-hardening Track A): what
+/// `brievc run` needs to drive the GPU runtime — kernels, the projection
+/// field table, and per-node dispatch geometry — with no C generation.
+pub struct RunProgram {
+    pub fields: Vec<RunnerField>,
+    pub state_bytes: u64,
+    pub kernels: Vec<RunKernel>,
+}
+
+pub struct RunKernel {
+    pub name: String,
+    pub spirv: Vec<u8>,
+    /// The counter's HOST offset in the state (the node's index-var field).
+    pub counter_offset: u64,
+    /// The node's work-item bound (const-folded count).
+    pub count: i64,
+    pub dispatch: RunDispatch,
+}
+
+pub enum RunDispatch {
+    /// 1D items: flat, tiled (n/4096·16), tensor (n/256·32).
+    Items(u64),
+    /// 2D cooperative row kernels: nx = 32 lanes, ny = rows.
+    Coop { rows: u64 },
+    /// 2D column kernels: nx = cols items, ny = row groups.
+    Cols { cols: u64, rows: u64 },
+}
+
+/// Const-fold a count expression to an integer (module consts only).
+pub fn eval_count(expr: &Expr, consts: &HashMap<String, i64>) -> Option<i64> {
+    match expr {
+        Expr::Decimal(d) => i64::try_from(*d).ok(),
+        Expr::Identifier(name) => consts.get(name).copied(),
+        Expr::BinaryOp(kind, l, r) => {
+            let (a, b) = (eval_count(l, consts)?, eval_count(r, consts)?);
+            match kind {
+                crate::ast::BinaryOpKind::Add => a.checked_add(b),
+                crate::ast::BinaryOpKind::Sub => a.checked_sub(b),
+                crate::ast::BinaryOpKind::Mul => a.checked_mul(b),
+                crate::ast::BinaryOpKind::Div if b != 0 => a.checked_div(b),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Build the run program from the analyzed .abv items. Mirrors
+/// dispatch_geometry_stmt + emit_runner's field table EXACTLY — one source
+/// of truth shared with the C runner via the same layout/geometry inputs.
+pub fn prepare_run(
+    items: &[TopLevel],
+    universe: &TypeUniverse,
+    int_bits: u64,
+    kernels: &[RunnerKernel],
+) -> Result<RunProgram, String> {
+    let fields = ssbo_layout(items, universe, int_bits)?;
+
+    // Module consts (name -> literal) for count folding.
+    let mut consts: HashMap<String, i64> = HashMap::new();
+    for item in items {
+        if let TopLevel::Constant(c) = item {
+            if let Expr::Decimal(d) = &c.expr {
+                consts.insert(c.name.clone(), *d);
+            }
+        }
+    }
+
+    let mut run_kernels = Vec::new();
+    for k in kernels {
+        let count = eval_count(&k.count_expr, &consts)
+            .ok_or_else(|| format!("node '{}': count is not a compile-time integer", k.name))?;
+        // The counter is the node's index-var state field.
+        let counter_offset = fields
+            .iter()
+            .find(|f| f.name == k.index_var)
+            .map(|f| f.offset)
+            .ok_or_else(|| format!("node '{}': counter field '{}' not in state", k.name, k.index_var))?;
+
+        let dispatch = if k.tensor {
+            RunDispatch::Items((count as u64 / 256).max(1) * 32)
+        } else if k.tiled {
+            RunDispatch::Items((count as u64 / 4096).max(1) * 16)
+        } else if k.cooperative {
+            RunDispatch::Coop { rows: count as u64 }
+        } else if let Some(cols) = k.work_cols {
+            let rows = (count as u64 + cols - 1) / cols;
+            RunDispatch::Cols { cols, rows }
+        } else {
+            RunDispatch::Items(count as u64)
+        };
+
+        run_kernels.push(RunKernel {
+            name: k.name.clone(),
+            spirv: k.spirv.clone(),
+            counter_offset,
+            count,
+            dispatch,
+        });
+    }
+
+    let state_bytes = fields.iter().map(|f| f.elem_bytes as u64 * f.count).sum();
+    Ok(RunProgram {
+        fields,
+        state_bytes,
+        kernels: run_kernels,
+    })
 }

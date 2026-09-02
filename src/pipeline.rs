@@ -174,6 +174,11 @@ pub struct BuildOptions {
     pub extra_objects: Vec<PathBuf>,
     /// 2026-07-18: Build a shared library (.so) instead of an executable.
     pub shared: bool,
+    /// 2026-09-01 (plan gpu-backend-hardening Track A): `brievc run x.abv` —
+    /// after kernel emission, drive the GPU runtime IN-PROCESS (the RT is
+    /// linked into brievc) instead of writing a runner .c file. The SPIR-V
+    /// backend arm branches to the run phase machine when this is set.
+    pub run: bool,
     /// 2026-08-03: Build a linkable static library (.a) — the `extern "C"`
     /// on-ramp. Runs the full backend in library_mode (emit_library_shim
     /// with __briev_init_state/__glue_release), packages .o + runtime into
@@ -647,6 +652,7 @@ pub fn load_target_config(opts: &BuildOptions) -> crate::target::TargetConfig {
 
 pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
     let default_opts = BuildOptions {
+        run: false,
         config_dir: None,
         file_path: file_path.to_string(),
         emit_ir_only: false,

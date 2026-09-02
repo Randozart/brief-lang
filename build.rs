@@ -37,6 +37,10 @@ fn main() {
     println!("cargo:rerun-if-changed=lib/compiler/soa_reorder.bv");
     println!("cargo:rerun-if-changed=lib/compiler/reader.bv");
 
+    // 2026-09-01 (Track A): the GPU runtime links into brievc for
+    // `brievc run` — independent of the briefc bootstrap below.
+    build_gpu_rt(&out_root);
+
     // A prebuilt briefc from a previous build (or BRIEFC_BIN override).
     let briefc = std::env::var("BRIEFC_BIN").ok().map(PathBuf::from).or_else(|| {
         let dbg = Path::new(&manifest).join("target").join("debug").join("briefc");
@@ -73,3 +77,62 @@ fn main() {
         }
     }
 }
+
+/// ── GPU runtime into brievc (plan gpu-backend-hardening Track A) ──────
+/// `brievc run x.abv` drives lib/runtime/briev_accel_rt.c IN-PROCESS: the
+/// RT compiles into a static archive linked into the binary, and
+/// src/gpu_rt.rs exposes the phase machine over FFI. If no C compiler is
+/// available the cfg flag stays off and `brievc run` reports cleanly.
+fn build_gpu_rt(out_root: &Path) {
+    let rt_dir = Path::new("lib/runtime");
+    let rt_src = rt_dir.join("briev_accel_rt.c");
+    if !rt_src.exists() {
+        println!("cargo:warning=gpu-rt: {} missing — brievc run unavailable", rt_src.display());
+        return;
+    }
+    // The RT dlopens libvulkan/OpenCL at init (LOAD macro) — no -lvulkan
+    // link needed; -ldl -lpthread -lm cover dlopen/pthread/libm.
+    let cc = match Command::new("cc").arg("--version").output() {
+        Ok(o) if o.status.success() => "cc".to_string(),
+        _ => match Command::new("clang").arg("--version").output() {
+            Ok(o) if o.status.success() => "clang".to_string(),
+            _ => {
+                println!("cargo:warning=gpu-rt: no cc/clang — brievc run unavailable");
+                return;
+            }
+        },
+    };
+    let obj = out_root.join("briev_accel_rt.o");
+    let arc = out_root.join("libbriev_gpu_rt.a");
+    let ok = Command::new(&cc)
+        .args(["-O2", "-fPIC", "-c"])
+        .arg(&rt_src)
+        .arg("-o")
+        .arg(&obj)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        println!("cargo:warning=gpu-rt: RT compile failed — brievc run unavailable");
+        return;
+    }
+    let ar_ok = Command::new("ar")
+        .args(["rcs"])
+        .arg(&arc)
+        .arg(&obj)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ar_ok {
+        println!("cargo:warning=gpu-rt: ar failed — brievc run unavailable");
+        return;
+    }
+    println!("cargo:rustc-link-search=native={}", out_root.display());
+    println!("cargo:rustc-link-lib=static=briev_gpu_rt");
+    println!("cargo:rustc-link-lib=dylib=dl");
+    println!("cargo:rustc-link-lib=dylib=pthread");
+    println!("cargo:rustc-link-lib=dylib=m");
+    println!("cargo:rerun-if-changed={}", rt_src.display());
+    println!("cargo:rustc-cfg=gpu_rt");
+}
+// SENTINEL: gpu-rt build script loaded (gpu-backend-hardening Track A)

@@ -49,6 +49,7 @@ pub mod errors;
 pub mod ffi;
 pub mod fuzz_checker;
 pub mod glue;
+pub mod gpu_rt;
 #[cfg(test)]
 pub mod fuzzing;
 pub mod hardware;
