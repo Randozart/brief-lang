@@ -379,7 +379,7 @@ static int briev_dev_vulkan_init(void) {
              uint32_t engineVersion; uint32_t apiVersion; } app = {0};
     app.sType = 0u; /* VK_STRUCTURE_TYPE_APPLICATION_INFO */
     app.apiVersion = (1u << 22) | (2u << 12); /* VK_MAKE_API_VERSION(0,1,2,0) */
-    ici.pApplicationInfo = &app;
+    ici.pApplicationInfo = NULL; // BISECT: disabled
     if (vkCreateInstance(&ici, NULL, &vk_instance) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] vkCreateInstance failed\n");
         goto fail;
@@ -536,7 +536,8 @@ static int briev_dev_vulkan_init(void) {
         f16_storage_features.pNext = &f16int8_features;
         f16int8_features.pNext = &coop_features;
         coop_features.pNext = NULL;
-        vkGetPhysicalDeviceFeatures2(vk_physical_device, &probe);
+        // BISECT: probe disabled
+        // vkGetPhysicalDeviceFeatures2(vk_physical_device, &probe);
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] probe: 16bit=%u uniform16=%u f16=%u coop=%u\n",
             f16_storage_features.storageBuffer16BitAccess,
             f16_storage_features.uniformAndStorageBuffer16BitAccess,
@@ -545,6 +546,10 @@ static int briev_dev_vulkan_init(void) {
     vmm_features.vulkanMemoryModel = 1u;
     vmm_features.vulkanMemoryModelDeviceScope = 1u;
     vmm_features.pNext = &f16_storage_features;
+    f16_storage_features.storageBuffer16BitAccess = 1u;
+    f16_storage_features.uniformAndStorageBuffer16BitAccess = 1u;
+    f16int8_features.shaderFloat16 = 1u;
+    coop_features.cooperativeMatrix = 1u;
     f16_storage_features.pNext = &f16int8_features;
     if (dev_ext_count > 0) {
         f16int8_features.pNext = &coop_features;

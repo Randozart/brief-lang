@@ -91,3 +91,21 @@ next `.abv` session resumes at the M2.2 ledger
 
 Gates: 2039 lib tests green · gemm_h.abv builds · Praetor clean on the
 new lexer functions.
+
+## Post-plan note: the .abv resume happened same-day
+
+The f16 pipeline is now CORRECT END-TO-END ON DEVICE (RTX 3060):
+- `gemm_h_bench` 4096³: max_rel_err 2.442e-04 (single f16 store-rounding),
+  502ms / 274 GFLOP/s naive tier — the "~25% y-fill fault" is gone.
+- Regression gates: GEMV coop 0.199ms / rel 0.0 (ledger parity), GEMM f32
+  4096³ rel 0.0.
+- Root causes fixed: (1) f16-as-storage-format kernel lowering (f32
+  Function storage + OpFConvert boundaries), (2) the runtime's
+  unconditional feature requests — now probed via features2 with a 1.2
+  apiVersion instance (a 1.0 instance silently no-ops the probe), plus
+  tensor-capable device preference and real device names in run output.
+
+Next: the tensor tier (spirv_coopmat ON) — the coopmat kernel now has a
+correct reference implementation to be validated against, and the
+probed-feature runtime removes the suspected device-side enabler of the
+original tensor fault.
