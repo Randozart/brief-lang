@@ -982,16 +982,13 @@ fn resolve_protocol(
 /// Type name → declared protocol (`type CStr: #String<C_String>` → CStr →
 /// "#String<C_String>"). 2026-08-03 (P3): lets the wrapper/header resolve a
 /// boundary type to its category's ABI names.
+/// The type → protocol map used to resolve boundary ABI names — now the
+/// SHARED AST-level derivation (2026-09-02, plan
+/// fundamental-parent-membership): explicit declarations win, bare-parent
+/// typedefs derive their category from the parent chain, so a
+/// de-hashtagged `Float16 : Float` resolves at the FFI boundary too.
 fn build_type_protocols(items: &[TopLevel]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for item in items {
-        if let TopLevel::TypeDef(td) = item {
-            if let Some(p) = td.protocol.as_ref() {
-                map.insert(td.name.clone(), p.clone());
-            }
-        }
-    }
-    map
+    crate::casting::graph::derive_type_protocols(items)
 }
 
 /// The bare category of a declared protocol string — `#String<C_String>` →

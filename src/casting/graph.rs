@@ -1069,8 +1069,7 @@ impl CastingGraph {
         }
     }
 
-    /// Parse a protocol base string (`#Cat`, `#Cat<Variant>`, or bare `Cat`)
-    /// into `(category, variant)`. Returns None for empty/unparseable strings.
+    /// Parse a protocol base string (`#Cat`, `#Cat<Variant>`, or bare `Cat`)    /// into `(category, variant)`. Returns None for empty/unparseable strings.
     /// 2026-08-03: `#String<C_String>` → `("String", "CString")`; `#String` →
     /// `("String", "")`.
     pub fn parse_protocol_base(base: &str) -> Option<(String, String)> {
@@ -1281,11 +1280,114 @@ impl Default for CastingGraph {
     }
 }
 
+/// Derive the type → declared-protocol map from the AST, pre-universe.
+/// Explicit declarations win (`type CStr: #String<C_String>` →
+/// "#String<C_String>"); a bare-parent typedef DERIVES its category by
+/// walking the parent chain — to another typedef's declaration or to a
+/// fundamental name (`type Float16 : Float` → "#Float"). 2026-09-02 (plan
+/// fundamental-parent-membership): the glue/FFI and boundary-marshalling
+/// passes built this map from explicit declarations only, so a
+/// de-hashtagged fundamental join lost its category at the boundary.
+/// One helper, both callers (rule 17). Visited-set guards cycles. Undo:
+/// restore the explicit-only inline loops in the two callers.
+pub fn derive_type_protocols(items: &[crate::ast::TopLevel]) -> std::collections::HashMap<String, String> {
+    use crate::ast::TopLevel;
+    use std::collections::HashMap;
+    // child → (explicit protocol, parent name)
+    let mut decls: HashMap<&str, (Option<&str>, Option<&str>)> = HashMap::new();
+    for item in items {
+        if let TopLevel::TypeDef(td) = item {
+            let parent = td.parent.as_ref().and_then(|e| match e.as_ref() {
+                crate::ast::Expr::Identifier(n) => Some(n.as_str()),
+                _ => None,
+            });
+            decls.insert(td.name.as_str(), (td.protocol.as_deref(), parent));
+        }
+    }
+    let mut map: HashMap<String, String> = HashMap::new();
+    for (name, (proto, _)) in &decls {
+        if let Some(p) = proto {
+            map.insert(name.to_string(), p.to_string());
+            continue;
+        }
+        let mut current = *name;
+        let mut visited: Vec<&str> = Vec::new();
+        loop {
+            let Some((proto, parent)) = decls.get(current).copied() else {
+                break;
+            };
+            if let Some(p) = proto {
+                map.insert(name.to_string(), p.to_string());
+                break;
+            }
+            let Some(parent) = parent else { break };
+            if crate::type_universe::FUNDAMENTAL_TYPES.contains(&parent) {
+                map.insert(name.to_string(), format!("#{}", parent));
+                break;
+            }
+            if visited.contains(&parent) {
+                break;
+            }
+            visited.push(parent);
+            current = parent;
+        }
+    }
+    map
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 2026-09-02 (plan fundamental-parent-membership): the AST-level
+    /// protocol map derives bare-parent typedefs through the parent chain —
+    /// explicit declarations keep precedence; non-fundamental parents
+    /// continue the walk; unknown parents terminate.
+    #[test]
+    fn derive_type_protocols_walks_fundamental_parents() {
+        use crate::ast::TopLevel;
+        use crate::ast::top::TypeDef;
+        use crate::ast::Expr;
+        let td = |name: &str, proto: Option<&str>, parent: Option<&str>| {
+            TopLevel::TypeDef(Box::new(TypeDef {
+                name: name.into(),
+                type_params: vec![],
+                parent: parent.map(|p| Box::new(Expr::Identifier(p.into()))),
+                protocol: proto.map(str::to_string),
+                traits: vec![],
+                bit_range: None,
+                coll: false,
+                ports_in: vec![],
+                ports_out: vec![],
+                seq: false,
+                body: crate::ast::top::TypeDefBody {
+                    slots: vec![],
+                    metadata: Default::default(),
+                    projections: vec![],
+                    bindings: vec![],
+                    operators: vec![],
+                    op_bindings: vec![],
+                    constraints: vec![],
+                    members: vec![],
+                    span: None,
+                },
+                span: None,
+            }))
+        };
+        let items = vec![
+            td("CStr", Some("#String<C_String>"), None),
+            td("Float16", None, Some("Float")),
+            td("MyHalf", None, Some("Float16")),
+            td("Weird", None, Some("Unrelated")),
+        ];
+        let map = derive_type_protocols(&items);
+        assert_eq!(map.get("CStr").map(String::as_str), Some("#String<C_String>"));
+        assert_eq!(map.get("Float16").map(String::as_str), Some("#Float"));
+        assert_eq!(map.get("MyHalf").map(String::as_str), Some("#Float"));
+        assert!(!map.contains_key("Weird"), "unknown parent terminates the walk");
+    }
 
     #[test]
     fn test_all_base_pairs_have_lanes() {

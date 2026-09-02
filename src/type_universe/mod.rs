@@ -33,6 +33,15 @@ pub const CAST_CATEGORY_PROPS: &[(&str, &str)] = &[
     ("Cast.Blob", "Blob"),
 ];
 
+/// The fundamental type names that ARE protocol categories (a bare parent
+/// `type Float16 : Float` names one). 2026-09-02 (plan
+/// fundamental-parent-membership): shared by the AST-level protocol
+/// derivation (casting::derive_type_protocols); `Data`/`Bit` included —
+/// they are base categories under the fundamentals model.
+pub const FUNDAMENTAL_TYPES: &[&str] = &[
+    "Float", "UInt", "Int", "String", "Bool", "Char", "Blob", "Data", "Bit",
+];
+
 /// Resolved metadata for a single type in the universe.
 /// CTD and ALU are set by the primordial, llvm_type by the normalizer.
 /// Properties, fields, and ops are all stored here — the flat property bag
