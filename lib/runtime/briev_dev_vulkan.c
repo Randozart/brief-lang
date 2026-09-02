@@ -512,9 +512,19 @@ static int briev_dev_vulkan_init(void) {
     // pNext, cooperativeMatrix } — chained via pNext.
     struct { uint32_t sType; void* pNext; uint32_t cooperativeMatrix; } coop_features = {0};
     vmm_features.sType = 1000211000u;
-    f16_storage_features.sType = 1000146000u;
-    f16int8_features.sType = 1000083000u;
-    coop_features.sType = 1000246000u;
+    // 2026-09-02: the sTypes were WRONG across the board (the probe
+    // filled whatever struct each value named on this driver: 1000146000
+    // is UniformBufferStandardLayout-era, 1000083000 is 16BIT_STORAGE --
+    // so the printed "f16=1" was 8-bit storage -- and 1000246000 is
+    // unknown). Correct values from vulkan_core.h: 16BitStorageFeatures
+    // = 1000083000, ShaderFloat16Int8Features = 1000082000,
+    // CooperativeMatrixFeaturesKHR = 1000506000. This is also why the
+    // probe "read 0 for 16bit/coop while kernels worked" -- NVIDIA
+    // under-enforcement of the mislabeled create-chain. Undo: restore
+    // the old values.
+    f16_storage_features.sType = 1000083000u;
+    f16int8_features.sType = 1000082000u;
+    coop_features.sType = 1000506000u;
     // 2026-09-02: PROBE the pNext feature structs against the device —
     // vkGetPhysicalDeviceFeatures2 fills each struct's fields with the
     // SUPPORTED values, which are then requested verbatim. The old code
