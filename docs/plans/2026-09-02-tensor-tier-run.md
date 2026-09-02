@@ -110,3 +110,30 @@ blob.
 **Next**: quiet-box re-A/B (R=2 vs R=4 promotion decision) · A-panel
 DRAM staging · the features2 probe-chain investigation · the 256³
 small-shape quirk.
+
+## Investigation results (2026-09-02, evening)
+
+1. **Probe mystery SOLVED — every feature sType was wrong.** The code's
+   "16BitStorage" sType (1000146000) is UniformBufferStandardLayout-era;
+   "Float16Int8" (1000083000) is actually 16BIT_STORAGE — the printed
+   "f16=1" was the driver filling 8-bit storage into our struct — and
+   "CooperativeMatrix" (1000246000) matched nothing. Correct values from
+   vulkan_core.h: 1000083000 / 1000082000 / 1000506000. The probe now
+   reads TRUE on device (16bit=1 uniform16=1 f16=1 coop=1) — the
+   request-what-is-supported contract holds, so strict vendors are safe.
+   NVIDIA's under-enforcement had masked all of it (kernels ran with
+   features never requested).
+2. **R=2 vs R=4 re-A/B (3 interleaved rounds)**: R=2 mins stable
+   13.38-13.56ms; R=4 bimodal 9.8ms/70ms — the bimodality is systematic
+   (occupancy cliff at 128 acc regs/lane), not co-tenant luck. VERDICT:
+   R=2 stays default; R=4 documented as the high-variance option.
+3. **256³ quirk RESOLVED — not a bug.** gemm_bench derives offsets from
+   its M·N·K args; the blob's arrays were literal-sized (16777216) —
+   member offsets diverged and y landed outside the harness's view. With
+   arrays sized to the shape: 256³ passes at rel 0.0 (1.73ms). Harness
+   rule recorded: derive offsets from the generated runner's layout —
+   it is the authority.
+
+**Remaining perf rungs**: A-panel DRAM staging across k-panels ·
+occupancy shaping (LocalSize search) · quiet-box confirmation of the
+R=4 promotion question.
