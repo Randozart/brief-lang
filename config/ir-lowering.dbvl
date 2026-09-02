@@ -60,4 +60,4 @@ circt.clock_hz: 0;
 // (32-lane workgroup, stride-128, OpGroupNonUniformFAdd).
 spirv_row_cooperative: 1;
 spirv_coopmat: 1;
-spirv_coopmat_tile_rows: 2;
+spirv_coopmat_tile_rows: 4;

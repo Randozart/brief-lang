@@ -156,3 +156,23 @@ R=4 promotion question.
 (R=2 33ms, R=4 18ms) — persistence mode / clock pinning (root/NVML)
 is the next lever; it likely recovers the burst rate for deployment
 loops, which is where an LLM server actually lives.
+
+## Clock lock + R=4 promotion (2026-09-02, latest)
+
+User locked clocks: `sudo nvidia-smi -pm 1 && sudo nvidia-smi -lgc 1800,1837`.
+With the lock, the R=4 bimodal mode is GONE — unfed mins 9.56-9.78ms
+stable = **14.3 TFLOP/s, 1.14× past the ggml anchor (12.6)**. R=2 stays
+13.4ms (DRAM-bound, clock-insensitive).
+
+**DEFAULT PROMOTED TO R=4** (config + dbvl): the committed pipeline now
+builds the anchor-beating tier; runner formula (16·4·64), spirv-val
+clean, rel 2.442e-04, min 9.68ms verified end-to-end.
+
+> **REMINDER (user request): unlock clocks later —**
+> `sudo nvidia-smi -rgc && sudo nvidia-smi -pm 0`
+> (both also reset on reboot unless systemd-persisted). Without the
+> lock, bursty callers on this box should set spirv_coopmat_tile_rows=2
+> (stable 13.4ms) — R=4 reverts to its bimodal 9.8/70ms modes.
+
+Ledger: naive 502ms → R=1 41ms → R=2 13.3ms → **R=4 9.6ms (14.3 TFLOP/s
+locked)** vs anchor 10.9ms / 12.6 TFLOP/s.

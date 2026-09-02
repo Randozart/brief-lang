@@ -80,14 +80,16 @@ pub struct IrLoweringSettings {
     /// (16-row strips) per coopmat workgroup. R > 1 loads each B fragment
     /// once and reuses it across R A fragments — B DRAM traffic ÷ R (the
     /// tensor tier is B-traffic-bound: 10.5 GB total ≈ 29 ms floor at
-    /// ~360 GB/s; measured min 41 ms at R=1). Interleaved device A/B
-    /// (RTX 3060, 4096³, all rel 2.442e-04, 3 rounds): R=1 min ~41ms →
-    /// R=2 **13.2ms stable = 10.4 TFLOP/s** → R=4 bimodal (9.9ms best-ever
-    /// but 70-77ms in 2/3 rounds — register pressure × co-tenant clocks)
-    /// → R=8 28ms. R=2 is the measured-best STABLE shape and the default;
-    /// R=4's 9.9ms flash (13.9 TFLOP/s, past the ggml anchor's 12.6) says
-    /// parity is reachable on a quiet box — re-A/B when the machine is
-    /// idle. Capped at 8: R=16 was slower AND miscomputed on device
+    /// ~360 GB/s; measured min 41 ms at R=1). A/B history (RTX 3060,
+    /// 4096³, all rel 2.442e-04): with unlocked clocks R=4 was bimodal
+    /// (9.9ms boost-mode / 70ms idle-downclock mode — the GPU dropped to
+    /// 139MHz between fence-waited launches; GPU_IDLE throttle flags, not
+    /// thermal). After LOCKING clocks (`nvidia-smi -lgc 1800,1837 -pm 1`,
+    /// user-run 2026-09-02), R=4 is stable: unfed mins 9.56-9.78ms =
+    /// **14.3 TFLOP/s, 1.14× the ggml anchor** — R=4 is the default.
+    /// Deployment note: fed/bursty both hold with locked clocks; without
+    /// the lock, bursty callers should prefer R=2 (stable 13.3ms) or feed
+    /// the queue. Capped at 8: R=16 was slower AND miscomputed on device
     /// (VERDICT: rejected — suspected coopmat fragment spill past 256
     /// acc regs/lane). Shapes not divisible by 16R clamp down the
     /// power-of-two ladder (kernel + runner share the clamp).
@@ -172,7 +174,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_unroll: 16,
     spirv_row_cooperative: false,
     spirv_coopmat: false,
-    spirv_coopmat_tile_rows: 2,
+    spirv_coopmat_tile_rows: 4,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
