@@ -134,3 +134,34 @@ bash benchmarks/build_and_bench.sh --runtime     # runtime only
 bash benchmarks/build_and_bench.sh --optimizer   # optimizer only
 bash benchmarks/build_and_bench.sh --correctness # output verification only
 ```
+
+## Anti-Overfit Doctrine (locked, 2026-09-02 — user)
+
+**Ward against over-tuning; keep the language powerful enough that a
+programmer reaches the same performance with general syntax.**
+
+The GPU (and CPU) optimization arcs anchor on real workloads — currently
+LLM-shaped GEMV/GEMM against the llama.cpp/ggml anchors. That is a
+BENCHMARK-TARGET choice, never a backend-design constraint. The doctrine
+that keeps the machinery general while the race stays honest:
+
+1. **Shape tiers, not workload tiers.** Strategy tiers (`GemmPlan`,
+   cooperative rows, coopmat fragments) may recognize loop STRUCTURE —
+   decomposition, reduction, indexed store — never workload names, type
+   names, or benchmark text (rule 1/15). A tier is selected by shape +
+   device capability, never by what the program is "for".
+2. **The general path is always the correctness reference.** Every tiered
+   fast path must be validated against the general lowering's output
+   (the f16 arc's pattern: the naive tier proved the tensor tier's
+   expected numerics before the tensor tier was trusted).
+3. **A general-syntax programmer gets the tier's performance.** Rule 2's
+   GPU corollary: if reaching the fast tier requires a strategy keyword,
+   a rewrite, or a luckier loop shape, that is a compiler bug — fix the
+   shape analysis to recognize the general form, never demand the
+   special one.
+4. **VERDICT discipline.** A rung that loses is a VERDICT entry, not a
+   silent revert (O3: ~5% on GEMV — rejected, kept as infrastructure
+   only where generally useful).
+5. **Watch the under-served side.** Over-tuning shows up as small /
+   irregular shapes degrading while the benchmark shape wins. Shape-robust
+   guards (the 256³ dispatch quirk) are generality work, not cleanup.

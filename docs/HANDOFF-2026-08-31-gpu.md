@@ -1,5 +1,25 @@
 # HANDOFF — GPU backend (.abv / SPIR-V): state, doctrine, next steps
 
+> **2026-09-02 STATUS UPDATE** (read this first; sections below are the
+> 2026-08-31 snapshot, kept for history):
+>
+> - M1 GEMV + O1/O2/O3 + `brievc run x.abv` + the resident gate: all
+>   LANDED (ledger rows in `2026-08-31-vitriol-gemm-comparison.md`).
+> - **Float16 pipeline correct end-to-end on device** (RTX 3060): naive
+>   tier 4096³ rel 2.4e-4; the y-fill fault is dead. Root causes fixed:
+>   f16-as-storage-format lowering (f32 Function storage + OpFConvert
+>   boundaries) and the runtime's unconditional feature requests (now
+>   features2-probed, apiVersion-1.2 instance, tensor-device preference).
+> - **DOCTRINE**: `docs/architecture/benchmark-strategy.md` §
+>   Anti-Overfit Doctrine — shape tiers only, general path as the
+>   correctness reference, general-syntax performance parity, VERDICT
+>   discipline, watch the small/irregular shapes.
+> - **NEXT (start here)**: `docs/plans/2026-09-02-tensor-tier-run.md` —
+>   the coopmat tensor tier run (spirv_coopmat=1, validate against the
+>   naive reference, race the 12.6 TFLOP/s ggml anchor), then the
+>   256³ small-shape generality quirk.
+
+
 **Date:** 2026-08-31 (end of session)
 **Branch:** main. Session commits: `5a52f961`, `961ca293`, `e8bfc789`,
 `85531646`, `94f9e3dd`, `863dcbc5`, `0dcdeaa1`.
