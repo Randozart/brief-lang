@@ -86,3 +86,27 @@ strategy, per doctrine).
   investigate the chain traversal before trusting it on OTHER vendors.
 - The 256³ small-shape quirk (pre-existing, both runtimes) — generality
   work per doctrine step 5.
+
+## B-reuse rung result (2026-09-02, later same session)
+
+`spirv_coopmat_tile_rows` — R 16-row strips per workgroup, B fragments
+load once per workgroup and feed R mma chains (B DRAM traffic ÷ R — the
+tier's binding limit). Kernel + runner share ONE clamp
+(`GemmPlan::coopmat_tile_rows`: cap 8 + power-of-two divisibility
+ladder) so grid decode and dispatch can never disagree.
+
+**Ledger row**: R=2 default — min 13.2ms stable = **10.4 TFLOP/s**
+(0.83× the anchor's time; 3.1× over R=1). R=4 flashed 9.9ms (13.9
+TFLOP/s, past the anchor) but bimodal under co-tenant load — re-A/B on
+an idle box. R=16 VERDICT-rejected (slower + miscomputed on device).
+
+**En-route lessons (recorded)**: `field_int(key, idx)` — the idx is a
+field INDEX, not a default (passing 8 silently pinned every build to
+the fallback, invalidating the first sweep); config knobs must be added
+to BOTH the struct and the dbvl line table; the dbvl is include_str!-
+baked — knob changes need a compiler rebuild, not just a rebuild of the
+blob.
+
+**Next**: quiet-box re-A/B (R=2 vs R=4 promotion decision) · A-panel
+DRAM staging · the features2 probe-chain investigation · the 256³
+small-shape quirk.
