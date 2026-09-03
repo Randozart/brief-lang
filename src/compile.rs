@@ -1449,30 +1449,47 @@ fn codegen(
             // metadata lands.
             // 2026-08-26 (§2.4): the normalized universe feeds scalar type
             // resolution in the kernel emitter.
-            let binary = briev_compiler::backend::spirv::compile_spirv(
-                items,
-                "main",
-                &analysis,
-                universe,
-                opts.int_bits,
-            )?;
-            let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
-            let out_path = out.replace(".ll", ".spv");
-            std::fs::write(&out_path, &binary)
-                .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
-            println!("wrote {}", out_path);
-            // 2026-08-31 (plan abv-gpu-by-default item 4): .abv is PURE GPU
-            // code — emit the standalone runner (a self-contained C program
-            // embedding one .spv per kernel + the reactive scheduler). The
-            // user compiles it with any C compiler; `brievc run x.abv` does
-            // it automatically.
+            // 2026-09-02: ONE .spv PER KERNEL (the abv-gpu-by-default
+            // doctrine; runner::build_kernels is the single source of
+            // blobs). The old path emitted every eligible kernel named
+            // "main" into ONE module — a SPIR-V spec violation (entry
+            // points must be unique per (name, execution mode)); multi-
+            // kernel .abv files never produced a valid artifact. A single-
+            // kernel program's file is byte-identical to the old artifact
+            // (same emit_kernel inputs). Entries stay "main": the device
+            // drivers hardcode pName "main" — the runner path and the file
+            // artifacts must never disagree.
             let kernels = briev_compiler::backend::spirv::runner::build_kernels(
                 items,
                 universe,
                 opts.int_bits,
                 &analysis.accel,
             )?;
-            // `brievc run x.abv` (Track A): drive the linked GPU runtime
+            let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
+            let out_path = out.replace(".ll", ".spv");
+            if kernels.len() == 1 {
+                std::fs::write(&out_path, &kernels[0].spirv)
+                    .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
+                println!("wrote {}", out_path);
+            } else {
+                let stem = std::path::Path::new(&out_path)
+                    .with_extension("")
+                    .to_string_lossy()
+                    .to_string();
+                for k in &kernels {
+                    let p = format!("{}_{}.spv", stem, k.name);
+                    std::fs::write(&p, &k.spirv)
+                        .map_err(|e| format!("cannot write '{}': {}", p, e))?;
+                    println!("wrote {}", p);
+                }
+            }
+            // 2026-08-31 (plan abv-gpu-by-default item 4): .abv is PURE GPU
+            // code — emit the standalone runner (a self-contained C program
+            // embedding one .spv per kernel + the reactive scheduler). The
+            // user compiles it with any C compiler; `brievc run x.abv` does
+            // it automatically.
+            // `kernels` was built above (the .spv artifacts' single source);
+            // `brievc run x.abv` (Track A) drives the linked GPU runtime
             // in-process — no runner .c file, no cc round trip.
             if opts.run {
                 let prog = briev_compiler::backend::spirv::runner::prepare_run(

@@ -5511,3 +5511,27 @@ exercise and surfaced both immediately:
 but the .bv descriptor constants were only ever inspected, never
 verified. Any new emission through a text IR format needs an
 `opt -passes=verify` smoke test, and float literals must never use `{:e}`.
+
+## 2026-09-02 — multi-kernel .abv: combined artifact violated the SPIR-V entry-point uniqueness rule (FIXED)
+
+A `.abv` program with 2+ eligible kernels produced ONE `.spv` containing
+every kernel as `OpEntryPoint GLCompute … "main"` — SPIR-V requires entry
+points to be unique per (name, execution mode); spirv-val rejected the
+artifact (`2 Entry points cannot share the same name and ExecutionMode`).
+Never seen before because every existing .abv bench is single-kernel.
+
+Root cause: the standalone artifact path (`compile_spirv` via
+compile.rs) emitted all eligible kernels into one module, each hardcoded
+"main" (the device drivers require pName "main" — per-node names had
+previously broken pipeline creation). The runner path
+(`runner::build_kernels`) was ALREADY correct: a fresh module per kernel.
+
+Fix: the .spv artifacts are now written from `build_kernels`' blobs —
+the single source (one .spv PER KERNEL, the abv-gpu-by-default
+doctrine). Single-kernel programs keep the exact old filename and a
+byte-identical artifact (verified `cmp` vs the previous build);
+multi-kernel programs write `<stem>_<txn>.spv` per kernel. `brievc run`
+and the C runner are unchanged. Regression guard:
+`multi_kernel_builds_one_module_per_kernel` (per-kernel modules, one
+"main" entry each). End-to-end: two chained kernels (fill → scale) both
+validate and produce correct values via `brievc run`.

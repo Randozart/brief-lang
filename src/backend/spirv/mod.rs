@@ -1320,6 +1320,110 @@ mod tests {
             String::from_utf8_lossy(&out.stderr));
     }
 
+    /// 2026-09-02: multi-kernel .abv programs build ONE MODULE PER KERNEL
+    /// (the runner doctrine) — the old combined artifact named every entry
+    /// "main" in one module, a SPIR-V spec violation (BUGS.md 2026-09-02).
+    /// Guards: per-kernel modules, each with exactly one entry point, all
+    /// named "main" (the drivers hardcode it).
+    #[test]
+    fn multi_kernel_builds_one_module_per_kernel() {
+        let float_state = |name: &str, n: i64| TopLevel::StateDecl(StateDecl {
+            name: name.into(),
+            ty: Type::Vector(Box::new(Type::float()), vec![Dimension::Anonymous(n as usize)]),
+            span: None,
+        });
+        let txn = |name: &str, dst: &str, src: &str, fold: f64| TopLevel::Transaction(Transaction {
+            name: name.into(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(
+                    BinaryOpKind::Lt,
+                    Box::new(Expr::Identifier("i".into())),
+                    Box::new(Expr::Decimal(1024)),
+                ),
+                post_condition: Expr::Bool(true),
+                watchdog: None,
+                explicit: false,
+                span: None,
+                post_authority: false,
+            },
+            body: vec![
+                Statement::Assign(
+                    Expr::Index(
+                        Box::new(Expr::Identifier(dst.into())),
+                        Box::new(Expr::Identifier("i".into())),
+                    ),
+                    Expr::BinaryOp(
+                        BinaryOpKind::Mul,
+                        Box::new(Expr::Index(
+                            Box::new(Expr::Identifier(src.into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        )),
+                        Box::new(Expr::Float(fold)),
+                    ),
+                ),
+                Statement::Assign(
+                    Expr::Identifier("i".into()),
+                    Expr::BinaryOp(
+                        BinaryOpKind::Add,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(1)),
+                    ),
+                ),
+            ],
+            metadata: std::collections::HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+            doc: None,
+        });
+        let program = vec![
+            // `!> accel: try_all` gates the analysis — without it
+            // accel.analyze produces no entries at all (policy: absent means
+            // keyword-bodies-only).
+            TopLevel::ModuleMetadata({
+                let mut m = std::collections::HashMap::new();
+                m.insert(
+                    "accel".into(),
+                    crate::ast::PropertyValue::String("try_all".into()),
+                );
+                m
+            }),
+            TopLevel::StateDecl(StateDecl {
+                name: "i".into(),
+                ty: Type::int(),
+                span: None,
+            }),
+            float_state("x", 1024),
+            float_state("y", 1024),
+            float_state("z", 1024),
+            txn("fill", "y", "x", 1.0),
+            txn("scale", "z", "y", 2.0),
+        ];
+        let analysis = analyze(&program);
+        let kernels = crate::backend::spirv::runner::build_kernels(
+            &program,
+            &test_universe(),
+            64,
+            &analysis.accel,
+        )
+        .expect("multi-kernel build");
+        let mut names: Vec<String> = kernels.iter().map(|k| k.name.clone()).collect();
+        names.sort();
+        assert_eq!(names, vec!["fill".to_string(), "scale".to_string()]);
+        for k in &kernels {
+            let asm = validate_and_disassemble(&k.spirv, "multi_kernel");
+            let entries = asm.lines().filter(|l| l.contains("OpEntryPoint")).count();
+            assert_eq!(entries, 1, "kernel '{}' must be its own module:\n{}", k.name, asm);
+            assert!(asm.contains("\"main\""), "entry must stay 'main':\n{}", asm);
+        }
+    }
+
     /// 2026-09-02 (plan 2026-09-02-graphics-ray-and-images): the GLSL.std.450
     /// math intrinsics lower as single-operand OpExtInst on floats. Locks the
     /// emission shape for `Exp#` and `Sqrt#` (the raytracer's dependence):
