@@ -670,6 +670,18 @@ impl<'a> FnLowerer<'a> {
                 let c = self.builder.i64_const(*n as u64);
                 Ok((c, Type::int()))
             }
+            // 2026-09-02: Bool literals as kernel values (match-arm bodies,
+            // flag bindings). Same globals-section routing as the numeric
+            // constants.
+            Expr::Bool(b) => {
+                let bool_ty = self.builder.lower_type(&Type::Bits(1))?;
+                let c = if *b {
+                    self.builder.builder.constant_true(bool_ty)
+                } else {
+                    self.builder.builder.constant_false(bool_ty)
+                };
+                Ok((c, Type::Bits(1)))
+            }
             // 2026-08-31 (plan abv-gpu-by-default): float literals lower to
             // bit-pattern constants of the default float type (f32 unless the
             // module's Float metadata widens it — resolved via the casting
@@ -1035,6 +1047,25 @@ impl<'a> FnLowerer<'a> {
     /// values joined by an OpPhi at the merge — the loop-phi emission
     /// pattern, no storage slots (function OpVariables must stay in the
     /// entry block; a phi needs no state).
+    ///
+    /// selected_block() gives an index into the function's block list;
+    /// branches and phis name the LABEL id — convert here.
+    fn selected_block_label(&self) -> Word {
+        let fidx = self
+            .builder
+            .builder
+            .selected_function()
+            .expect("selection arm must be inside a function");
+        let bidx = self
+            .builder
+            .builder
+            .selected_block()
+            .expect("selection arm must stay inside a block");
+        self.builder.builder.module_ref().functions[fidx].blocks[bidx]
+            .label_id()
+            .expect("block must carry a label id")
+    }
+
     fn emit_bool_selection(
         &mut self,
         cond: &Expr,
@@ -1053,6 +1084,11 @@ impl<'a> FnLowerer<'a> {
             .branch_conditional(c, then_bb, else_bb, [] as [u32; 0]);
         self.builder.begin_block(Some(then_bb));
         let (tv, tty) = self.emit_expr(then_e)?;
+        // The arm may itself contain selections (nested match arms) — the
+        // phi's predecessor is the block that ACTUALLY branches to the
+        // merge, not the arm's entry block. selected_block() is an INDEX
+        // into the function's block list; the label id is what branches use.
+        let then_end = self.selected_block_label();
         self.builder.builder.branch(merge_bb);
         self.builder.begin_block(Some(else_bb));
         let (ev, ety) = self.emit_expr(else_e)?;
@@ -1062,13 +1098,14 @@ impl<'a> FnLowerer<'a> {
                  the same type in a kernel",
             );
         }
+        let else_end = self.selected_block_label();
         self.builder.builder.branch(merge_bb);
         self.builder.begin_block(Some(merge_bb));
         let ty_id = self.type_id(&tty)?;
         let joined = self
             .builder
             .builder
-            .phi(ty_id, None, [(tv, then_bb), (ev, else_bb)])
+            .phi(ty_id, None, [(tv, then_end), (ev, else_end)])
             .map_err(|e| format!("selection phi: {:?}", e))?;
         Ok((joined, tty))
     }
