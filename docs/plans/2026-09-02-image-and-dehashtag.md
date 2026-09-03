@@ -299,3 +299,38 @@ source types are not).
 Tree clean at `feat(spirv): image storage lowering` — 2047 green. All
 compiler-side image machinery is in place behind `spirv_image_storage`
 (default OFF); steps 4-5 are the runtime + gate, scoped above.
+
+---
+
+## Step 4 landed (2026-09-02, device-verified)
+
+The full image pipeline works end to end on the RTX 3060: .abv texel
+array → SSBO partition + OpTypeImage/OpImageWrite blob → VkImage →
+CopyImageToBuffer readback → pixel-exact host state (0/65536 wrong,
+max_err 0.0; img[0]=1.0, img[N-1]=32768.5 on the x+1 fixture).
+2047 tests green at the step-4 commits.
+
+### Driver findings (580.178, recorded for posterity)
+
+- **Image memory barriers segfault** — vkCmdPipelineBarrier with
+  pImageBarriers crashes in libnvidia-glcore with a byte-exact
+  VkImageMemoryBarrier (verified against /usr/include). The workaround:
+  images are CREATED in GENERAL and copies read GENERAL directly
+  (legal); the kernel fence provides write→copy ordering. BUFFER
+  barriers (the launch path's) are unaffected.
+- **Private one-shot command buffers** from a non-reset pool also
+  segfaulted barriers; the shared vk_cmd_buf + kernel-fence pattern is
+  the working form.
+- The buffer + map + descriptor set are created LAZILY on the first
+  full-copy launch — launch_resident now primes once when mapped() is
+  NULL, then takes the resident path (previously it fell back forever,
+  silently breaking readback).
+
+### Remaining (step 5)
+
+- ray-through-image gate: a ray.abv variant writing a texel array
+  (R32Float luminance or depth), image_check-style harness diff vs the
+  SSBO path at 1e-6, portfolio row + ledger numbers.
+- brievc run (the in-process Rust machine) has no image readback yet —
+  image kernels through `brievc run` run but don't read images back;
+  the C runner/harness path is the verified surface.
