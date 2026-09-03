@@ -174,3 +174,61 @@ img[i] = color;               // → OpImageWrite(x = i % 1920, y = i / 1920)
 The parser registry commit (e7ad1d9e) is corrected by a follow-up edit,
 not reverted (rule 8 discipline). The graph.rs hunks were never
 committed; they are reversed by inverse edits.
+
+---
+
+## Step 0-2 landed (2026-09-02). Step 3 implementation notes (next session)
+
+Steps landed: graph.rs Image-category hunks reversed (empty diff, never
+committed); spec registry slimmed to `Format`; texel type verified
+end-to-end (`type R32: Float { spec Bits: 32; spec Format: R32Float; }`
+compiles, spirv-val clean; `as R32` / `as Float` casts are the nominal
+cross-type path — fundamental-children are nominal, not coercive);
+`image_storage.rs` detection shipped with tests; config knob
+`spirv_image_storage` (dbvl + config_tuning, default OFF). 2045 tests
+green at commit `step-2`.
+
+### Step 3 anchors (from this session's reads — verified line-precise)
+
+1. `lower.rs:1513 setup_state_buffer` builds ONE SSBO from ALL of
+   `self.state_fields` (name-sorted; projection_offsets; Block decorate;
+   member offsets). PLANNED ARRAYS MUST BE FILTERED OUT of state_fields
+   BEFORE this runs — filtering here automatically fixes offsets, member
+   indices, and the runner field table IF the filter sits at the
+   state_fields collection point (find where state_fields is populated —
+   collect_state_fields callers — so every consumer agrees).
+2. Stores: `lower.rs` Assign-to-Index lowers via `emit_addr` →
+   AccessChain + OpStore (store at 224 is `term`-adjacent; the assign
+   path reuses emit_addr). Add the image check where the Assign INDEX
+   base resolves: if the base array has a plan → OpImageWrite path, no
+   pointer exists for that array.
+3. Image declaration (per planned array): typed
+   `type_image(f32, Dim::Dim2D, 0, 0, 0, sampled=2, R32f, None)`
+   (rspirv autogen_type.rs:168 — typed, deduped ✓ house law);
+   OpTypePointer UniformConstant → that type; OpVariable UniformConstant;
+   decorate DescriptorSet 0, Binding 1; add to the ENTRY-POINT interface
+   list (kernel.rs:242/287/430 set_entry_point calls).
+4. OpImageWrite texel for R32Float = a SCALAR float; coords =
+   OpCompositeConstruct %v2uint (i % W, i / W) — i is i64: widen/trunc
+   path via the existing int-cast machinery; W from the plan (a u32
+   constant).
+5. Descriptor count: the runner + LLVM descriptor emitters carry
+   n_fields for the SSBO — the image binding is a SECOND descriptor
+   (set 0, binding 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE). runner.rs +
+   llvm/kernel.rs field tables must exclude the planned array from the
+   SSBO projection (same filter as #1) — the C harness (step 5) then
+   sees a SMALLER field table + a new image field kind.
+6. Format validation: the backend's format table (R32Float →
+   ImageFormat::R32f, Dim::Dim2D) — unknown format = loud capability
+   error naming the supported set. The analysis carries the format
+   STRING; the backend owns the SPIR-V mapping (parser precedent).
+7. Risks: multi-kernel .abv files currently COLLIDE on entry name
+   "main" ("2 Entry points cannot share the same name and ExecutionMode"
+   — pre-existing, seen with a 2-kernel texel fixture). B1 fixtures are
+   single-kernel; file the collision as its own BUGS.md entry.
+
+### Session checkpoint
+
+Tree clean, 2045 green. Step 3 (SPIR-V lowering) → step 4 (runtime
+VkImage + download) → step 5 (ray-through-image gate + benchmark row +
+docs) remain, all scoped above.
