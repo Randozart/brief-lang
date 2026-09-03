@@ -178,6 +178,12 @@ impl GemmPlan {
         crate::config_tuning::ir_lowering().spirv_coopmat_f16acc
     }
 
+    /// 2026-09-02 (plan 2026-09-02-cuda-race B2): subgroups per tensor
+    /// workgroup (1 = the historical one-warp form).
+    pub(crate) fn coopmat_subgroups() -> u32 {
+        crate::config_tuning::ir_lowering().spirv_coopmat_subgroups
+    }
+
     pub(crate) fn coopmat_tile_rows(plan_m: i64) -> u32 {
         let mut r = crate::config_tuning::ir_lowering()
             .spirv_coopmat_tile_rows
@@ -468,7 +474,7 @@ fn i64_const(builder: &mut super::SpirvBuilder, int_ty: Word, v: u64) -> Word {
 /// 2026-09-01: shared-memory addressing uses u32 — real shaders index
 /// workgroup arrays with 32-bit ids, and the i64 variant is both slower
 /// and (observed on device) unreliable through this driver.
-fn u32_binop(builder: &mut super::SpirvBuilder, op: spirv::Op, a: Word, b: Word) -> Word {
+pub(crate) fn u32_binop(builder: &mut super::SpirvBuilder, op: spirv::Op, a: Word, b: Word) -> Word {
     let ty = builder.u32_type();
     let id = builder.gen_id();
     builder.emit(Instruction::new(
@@ -480,7 +486,7 @@ fn u32_binop(builder: &mut super::SpirvBuilder, op: spirv::Op, a: Word, b: Word)
     id
 }
 
-fn u32_const(builder: &mut super::SpirvBuilder, v: u32) -> Word {
+pub(crate) fn u32_const(builder: &mut super::SpirvBuilder, v: u32) -> Word {
     builder.u32_const(v)
 }
 
@@ -1064,18 +1070,31 @@ pub(crate) fn fields_are_f16(
 /// SPV_KHR_cooperative_matrix, Vulkan memory model, load/store take
 /// CONSTANT-INSTRUCTION layout + stride operands, accumulator in Function
 /// storage.
-#[allow(clippy::too_many_arguments)]
+/// 2026-09-02 (plan 2026-09-02-cuda-race B2): the tensor kernel's device
+/// handles — the SSBO, the two grid builtins, the SubgroupId input (S>1
+/// decode), and the three SSBO member indices. One struct keeps the
+/// emit_coopmat signature flat.
+pub struct CoopMatIo {
+    pub ssbo: Word,
+    pub wgid: Word,
+    /// SubgroupId input variable (u32). Declared by the caller ONLY when
+    /// subgroups > 1; S=1 passes Word::MAX and the decode uses the
+    /// historical single-subgroup form (no input, no interface entry).
+    pub sub_id: Word,
+    pub a_member: u32,
+    pub b_member: u32,
+    pub y_member: u32,
+}
+
 pub(crate) fn emit_coopmat(
     builder: &mut super::SpirvBuilder,
     plan: &GemmPlan,
-    ssbo: Word,
-    wgid: Word,
+    io: &CoopMatIo,
     exit_bb: Word,
-    a_member: u32,
-    b_member: u32,
-    y_member: u32,
 ) -> Result<(), String> {
     use rspirv::spirv::Capability;
+    let (ssbo, wgid, a_member, b_member, y_member) =
+        (io.ssbo, io.wgid, io.a_member, io.b_member, io.y_member);
 
     // Module preamble: capabilities, extensions, Vulkan memory model.
     // (Shader is already declared by SpirvBuilder::new.)
@@ -1125,6 +1144,8 @@ pub(crate) fn emit_coopmat(
     // double-pumped on Ampere and the store needs no OpFConvert (the field
     // is f16 already). The f32-acc path is byte-identical to before.
     let f16acc = GemmPlan::coopmat_f16acc();
+    let sub_check = GemmPlan::coopmat_subgroups();
+    eprintln!("DBG knobs: f16acc={} subgroups={}", f16acc, sub_check);
     let acc_cm = if f16acc { cm_c16 } else { cm_c32 };
 
     // Memory layout constant: RowMajorKHR = 0.
@@ -1143,11 +1164,22 @@ pub(crate) fn emit_coopmat(
     // the output width (garbage over correct tiles). Undo: swap the two
     // ops back.
     let tile_rows = GemmPlan::coopmat_tile_rows(plan.m);
-    let tiles_x = (plan.n / 64) as u32;
+    // B2 (cuda-race): S subgroups per workgroup — the X-flatten divisor is
+    // tiles_x' = N/(64*S) and each SUBGROUP owns its own tile_n slice
+    // (adjacent N tiles share the A panel rows: L1/L2 reuse).
+    let subgroups = GemmPlan::coopmat_subgroups();
+    let tiles_x = (plan.n / (64 * subgroups as i64)) as u32;
     let wgx = builtin_comp_u(builder, wgid, 0);
     let tiles_x_c = u32_const(builder, tiles_x);
     let tile_my = u32_binop(builder, spirv::Op::UDiv, wgx, tiles_x_c);
-    let tile_n = u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c);
+    let tile_n = if subgroups > 1 {
+        let tn_base = u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c);
+        let s_c = u32_const(builder, subgroups);
+        let tn_mul = u32_binop(builder, spirv::Op::IMul, tn_base, s_c);
+        u32_binop(builder, spirv::Op::IAdd, tn_mul, io.sub_id)
+    } else {
+        u32_binop(builder, spirv::Op::UMod, wgx, tiles_x_c)
+    };
     let s16 = u32_const(builder, 16);
     let s64 = u32_const(builder, 64);
     // The workgroup's FIRST 16-row strip: (tile_my * R) * 16.

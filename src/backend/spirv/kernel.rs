@@ -222,23 +222,56 @@ pub fn emit_kernel(
                     .position(|f| f.name == name)
             };
             let exit_bb = builder.gen_id();
-            let coopmat_args = (
-                ssbo_var.ok_or("gemm without SSBO")?,
-                workgroup_id_var.ok_or("gemm without WorkGroupId")?,
-                member_of(&plan.a_field).ok_or("gemm a field not in state")? as u32,
-                member_of(&plan.b_field).ok_or("gemm b field not in state")? as u32,
-                member_of(&plan.y_field).ok_or("gemm y field not in state")? as u32,
-            );
-            gemm::emit_coopmat(
-                builder,
-                plan,
-                coopmat_args.0,
-                coopmat_args.1,
-                exit_bb,
-                coopmat_args.2,
-                coopmat_args.3,
-                coopmat_args.4,
-            )?;
+            // B2 (plan 2026-09-02-cuda-race): S subgroups per workgroup —
+            // each owns its tile_n slice via the SubgroupId builtin. S=1
+            // declares no input at all (the historical module shape).
+            let subgroups = gemm::GemmPlan::coopmat_subgroups();
+            // B2: SubgroupId without the builtin — NVVM rejected
+            // SubgroupId outright and LocalInvocationIndex is i64 (UDiv
+            // wants unsigned). The LINEAR local index is y*LocalSizeX + x,
+            // so subgroup = y*4 + x/32 — exact on every 32-lane target.
+            let sub_id_var = if subgroups > 1 {
+                let lid_ptr = local_id_var.ok_or("gemm without LocalInvocationId")?;
+                let u32_ty = builder.u32_type();
+                let lid = builder.gen_id();
+                let v3_ty = builder.builder.type_vector(u32_ty, 3);
+                builder.emit(Instruction::new(
+                    spirv::Op::Load,
+                    Some(v3_ty),
+                    Some(lid),
+                    vec![Operand::IdRef(lid_ptr)],
+                ));
+                let ly = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::CompositeExtract,
+                    Some(u32_ty),
+                    Some(ly),
+                    vec![Operand::IdRef(lid), Operand::LiteralBit32(1)],
+                ));
+                let lx = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::CompositeExtract,
+                    Some(u32_ty),
+                    Some(lx),
+                    vec![Operand::IdRef(lid), Operand::LiteralBit32(0)],
+                ));
+                let c4 = super::gemm::u32_const(builder, 4);
+                let c32 = super::gemm::u32_const(builder, 32);
+                let y4 = super::gemm::u32_binop(builder, spirv::Op::IMul, ly, c4);
+                let x32 = super::gemm::u32_binop(builder, spirv::Op::UDiv, lx, c32);
+                Some(super::gemm::u32_binop(builder, spirv::Op::IAdd, y4, x32))
+            } else {
+                None
+            };
+            let coopmat_args = gemm::CoopMatIo {
+                ssbo: ssbo_var.ok_or("gemm without SSBO")?,
+                wgid: workgroup_id_var.ok_or("gemm without WorkGroupId")?,
+                sub_id: sub_id_var.unwrap_or(Word::MAX),
+                a_member: member_of(&plan.a_field).ok_or("gemm a field not in state")? as u32,
+                b_member: member_of(&plan.b_field).ok_or("gemm b field not in state")? as u32,
+                y_member: member_of(&plan.y_field).ok_or("gemm y field not in state")? as u32,
+            };
+            gemm::emit_coopmat(builder, plan, &coopmat_args, exit_bb)?;
             builder.begin_block(Some(exit_bb));
             builder.ret();
             builder.end_function();
@@ -247,12 +280,14 @@ pub fn emit_kernel(
                 .flatten()
                 .chain(ssbo_var.into_iter())
                 .chain(image_vars.values().copied())
+                // B2: no new interface entry — the subgroup decode reuses
+                // gl_LocalInvocationID (already listed above).
                 .collect();
             builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
             builder.add_execution_mode(
                 func_id,
                 spirv::ExecutionMode::LocalSize,
-                32,
+                32 * subgroups,
                 1,
                 1,
             );

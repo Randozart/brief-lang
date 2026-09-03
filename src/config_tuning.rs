@@ -104,6 +104,12 @@ pub struct IrLoweringSettings {
     /// 2x the FP32-acc ceiling). SEPARATE numerics tier: gate rel <= 1e-2
     /// vs the f32-acc tier (the default + correctness reference).
     pub spirv_coopmat_f16acc: bool,
+    /// 2026-09-02 (plan 2026-09-02-cuda-race B2): subgroups per tensor-tier
+    /// workgroup. S=1 (default) = one 32-lane warp per workgroup (16k
+    /// workgroups of 32 lanes underfill the 3060's 28 SMs); S>1 packs S
+    /// subgroups per workgroup, each owning its own tile_n slice via the
+    /// SubgroupId builtin — fewer, fatter workgroups.
+    pub spirv_coopmat_subgroups: u32,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -187,6 +193,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_coopmat_tile_rows: 4,
     spirv_image_storage: false,
     spirv_coopmat_f16acc: false,
+    spirv_coopmat_subgroups: 1,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -346,6 +353,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_f16acc", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_f16acc),
+        spirv_coopmat_subgroups: db
+            .field_int("spirv_coopmat_subgroups", 0)
+            .map(|v| v.max(1).min(4) as u32)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_subgroups),
     }
 }
 
