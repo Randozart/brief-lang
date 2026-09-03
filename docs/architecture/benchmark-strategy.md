@@ -184,6 +184,7 @@ applied to the benchmark suite itself:
 | `nbody_force.bv` | N-body central force | non-AI compute generality | ✅ pre-existing |
 | `pairs.abv` | 2D dispatch infra | grid geometry | ✅ infra |
 | stencil (neighbor + boundary) | local windows | needs guarded bodies or .bv+accel lane | 📝 deferred — SPIR-V rejects when/[]; gather fills the non-contiguous slot |
+| `ray.abv` + `ray_bench` | per-pixel raytracer | divergence + transcendental shading | ✅ 1.01e-04 gate, 0.246ms, 8437 Mrays/s = 436× CPU (plan 2026-09-02-graphics-ray-and-images) |
 
 Doctrine notes:
 - Every entry gates on correctness BEFORE timing; the C harness is
