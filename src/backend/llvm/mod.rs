@@ -189,8 +189,15 @@ pub(crate) fn float_to_llvm_hex(f: f64) -> String {
 /// but the encoder rounds correctly for any input (overflow → Inf,
 /// underflow → ±0) so a future caller cannot produce garbage. Undo:
 /// delete with the Float16 half-slot support in emit_field_init_value.
+// 2026-09-02: numeric core of the f16 storage encoding — shared with the
+// SPIR-V builder (f16 coopmat accumulator constants need the bit pattern,
+// not the .ll hex text).
 pub(crate) fn f32_to_f16_hex(v: f64) -> String {
-    let bits = (v as f32).to_bits();
+    format!("0xH{:04X}", f32_to_f16_bits(v as f32))
+}
+
+pub(crate) fn f32_to_f16_bits(v: f32) -> u16 {
+    let bits = v.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
     let exp = ((bits >> 23) & 0xff) as i32;
     let mant = bits & 0x007f_ffff;
@@ -222,7 +229,7 @@ pub(crate) fn f32_to_f16_hex(v: f64) -> String {
             sign // underflow → ±0
         }
     };
-    format!("0xH{:04X}", h)
+    h
 }
 
 // 2026-06-29: For Float64 literals (f64), bitcast directly to i64 bits

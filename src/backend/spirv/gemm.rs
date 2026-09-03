@@ -169,6 +169,15 @@ impl GemmPlan {
     /// past the driver's comfortable fragment allocation (suspected
     /// spill/reload of coopmat fragments); VERDICT: rejected, do not use
     /// R=16. 2026-09-02 (plan 2026-09-02-tensor-tier-run, B-reuse rung).
+    /// 2026-09-02 (plan 2026-09-02-cuda-race B3): the FP16-accumulate tier
+    /// — accumulator fragments coopmat<f16> (Ampere double-pumped mma, 2×
+    /// the FP32-acc ceiling). SEPARATE numerics tier (user-approved): gate
+    /// rel ≤ 1e-2 vs the f32-acc tier, which remains the default and the
+    /// correctness reference. Off = the default.
+    pub(crate) fn coopmat_f16acc() -> bool {
+        crate::config_tuning::ir_lowering().spirv_coopmat_f16acc
+    }
+
     pub(crate) fn coopmat_tile_rows(plan_m: i64) -> u32 {
         let mut r = crate::config_tuning::ir_lowering()
             .spirv_coopmat_tile_rows
@@ -1112,6 +1121,11 @@ pub(crate) fn emit_coopmat(
         f32_ty, scope_sub, dim16, dim16, use_c);
     let cm_c16 = builder.builder.type_cooperative_matrix_khr(
         f16_ty, scope_sub, dim16, dim16, use_c);
+    // 2026-09-02 (B3): the f16-acc tier accumulates IN f16 — the mma runs
+    // double-pumped on Ampere and the store needs no OpFConvert (the field
+    // is f16 already). The f32-acc path is byte-identical to before.
+    let f16acc = GemmPlan::coopmat_f16acc();
+    let acc_cm = if f16acc { cm_c16 } else { cm_c32 };
 
     // Memory layout constant: RowMajorKHR = 0.
     let layout_row = builder.u32_const(0);
@@ -1157,8 +1171,8 @@ pub(crate) fn emit_coopmat(
     // types allocate in Function/Private storage only; the phi carries the
     // value across iterations without a Function variable). R strips ×
     // 4 column fragments each.
-    let zero_f = builder.float_const(32, 0.0);
-    let acc_zero = builder.builder.constant_composite(cm_c32, vec![zero_f]);
+    let zero_f = builder.float_const(if f16acc { 16 } else { 32 }, 0.0);
+    let acc_zero = builder.builder.constant_composite(acc_cm, vec![zero_f]);
 
     let acc_count = tile_rows * 4;
     let acc_backedges: Vec<Word> = (0..acc_count).map(|_| builder.gen_id()).collect();
@@ -1166,7 +1180,7 @@ pub(crate) fn emit_coopmat(
     let acc_phis: Vec<(Word, Word, Word)> = acc_backedges
         .iter()
         .zip(acc_inits.iter())
-        .map(|(&be, &init)| (cm_c32, init, be))
+        .map(|(&be, &init)| (acc_cm, init, be))
         .collect();
     let sig = CoopLoopSig {
         int_ty,
@@ -1277,7 +1291,7 @@ pub(crate) fn emit_coopmat(
         for (j, frag_b) in frag_bs.iter().enumerate() {
             builder.emit(Instruction::new(
                 spirv::Op::CooperativeMatrixMulAddKHR,
-                Some(cm_c32),
+                Some(acc_cm),
                 Some(acc_backedges[r * 4 + j]),
                 vec![
                     Operand::IdRef(*frag_a),
@@ -1302,13 +1316,19 @@ pub(crate) fn emit_coopmat(
         let c_row = u32_binop(builder, spirv::Op::IMul, row, n_stride);
         for j in 0..4 {
             let phi = acc_phis_live[r * 4 + j];
-            let frag_out = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::FConvert,
-                Some(cm_c16),
-                Some(frag_out),
-                vec![Operand::IdRef(phi)],
-            ));
+            let frag_out = if f16acc {
+                // The accumulator IS f16 — store it directly.
+                phi
+            } else {
+                let fo = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::FConvert,
+                    Some(cm_c16),
+                    Some(fo),
+                    vec![Operand::IdRef(phi)],
+                ));
+                fo
+            };
             let jm = u32_const(builder, 16);
             let ji = u32_const(builder, j as u32);
             let jcol = u32_binop(builder, spirv::Op::IMul, jm, ji);

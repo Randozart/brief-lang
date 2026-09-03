@@ -411,6 +411,15 @@ impl SpirvBuilder {
         let id = match bits {
             64 => self.builder.constant_bit64(float_ty, v.to_bits()),
             32 => self.builder.constant_bit32(float_ty, (v as f32).to_bits()),
+            // 2026-09-02 (plan 2026-09-02-cuda-race B3): f16 literals —
+            // SPIR-V packs a 16-bit float constant into one 32-bit literal
+            // word (the value in the LOW half). Zero is the common case
+            // (coopmat accumulator init); general half values go through
+            // the f32→f16 RNE rounding the storage format already uses.
+            16 => {
+                let half_bits = crate::backend::llvm::f32_to_f16_bits(v as f32);
+                self.builder.constant_bit32(float_ty, half_bits as u32)
+            }
             other => unreachable!("float width {} is rejected at shape resolution", other),
         };
         self.type_keys.insert(key, id);

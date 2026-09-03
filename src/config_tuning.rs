@@ -99,6 +99,11 @@ pub struct IrLoweringSettings {
     /// storage images when the kernel's index math yields dimensions.
     /// Opt-in until measured (coopmat precedent).
     pub spirv_image_storage: bool,
+    /// 2026-09-02 (plan 2026-09-02-cuda-race B3): the FP16-accumulate
+    /// tensor tier — coopmat<f16> accumulators (Ampere double-pumped mma,
+    /// 2x the FP32-acc ceiling). SEPARATE numerics tier: gate rel <= 1e-2
+    /// vs the f32-acc tier (the default + correctness reference).
+    pub spirv_coopmat_f16acc: bool,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -181,6 +186,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_coopmat: false,
     spirv_coopmat_tile_rows: 4,
     spirv_image_storage: false,
+    spirv_coopmat_f16acc: false,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -336,6 +342,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_image_storage", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_image_storage),
+        spirv_coopmat_f16acc: db
+            .field_int("spirv_coopmat_f16acc", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_f16acc),
     }
 }
 

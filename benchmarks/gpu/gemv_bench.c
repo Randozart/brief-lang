@@ -57,7 +57,11 @@ int main(int argc, char** argv) {
     }
     const uint64_t M = argc > 2 ? strtoull(argv[2], NULL, 10) : 4096;
     const uint64_t K = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
-    const int coop = argc > 4 ? atoi(argv[4]) : 0;
+    // 2026-09-02: default 1 — gemv.abv has compiled to the cooperative-row
+    // kernel since plan 2026-09-01; a 1D dispatch on it writes nothing
+    // (rows decode from gid.y) and the bench silently read zeros as rel
+    // 1.0. The 0.199ms ledger row was the 2D invocation.
+    const int coop = argc > 4 ? atoi(argv[4]) : 1;
     const int batch = argc > 5 ? atoi(argv[5]) : 0;
 
     // Load the SPIR-V blob (read from file — the harness stays reusable
@@ -162,7 +166,7 @@ int main(int argc, char** argv) {
             *(int64_t*)(state + off_i) = 0;
             double t0 = now_ms();
             int ok = coop ? briev_accel_launch_resident_2d(0, state, 32, M)
-                          : briev_accel_launch_resident(0, state, M);
+                          : briev_accel_launch_resident_2d(0, state, 32, M) /* coop-row geometry */;
             if (!ok) {
                 fprintf(stderr, "briev: dispatch failed\n");
                 return 1;
