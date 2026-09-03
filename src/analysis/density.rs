@@ -19,7 +19,7 @@
 // Float determination is a structural fixpoint over float literals and
 // float-typed bindings. TEMP: 2026-07-31 — this uses type names for the
 // float check because the analysis layer has no TypeUniverse. Plan §8.4
-// (D4) replaces this with `is_protocol_member(ty, "#Float")` via the
+// (D4) replaces this with `is_protocol_member(ty, "Float")` via the
 // casting graph in Phase 3.
 
 use crate::ast::{Expr, Statement, TopLevel, Type};
@@ -171,7 +171,9 @@ fn is_float_type(ty: &Type) -> bool {
             "Float" | "Float32" | "Float64" | "Double" | "Half" | "BFloat" | "Bfloat16" | "FP16" | "FP32" | "FP64"
         ),
         Type::Constrained(inner, _) => is_float_type(inner),
-        Type::HashWord(n) if n == "#Float" => true,
+        // 2026-09-02 (de-hashtag sweep): category comparison on the trimmed
+        // hashword — HashWord values carry '#' by parser construction.
+        Type::HashWord(n) if n.trim_start_matches('#') == "Float" => true,
         _ => false,
     }
 }

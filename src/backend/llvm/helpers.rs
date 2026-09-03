@@ -595,11 +595,11 @@ impl LlvmBackend {
     ) -> String {
         // 2026-07-26: Protocol-driven dispatch — no name matching.
         // Int values are i64 — trunc to i1.
-        if self.is_protocol_member(&reg.ty, "#Int") {
+        if self.is_protocol_member(&reg.ty, "Int") {
             let t = self.next_reg_with_prefix("tb");
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, t, reg.name).ok();
             t
-        } else if self.is_protocol_member(&reg.ty, "#Bool") {
+        } else if self.is_protocol_member(&reg.ty, "Bool") {
             // 2026-07-14: Bool is i8 — trunc to i1 for br
             let t = self.next_reg_with_prefix("tb");
             writeln!(out, "{}{} = trunc i8 {} to i1", indent, t, reg.name).ok();
@@ -617,8 +617,8 @@ impl LlvmBackend {
         indent: &str,
         reg: &TypedRegister,
     ) -> String {
-        if self.is_protocol_member(&reg.ty, "#String")
-            || self.is_protocol_member(&reg.ty, "#Blob")
+        if self.is_protocol_member(&reg.ty, "String")
+            || self.is_protocol_member(&reg.ty, "Blob")
         {
             let p = self.next_reg_with_prefix("ptri");
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, reg.name).ok();
@@ -659,9 +659,9 @@ impl LlvmBackend {
                 // Fallback: use protocol membership + byte-width for types that
                 // bypassed the normalizer.
                 // 2026-07-31: Phase 3 (§8.4-D10) — float detection via
-                // is_protocol_member(ty, "#Float") instead of the legacy `alu`
+                // is_protocol_member(ty, "Float") instead of the legacy `alu`
                 // property string match.
-                let is_float = self.is_protocol_member(ty, "#Float");
+                let is_float = self.is_protocol_member(ty, "Float");
                 if is_float && rt.bytes <= 4 {
                     return "float".to_string();
                 }
@@ -692,8 +692,8 @@ impl LlvmBackend {
         // 2026-08-01 (B4): is_string_like (the 2-field structural heuristic)
         // retired — protocol membership only. A trigger whose type is a
         // #String or #Blob member carries a pointer-typed payload.
-        self.is_protocol_member(&trg.ty, "#String")
-            || self.is_protocol_member(&trg.ty, "#Blob")
+        self.is_protocol_member(&trg.ty, "String")
+            || self.is_protocol_member(&trg.ty, "Blob")
     }
 
     /// Emit a cached projection: load valid flag, branch on hit/miss.
@@ -1128,7 +1128,7 @@ impl LlvmBackend {
                 .and_then(|u| t.universe_key().and_then(|k| u.get(k)))
                 .map(|rt| rt.properties.contains_key("Cast.Blob"))
                 .unwrap_or(false);
-            self.is_protocol_member(t, "#String")
+            self.is_protocol_member(t, "String")
                 || is_data
         };
         if self
@@ -1252,7 +1252,7 @@ impl LlvmBackend {
     pub(super) fn is_protocol_member(&self, ty: &Type, protocol: &str) -> bool {
         // 2026-07-30: Check casting graph first — resolves protocol membership
         // from (type → protocol) via type_to_protocol. Only EXACT category match
-        // qualifies as membership (is_protocol_member(Int, "#Float") = false,
+        // qualifies as membership (is_protocol_member(Int, "Float") = false,
         // even though Int can be cast to Float — castability ≠ membership).
         if let Some(graph) = self.ctx.casting_graph.as_ref() {
             if let Some(universe) = self.ctx.type_universe.as_ref() {
@@ -1279,7 +1279,7 @@ impl LlvmBackend {
     }
 
     fn is_native_float(&self, ty: &Type) -> bool {
-        self.is_protocol_member(ty, "#Float")
+        self.is_protocol_member(ty, "Float")
     }
 
     /// Float-category width of a type — `Some(bits)` when the type is a
@@ -1291,7 +1291,7 @@ impl LlvmBackend {
     /// (rule 19) — Half, Float16, and every future float width flow the one
     /// path. Undo: restore the name matches in emit_binary_op.
     pub(super) fn float_category_bits(&self, ty: &Type) -> Option<u64> {
-        if !self.is_protocol_member(ty, "#Float") {
+        if !self.is_protocol_member(ty, "Float") {
             return None;
         }
         let universe = self.ctx.type_universe.as_ref()?;
@@ -1313,14 +1313,14 @@ impl LlvmBackend {
     /// is_protocol_member call at each site if the protocol check ever differs
     /// per op.
     pub(super) fn is_string_operand(&self, ty: &Type) -> bool {
-        self.is_protocol_member(ty, "#String")
+        self.is_protocol_member(ty, "String")
     }
 
     /// 2026-08-07 (Phase 7): is `ty` a Blob operand (the [len][bytes]
     /// byte-buffer protocol)? Resolved via the casting graph — never by type
     /// name (rules 14/18). 2026-08-15 (fundamentals): `#Blob` → `Blob`.
     pub(super) fn is_blob_operand(&self, ty: &Type) -> bool {
-        self.is_protocol_member(ty, "#Blob")
+        self.is_protocol_member(ty, "Blob")
     }
 
     /// 2026-08-28 (String ABI fix, obj params): the base obj name when `ty`
@@ -1586,9 +1586,9 @@ impl LlvmBackend {
     ) -> TypedRegister {
         let v = self.fun.next_reg();
         // 2026-07-31: Phase 3 (§8.4-D10) — native-float detection via protocol
-        // membership (is_protocol_member(ty, "#Float")) instead of the legacy
+        // membership (is_protocol_member(ty, "Float")) instead of the legacy
         // `alu` property string match.
-        let is_native = self.is_protocol_member(&a.ty, "#Float");
+        let is_native = self.is_protocol_member(&a.ty, "Float");
         let (op_a, op_b) = if is_native {
             (
                 self.ensure_float_reg(out, indent, a),
@@ -2178,7 +2178,7 @@ impl LlvmBackend {
         // 2026-07-26: Protocol-driven dispatch. No name matching.
         let ty = &reg.ty;
         // #Float protocol: convert float/double to i64
-        if self.is_protocol_member(ty, "#Float") {
+        if self.is_protocol_member(ty, "Float") {
             let maxbits = self.ctx.type_universe.as_ref()
                 .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
                 .map(|rt| rt.max_bits).unwrap_or(32);
@@ -2195,7 +2195,7 @@ impl LlvmBackend {
             }
         }
         // #Bool protocol: zext i8 to i64
-        if self.is_protocol_member(ty, "#Bool") {
+        if self.is_protocol_member(ty, "Bool") {
             let tr = self.fun.gen_reg();
             writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
             return tr;
@@ -2203,7 +2203,7 @@ impl LlvmBackend {
         // #Char protocol: a Char reg is native i32 (literal/let/field/cast);
         // boxed Char params are i64 and typed Int in SSA, so they never reach
         // this arm (they hit the `llvm_type == i64` early return above).
-        if self.is_protocol_member(ty, "#Char") {
+        if self.is_protocol_member(ty, "Char") {
             let tr = self.fun.gen_reg();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, tr, reg.name).ok();
             return tr;
@@ -2211,19 +2211,19 @@ impl LlvmBackend {
         // #String / #Blob protocol: a String is a ptr to [len][bytes] (B0),
         // so adapting to i64 is a ptrtoint. The SSO handle-extraction branch
         // was retired in B4.
-        let is_string = self.is_protocol_member(ty, "#String");
-        let is_data = self.is_protocol_member(ty, "#Blob");
+        let is_string = self.is_protocol_member(ty, "String");
+        let is_data = self.is_protocol_member(ty, "Blob");
         if is_string || is_data {
             let tr = self.fun.gen_reg();
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tr, reg.name).ok();
             return tr;
         }
         // #Int / #UInt protocol: widen if narrower than i64
-        if self.is_protocol_member(ty, "#Int") {
+        if self.is_protocol_member(ty, "Int") {
             let llvm_ty = self.llvm_type(ty);
             if llvm_ty != "i64" && llvm_ty.starts_with('i') {
                 let tr = self.fun.gen_reg();
-                let is_unsigned = self.is_protocol_member(ty, "#UInt");
+                let is_unsigned = self.is_protocol_member(ty, "UInt");
                 if is_unsigned {
                     writeln!(out, "{}{} = zext {} {} to i64", indent, tr, llvm_ty, reg.name).ok();
                 } else {

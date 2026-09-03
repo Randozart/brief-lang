@@ -981,7 +981,7 @@ impl CastingGraph {
             Type::Bits(_) => return ("Bit".to_string(), String::new()),
             Type::Void => return ("Bit".to_string(), String::new()),
             // 2026-07-30: Ptr<T> deliberately NOT mapped to "Blob" here.
-            // Mapping Ptr→Data would cause is_protocol_member(Ptr, "#Blob")
+            // Mapping Ptr→Data would cause is_protocol_member(Ptr, "Blob")
             // to return true, breaking adapt_to_i64 which expects Ptr fields
             // (stored as i64 in %State) to NOT undergo ptrtoint conversion.
             // resolve_llvm_type() handles Ptr directly before calling this.

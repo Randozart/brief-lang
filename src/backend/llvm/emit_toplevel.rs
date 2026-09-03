@@ -842,7 +842,7 @@ impl LlvmBackend {
         // of the type-name match.
         // 2026-08-01 (B4): the SSO `{ i64, i64 }` branches were retired — a
         // String is never a fat pointer under the bits model.
-        if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Blob") {
+        if self.is_protocol_member(ty, "String") || self.is_protocol_member(ty, "Blob") {
             return "ptr".to_string();
         }
         // 2026-07-30: Struct-like types derive LLVM type from field shapes.
@@ -880,14 +880,14 @@ impl LlvmBackend {
     /// bytes 8) is deliberately EXCLUDED: the legacy box_op only boxed the
     /// 32-bit Float, and Float64 params pass through as native double.
     pub(super) fn is_boxed_type(&self, ty: &Type) -> bool {
-        if self.is_protocol_member(ty, "#Bool")
-            || self.is_protocol_member(ty, "#Char")
-            || self.is_protocol_member(ty, "#String")
-            || self.is_protocol_member(ty, "#Blob")
+        if self.is_protocol_member(ty, "Bool")
+            || self.is_protocol_member(ty, "Char")
+            || self.is_protocol_member(ty, "String")
+            || self.is_protocol_member(ty, "Blob")
         {
             return true;
         }
-        self.is_protocol_member(ty, "#Float")
+        self.is_protocol_member(ty, "Float")
             && self.ctx.type_universe.as_ref()
                 .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
                 .map_or(false, |rt| rt.bytes <= 4)
@@ -901,10 +901,10 @@ impl LlvmBackend {
     /// 2026-07-31: Phase 3 (§8.4-D1) — protocol membership instead of the
     /// hardcoded name set.
     pub(super) fn is_boxed_int_type(&self, ty: &Type) -> bool {
-        self.is_protocol_member(ty, "#Bool")
-            || self.is_protocol_member(ty, "#Char")
-            || self.is_protocol_member(ty, "#String")
-            || self.is_protocol_member(ty, "#Blob")
+        self.is_protocol_member(ty, "Bool")
+            || self.is_protocol_member(ty, "Char")
+            || self.is_protocol_member(ty, "String")
+            || self.is_protocol_member(ty, "Blob")
     }
 
     /// Box a value of a boxed type to its i64 representation.
@@ -922,13 +922,13 @@ impl LlvmBackend {
         conv: &str,
         float_tmp: &str,
     ) {
-        if self.is_protocol_member(ty, "#Bool") {
+        if self.is_protocol_member(ty, "Bool") {
             writeln!(out, "{}{} = zext i8 {} to i64", indent, conv, raw).ok();
-        } else if self.is_protocol_member(ty, "#Char") {
+        } else if self.is_protocol_member(ty, "Char") {
             writeln!(out, "{}{} = zext i32 {} to i64", indent, conv, raw).ok();
-        } else if self.is_protocol_member(ty, "#String") || self.is_protocol_member(ty, "#Blob") {
+        } else if self.is_protocol_member(ty, "String") || self.is_protocol_member(ty, "Blob") {
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, conv, raw).ok();
-        } else if self.is_protocol_member(ty, "#Float") {
+        } else if self.is_protocol_member(ty, "Float") {
             writeln!(out, "{}{} = bitcast float {} to i32", indent, float_tmp, raw).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, conv, float_tmp).ok();
         }
@@ -1157,15 +1157,15 @@ impl LlvmBackend {
     /// 2026-07-31: Phase 3 (§8.4-D7) — protocol-membership dispatch replaces
     /// the hardcoded type-name match.
     pub(super) fn emit_trg_load_finish(&self, out: &mut String, indent: &str, dst: &str, raw: String, trg_ty: &Type) {
-        if self.is_protocol_member(trg_ty, "#Bool") {
+        if self.is_protocol_member(trg_ty, "Bool") {
             writeln!(out, "{}{} = trunc i8 {} to i1", indent, dst, raw).ok();
-        } else if self.is_protocol_member(trg_ty, "#Int") || self.is_protocol_member(trg_ty, "#UInt") {
+        } else if self.is_protocol_member(trg_ty, "Int") || self.is_protocol_member(trg_ty, "UInt") {
             writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
-        } else if self.is_protocol_member(trg_ty, "#Float") {
+        } else if self.is_protocol_member(trg_ty, "Float") {
             writeln!(out, "{}{} = add float 0.0, {}", indent, dst, raw).ok();
-        } else if self.is_protocol_member(trg_ty, "#Char") {
+        } else if self.is_protocol_member(trg_ty, "Char") {
             writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, raw).ok();
-        } else if self.is_protocol_member(trg_ty, "#String") || self.is_protocol_member(trg_ty, "#Blob") {
+        } else if self.is_protocol_member(trg_ty, "String") || self.is_protocol_member(trg_ty, "Blob") {
             writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, dst, raw).ok();
         } else {
             writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
@@ -2798,7 +2798,7 @@ impl LlvmBackend {
                 // emit_box_value_to_i64, replacing the name-match arm.
                 let conv = format!("%ac{}", i);
                 self.emit_box_value_to_i64(out, "  ", t, &raw, &conv, &format!("%ai{}", i));
-                if self.is_protocol_member(t, "#Float") {
+                if self.is_protocol_member(t, "Float") {
                     self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
                 } else {
                     // 2026-08-01 (audit): a boxed Bool/Char/Data param reg is
@@ -3447,7 +3447,7 @@ impl LlvmBackend {
                         // category doesn't distinguish Float64, so width is read
                         // from the universe bytes. Other widths (e.g. BFloat)
                         // stay i64, matching the prior name-based behavior.
-                        let llvm_ty = if self.is_protocol_member(t, "#Float") {
+                        let llvm_ty = if self.is_protocol_member(t, "Float") {
                             let bytes = self.ctx.type_universe.as_ref()
                                 .and_then(|u| t.universe_key().and_then(|k| u.get(k)))
                                 .map(|rt| rt.bytes).unwrap_or(4);
@@ -4403,7 +4403,7 @@ fn probe_ok_checks(
                 // ("defined with type 'i32' but expected 'i64'"). Widen to the
                 // slot width: signed Int sexts, unsigned UInt zexts.
                 let ac = format!("%ac{}", i);
-                if self.is_protocol_member(t, "#UInt") {
+                if self.is_protocol_member(t, "UInt") {
                     writeln!(out, "  {} = zext {} {} to i64", ac, param_llvm_ty, raw).ok();
                 } else {
                     writeln!(out, "  {} = sext {} {} to i64", ac, param_llvm_ty, raw).ok();

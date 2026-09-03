@@ -478,11 +478,11 @@ impl LlvmBackend {
                             let p = self.fun.gen_reg();
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, loaded).ok();
                             TypedRegister { name: p, ty }
-                        } else if self.is_protocol_member(&ty, "#Char") {
+                        } else if self.is_protocol_member(&ty, "Char") {
                             let t = self.fun.gen_reg();
                             writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, loaded).ok();
                             TypedRegister { name: t, ty }
-                        } else if self.is_protocol_member(&ty, "#Bool") {
+                        } else if self.is_protocol_member(&ty, "Bool") {
                             let t = self.fun.gen_reg();
                             writeln!(out, "{}{} = trunc i64 {} to i8", indent, t, loaded).ok();
                             TypedRegister { name: t, ty }
@@ -518,7 +518,7 @@ impl LlvmBackend {
                             && let Some(cached) = self.fun.reg_float_cache.get(&reg)
                         {
                             TypedRegister { name: cached.clone(), ty }
-                        } else if self.is_protocol_member(&orig_ty, "#Char") {
+                        } else if self.is_protocol_member(&orig_ty, "Char") {
                             // 2026-08-13: a Char param is boxed to i64 at
                             // entry (emit_box_param "zext.i32.to.i64#") but its
                             // native register is i32. A comparison against a
@@ -1063,7 +1063,7 @@ impl LlvmBackend {
                             |fidx| matches!(
                                 self.ctx.field_briev_types.get(*fidx),
                                 Some(t) if matches!(t, Type::Vector(inner, _)
-                                    if self.is_protocol_member(inner, "#Bool"))
+                                    if self.is_protocol_member(inner, "Bool"))
                             ),
                         ),
                         _ => None,
@@ -1377,7 +1377,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = load {}{}, ptr {}", indent, raw,
                             if self.fun.volatile_read { "volatile " } else { "" }, "i64", gep).ok();
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, raw).ok();
-                    } else if self.is_protocol_member(&index_elem_ty, "#Float") {
+                    } else if self.is_protocol_member(&index_elem_ty, "Float") {
                         // 2026-08-07 (Phase 7): a Float (f32) element is
                         // stored in the i64 list slot as
                         // `zext(bitcast float to i32)` — invert it.
@@ -1387,7 +1387,7 @@ impl LlvmBackend {
                         let tr = self.fun.gen_reg();
                         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, raw).ok();
                         writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, tr).ok();
-                    } else if self.is_protocol_member(&index_elem_ty, "#Int") {
+                    } else if self.is_protocol_member(&index_elem_ty, "Int") {
                         // 2026-08-12 (slice 4, wasm32 maze): an Int element is
                         // stored as a boxed i64 handle; on wasm32 the value is
                         // in the low i32 — load at the ELEMENT's native width
@@ -1763,13 +1763,13 @@ impl LlvmBackend {
                     let n = self.vector_element_count(&vec_ty) as i64;
                     let data_ptr = self.emit_state_gep(out, indent, "f", "%state", fidx);
                     let is_f32 = matches!(&vec_ty, Type::Vector(inner, _)
-                        if self.is_protocol_member(inner, "#Float")
+                        if self.is_protocol_member(inner, "Float")
                             && self.ctx.type_universe.as_ref()
                                 .and_then(|u| inner.universe_key().and_then(|k| u.get(k)))
                                 .map(|rt| rt.max_bits <= 32)
                                 .unwrap_or(true));
                     if matches!(&vec_ty, Type::Vector(inner, _)
-                        if self.is_protocol_member(inner, "#Float") && !is_f32)
+                        if self.is_protocol_member(inner, "Float") && !is_f32)
                     {
                         panic!("slicing on Float64 (double) vectors is not yet supported");
                     }
@@ -2067,7 +2067,7 @@ impl LlvmBackend {
         // bit patterns, matching how heap List<Float> slots store floats.
         // Float64 (double) vectors are a hard error (no f64 gather yet).
         let is_f32 = matches!(&op.obj_reg.ty, Type::Vector(inner, _)
-            if self.is_protocol_member(inner, "#Float")
+            if self.is_protocol_member(inner, "Float")
                 && self.ctx.type_universe.as_ref()
                     .and_then(|u| inner.universe_key().and_then(|k| u.get(k)))
                     .map(|rt| rt.max_bits <= 32)
@@ -2092,7 +2092,7 @@ impl LlvmBackend {
         // briev_mask_select64 would read `[N x double]` as i64s (garbage).
         // No f64 gather exists yet: hard error, no silent wrongness.
         if matches!(&op.obj_reg.ty, Type::Vector(inner, _)
-            if self.is_protocol_member(inner, "#Float"))
+            if self.is_protocol_member(inner, "Float"))
         {
             panic!("mask indexing on Float64 (double) vectors is not yet supported");
         }
@@ -6202,7 +6202,7 @@ impl LlvmBackend {
                     // 2026-08-13: a native Char source (i32, from a boxed Char
                     // param unboxed at read) must be widened to the boxed i64
                     // the runtime helpers expect (`char_to_str(int64_t)`).
-                    let (arg_ll, arg) = if cur_ll == "i32" && self.is_protocol_member(&src.ty, "#Char") {
+                    let (arg_ll, arg) = if cur_ll == "i32" && self.is_protocol_member(&src.ty, "Char") {
                         let w = self.fun.gen_reg();
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, w, cur).ok();
                         ("i64".to_string(), w)

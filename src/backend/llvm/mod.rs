@@ -247,7 +247,7 @@ pub(crate) fn float_to_llvm_str(f: f64, llvm_ty: &str) -> String {
 /// global emission, avoiding the `constant float 0` bug.
 ///
 /// 2026-07-31: Phase 3 (§8.4-D4) — float const resolution uses a protocol
-/// membership check (`is_protocol_member(ty, "#Float")` via the casting graph,
+/// membership check (`is_protocol_member(ty, "Float")` via the casting graph,
 /// supplied by the caller) instead of matching the type name.
 fn try_eval_cfloat(
     expr: &Expr,
@@ -2121,10 +2121,10 @@ impl LlvmBackend {
         // heap-allocated [len][bytes] buffer (allocated at init/FFI time).
         // #Blob values are also pointers. UTF8View/StaticString/SmallString64
         // (legacy stack types) are retired.
-        if self.is_protocol_member(ty, "#String") {
+        if self.is_protocol_member(ty, "String") {
             return true;
         }
-        if self.is_protocol_member(ty, "#Blob") {
+        if self.is_protocol_member(ty, "Blob") {
             return true;
         }
         ty.universe_key()
@@ -3112,7 +3112,7 @@ impl LlvmBackend {
             if ty == Type::float() || ty == Type::float64() {
                 // 2026-07-31: Phase 3 (§8.4-D4) — float const resolution via
                 // protocol membership instead of name matching.
-                if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants, &|t| self.is_protocol_member(t, "#Float")) {
+                if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants, &|t| self.is_protocol_member(t, "Float")) {
                     self.ctx.constants.insert(name, (ty.clone(), Expr::Float(val)));
                 }
             }
@@ -3469,8 +3469,8 @@ impl LlvmBackend {
                 // membership (is_boxed_int_type + #Int/#UInt) instead of the
                 // hardcoded type-name list.
                 let supported = self.is_boxed_int_type(&trg.ty)
-                    || self.is_protocol_member(&trg.ty, "#Int")
-                    || self.is_protocol_member(&trg.ty, "#UInt");
+                    || self.is_protocol_member(&trg.ty, "Int")
+                    || self.is_protocol_member(&trg.ty, "UInt");
                 if !supported {
                     eprintln!("warning:{}:{}: trigger '{}' has type {:?} which the LLVM runtime does not fully support; using i8 storage",
                         trg.span.as_ref().map(|s| s.line).unwrap_or(0),

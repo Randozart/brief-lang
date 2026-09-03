@@ -132,11 +132,19 @@ pub fn is_string_category(ty: &Type, universe: &TypeUniverse) -> bool {
             universe.get(name).map(|rt| {
                 rt.properties.contains_key("Cast.String")
                     || rt.properties.contains_key("Cast.Blob")
-                    || rt.base.starts_with("#String")
-                    || rt.base.starts_with("#Blob")
+                    // 2026-09-02 (de-hashtag sweep): category comparison on
+                    // the trimmed base — legacy registrations may still
+                    // spell the base "#String"; the law is plain names.
+                    || rt.base.trim_start_matches('#').starts_with("String")
+                    || rt.base.trim_start_matches('#').starts_with("Blob")
             }).unwrap_or(false)
         }
-        Type::HashWordVariant(name, _) => name == "#String" || name == "#Blob",
+        // HashWordVariant names carry the '#' by parser construction; the
+        // comparison is on the CATEGORY.
+        Type::HashWordVariant(name, _) => {
+            name.trim_start_matches('#') == "String"
+                || name.trim_start_matches('#') == "Blob"
+        }
         _ => false,
     }
 }
