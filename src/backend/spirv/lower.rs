@@ -86,6 +86,16 @@ pub struct FnLowerer<'a> {
     /// components. Maps "__vec4_{field}_{j}" → (SSA id, elem type).
     /// Populated before body emission; emit_expr resolves these directly.
     pub vec4_component_vars: HashMap<String, (Word, Type)>,
+    /// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image
+    /// storage plans for this kernel — array name → plan. Planned arrays
+    /// are EXCLUDED from state_fields (they are not SSBO members); their
+    /// writes lower to OpImageWrite against a UniformConstant image.
+    pub image_plans: HashMap<String, crate::analysis::image_storage::ImageStoragePlan>,
+    /// Array name → the emitted image variable id (UniformConstant).
+    pub image_vars: HashMap<String, Word>,
+    /// Array name → the OpTypeImage id (the OpLoad result type — the
+    /// variable's result_type is the POINTER, not the image).
+    pub image_types: HashMap<String, Word>,
 }
 
 impl<'a> FnLowerer<'a> {
@@ -106,7 +116,24 @@ impl<'a> FnLowerer<'a> {
             vec4_fields: HashMap::new(),
             vec4_coop_components: HashMap::new(),
             vec4_component_vars: HashMap::new(),
+            image_plans: HashMap::new(),
+            image_vars: HashMap::new(),
+            image_types: HashMap::new(),
         }
+    }
+
+    /// Register image storage plans and REMOVE the planned arrays from the
+    /// SSBO field list (they are not buffer members). Call before any
+    /// setup/buffer work.
+    pub fn set_image_plans(
+        &mut self,
+        plans: &[crate::analysis::image_storage::ImageStoragePlan],
+    ) {
+        for p in plans {
+            self.image_plans.insert(p.array.clone(), p.clone());
+        }
+        self.state_fields
+            .retain(|f| !self.image_plans.contains_key(&f.name));
     }
 
     /// 2026-08-31 (plan abv-gpu-by-default): materialize module consts as
@@ -213,6 +240,15 @@ impl<'a> FnLowerer<'a> {
             }
             Statement::Assign(lhs, rhs) => {
                 let (val, vty) = self.emit_expr(rhs)?;
+                // 2026-09-02: image-planned arrays store via OpImageWrite —
+                // no SSBO pointer exists for them.
+                if let Expr::Index(base, idx) = lhs {
+                    if let Expr::Identifier(name) = base.as_ref() {
+                        if self.image_plans.contains_key(name) {
+                            return self.emit_image_write(name, idx, val, &vty);
+                        }
+                    }
+                }
                 let (ptr, pty) = self.lhs_addr(lhs)?;
                 // 2026-09-02: the STORE COERCES to the destination shape —
                 // an f32-widened local storing into an f16 SSBO member
@@ -1601,6 +1637,152 @@ fn cast_opcode(
             vec![rspirv::dr::Operand::LiteralBit32(0)],
         );
         self.ssbo_var = Some(var);
+        Ok(())
+    }
+
+    /// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): declare
+    /// the UniformConstant storage-image variables for this kernel's
+    /// planned arrays — OpTypeImage (typed builder), pointer, variable,
+    /// DescriptorSet 0 / Binding 1+ (images bind AFTER the SSBO's set-0
+    /// binding 0). The runtime (step 4) allocates the matching VkImage per
+    /// binding slot.
+    pub fn declare_images(&mut self) -> Result<(), String> {
+        let names: Vec<String> = self.image_plans.keys().cloned().collect();
+        let mut names = names;
+        names.sort();
+        for (slot, name) in names.iter().enumerate() {
+            let plan = &self.image_plans[name];
+            let fmt = self.spirv_image_format(&plan.format)?;
+            let f32_ty = self.builder.lower_type(&Type::float())?;
+            let img_ty = self
+                .builder
+                .builder
+                .type_image(f32_ty, spirv::Dim::Dim2D, 0, 0, 0, 2, fmt, None);
+            let ptr_ty = self
+                .builder
+                .builder
+                .type_pointer(None, spirv::StorageClass::UniformConstant, img_ty);
+            let var = self.builder.gen_id();
+            self.builder.emit_global(Instruction::new(
+                spirv::Op::Variable,
+                Some(ptr_ty),
+                Some(var),
+                vec![Operand::StorageClass(spirv::StorageClass::UniformConstant)],
+            ));
+            self.builder.decorate_raw(
+                var,
+                spirv::Decoration::DescriptorSet,
+                vec![rspirv::dr::Operand::LiteralBit32(0)],
+            );
+            self.builder.decorate_raw(
+                var,
+                spirv::Decoration::Binding,
+                vec![rspirv::dr::Operand::LiteralBit32(1 + slot as u32)],
+            );
+            self.image_vars.insert(name.clone(), var);
+            self.image_types.insert(name.clone(), img_ty);
+        }
+        Ok(())
+    }
+
+    /// The backend's texel-format table: analysis-carried format STRING →
+    /// SPIR-V ImageFormat. Unknown format = loud error naming the set
+    /// (the parser never validates device formats — this is the one place
+    /// that knows them).
+    fn spirv_image_format(&self, format: &str) -> Result<spirv::ImageFormat, String> {
+        match format {
+            "R32Float" => Ok(spirv::ImageFormat::R32f),
+            other => Err(format!(
+                "unknown texel format '{}' — supported: R32Float (more join as \
+                 the runtime gains their VkImage paths)",
+                other
+            )),
+        }
+    }
+
+    /// The image-write path for `planned[i] = value`: coords (i % W, i / W)
+    /// (the same decomposition the plan's detection extracted), texel =
+    /// scalar float (R32Float). The value must lower to f32 — R32 IS a
+    /// float child; anything else is a loud error, never a silent convert.
+    fn emit_image_write(
+        &mut self,
+        array: &str,
+        idx: &Expr,
+        val: Word,
+        val_ty: &Type,
+    ) -> Result<(), String> {
+        let Some(var) = self.image_vars.get(array).copied() else {
+            return self.err(format!("image plan for '{}' has no variable", array));
+        };
+        if !self.builder.is_float_type(val_ty)? {
+            return self.err(format!(
+                "image store into '{}' requires a float value — texel formats \
+                 are float-backed in this slice",
+                array
+            ));
+        }
+        let plan = &self.image_plans[array];
+        let width = self.builder.i64_const(plan.width as u64);
+        let i_reg = self.emit_expr(idx)?.0;
+        let int_ty = self.builder.lower_type(&Type::int())?;
+        // i64 → u32 coords: OpSConvert truncates to the low 32 bits — the
+        // plan guarantees i < width*height ≤ u32::MAX.
+        let u32_ty = self.builder.u32_type();
+        let conv = |me: &mut Self, v: Word| -> Result<Word, String> {
+            let id = me.builder.gen_id();
+            me.builder.emit(Instruction::new(
+                spirv::Op::SConvert,
+                Some(u32_ty),
+                Some(id),
+                vec![Operand::IdRef(v)],
+            ));
+            Ok(id)
+        };
+        let rem = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            spirv::Op::SRem,
+            Some(int_ty),
+            Some(rem),
+            vec![Operand::IdRef(i_reg), Operand::IdRef(width)],
+        ));
+        let quo = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            spirv::Op::SDiv,
+            Some(int_ty),
+            Some(quo),
+            vec![Operand::IdRef(i_reg), Operand::IdRef(width)],
+        ));
+        let cx = conv(self, rem)?;
+        let cy = conv(self, quo)?;
+        let coord_ty = self.builder.builder.type_vector(u32_ty, 2);
+        let coords = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            spirv::Op::CompositeConstruct,
+            Some(coord_ty),
+            Some(coords),
+            vec![Operand::IdRef(cx), Operand::IdRef(cy)],
+        ));
+        let image_ty = *self
+            .image_types
+            .get(array)
+            .ok_or_else(|| "image variable lost its type".to_string())?;
+        let image = self.builder.gen_id();
+        self.builder.emit(Instruction::new(
+            spirv::Op::Load,
+            Some(image_ty),
+            Some(image),
+            vec![Operand::IdRef(var)],
+        ));
+        self.builder.emit(Instruction::new(
+            spirv::Op::ImageWrite,
+            None,
+            None,
+            vec![
+                Operand::IdRef(image),
+                Operand::IdRef(coords),
+                Operand::IdRef(val),
+            ],
+        ));
         Ok(())
     }
 

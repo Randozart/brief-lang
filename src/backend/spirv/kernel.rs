@@ -30,6 +30,10 @@ pub fn emit_kernel(
     shape: &KernelShape,
     items: &[crate::ast::TopLevel],
     cooperative: bool,
+    // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): this
+    // kernel's image storage plans — planned arrays leave the SSBO and
+    // bind as STORAGE_IMAGE (set 0, binding 1+).
+    images: &[crate::analysis::image_storage::ImageStoragePlan],
 ) -> Result<Word, String> {
     let mut cooperative = cooperative;
     let void_id = builder.lower_type(&Type::void())?;
@@ -59,11 +63,13 @@ pub fn emit_kernel(
             }
         }
     }
-    let (ssbo_var, global_id_var, local_id_var, workgroup_id_var, vec4_fields, state_fields_sorted) = {
+    let (ssbo_var, global_id_var, local_id_var, workgroup_id_var, vec4_fields, state_fields_sorted, image_vars, image_types) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
+        warm.set_image_plans(images);
         warm.materialize_consts(items)?;
         warm.warm_builtins()?;
         warm.setup_state_buffer()?;
+        warm.declare_images()?;
         (
             warm.ssbo_var,
             warm.global_id_var,
@@ -71,6 +77,8 @@ pub fn emit_kernel(
             warm.workgroup_id_var,
             warm.vec4_fields,
             warm.state_fields,
+            warm.image_vars,
+            warm.image_types,
         )
     };
     // Types referenced by the function must precede it in the module.
@@ -238,6 +246,7 @@ pub fn emit_kernel(
                 .into_iter()
                 .flatten()
                 .chain(ssbo_var.into_iter())
+                .chain(image_vars.values().copied())
                 .collect();
             builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
             builder.add_execution_mode(
@@ -283,6 +292,7 @@ pub fn emit_kernel(
             .flatten()
             .chain(ssbo_var.into_iter())
             .chain([shared_a, shared_b])
+            .chain(image_vars.values().copied())
             .collect();
         builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
         builder.add_execution_mode(
@@ -296,6 +306,9 @@ pub fn emit_kernel(
     }
 
     let mut lower = FnLowerer::new(builder, state_fields);
+    lower.set_image_plans(images);
+    lower.image_vars = image_vars.clone();
+    lower.image_types = image_types;
     lower.ssbo_var = ssbo_var;
     lower.global_id_var = global_id_var;
     lower.local_id_var = local_id_var;
@@ -426,6 +439,7 @@ pub fn emit_kernel(
         .into_iter()
         .flatten()
         .chain(ssbo_var.into_iter())
+        .chain(image_vars.values().copied())
         .collect();
     builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
     // Cooperative row kernels (plan 2026-09-01-cooperative-row-kernels):

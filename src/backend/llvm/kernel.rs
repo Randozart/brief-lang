@@ -61,9 +61,14 @@ impl super::LlvmBackend {
                 .with_universe(&universe, int_bits);
             // Entry is "main" (each offload module is self-contained; the
             // device drivers look up "main" — kernel.rs's own header note).
-            let emitted =
-                crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &shape, items, false)
-                    .and_then(|_| sb.build());
+            // 2026-09-02: no image plans here — the .bv offload lane keeps
+            // texel arrays as plain SSBO fields (image realization is the
+            // .abv lane; a .bv accel kernel with a spec-Format array simply
+            // stays buffer-backed until the lane catches up).
+            let emitted = crate::backend::spirv::kernel::emit_kernel(
+                &mut sb, "main", &shape, items, false, &[],
+            )
+            .and_then(|_| sb.build());
             match emitted {
                 Ok(bytes) => blobs.push(AccelKernelBlob { txn_name: name.clone(), bytes }),
                 Err(e) => {

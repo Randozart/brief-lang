@@ -118,7 +118,10 @@ pub fn compile_spirv_builder(
                 // never disagree again.
                 let cooperative =
                     crate::backend::spirv::kernel::is_cooperative_shape(&entry.shape);
-                emit_kernel(&mut builder, "main", &entry.shape, program, cooperative)?;
+                // 2026-09-02: plan-free — this combined-module helper is
+                // single-kernel surface/tests only; the artifact path goes
+                // through build_kernels (one module per kernel).
+                emit_kernel(&mut builder, "main", &entry.shape, program, cooperative, &[])?;
                 emitted.push(txn.name.clone());
             }
         }
@@ -288,7 +291,7 @@ mod tests {
         let analysis = analyze(&program);
         let shape = eligible_shape(&analysis).clone();
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "scale", &shape, &program, false)
+        emit_kernel(&mut builder, "scale", &shape, &program, false, &[])
             .expect("kernel with real body must compile");
         let m = builder.module_ref();
 
@@ -336,7 +339,7 @@ mod tests {
         let analysis = analyze(&program);
         let shape = eligible_shape(&analysis).clone();
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "scale", &shape, &program, false).unwrap();
+        emit_kernel(&mut builder, "scale", &shape, &program, false, &[]).unwrap();
         let binary = builder.build().unwrap();
 
         let dir = std::env::temp_dir().join(format!("briev_spv_{}", std::process::id()));
@@ -440,7 +443,7 @@ mod tests {
         eprintln!("read_buffers={:?} scalars={:?}", reads, entry.shape.scalar_ins);
 
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "mad", &entry.shape, &program, false).unwrap();
+        emit_kernel(&mut builder, "mad", &entry.shape, &program, false, &[]).unwrap();
         let m = builder.module_ref();
         let access_chains = m.functions.iter()
             .flat_map(|f| f.blocks.iter())
@@ -549,7 +552,7 @@ mod tests {
         };
 
         let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
-        emit_kernel(&mut builder, "fmad", &shape, &program, false)
+        emit_kernel(&mut builder, "fmad", &shape, &program, false, &[])
             .expect("float kernel must lower");
         let ops = {
             let m = builder.module_ref();
@@ -695,7 +698,7 @@ mod tests {
         };
 
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "ls", &shape, &program, false).unwrap();
+        emit_kernel(&mut builder, "ls", &shape, &program, false, &[]).unwrap();
         // Count inside a scope: module_ref borrows; build() consumes.
         let chain_count = {
             let m = builder.module_ref();
@@ -772,7 +775,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        let err = emit_kernel(&mut builder, "bad", &raw_shape("i", stmts, &[], &["total"]), &program, false)
+        let err = emit_kernel(&mut builder, "bad", &raw_shape("i", stmts, &[], &["total"]), &program, false, &[])
             .err()
             .expect("Load#(5) must be rejected");
         assert!(err.contains("not an address expression"), "{err}");
@@ -825,7 +828,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        let err = emit_kernel(&mut builder, "wbad", &raw_shape("i", stmts, &["a"], &[]), &program, false)
+        let err = emit_kernel(&mut builder, "wbad", &raw_shape("i", stmts, &["a"], &[]), &program, false, &[])
             .err()
             .expect("width mismatch must error");
         assert!(err.contains("byte-width"), "{err}");
@@ -908,7 +911,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new().with_universe(&u, 64);
-        emit_kernel(&mut builder, "tk", &raw_shape("i", stmts, &[], &["t"]), &program, false).unwrap();
+        emit_kernel(&mut builder, "tk", &raw_shape("i", stmts, &[], &["t"]), &program, false, &[]).unwrap();
         // The SSBO struct member must be OpTypeFloat 64 — derived from the
         // Temp typedef's Cast.Float property + bits metadata, not from names.
         let has_float64 = builder.module_ref().types_global_values.iter().any(|inst| {
@@ -959,7 +962,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["i"]), &program, false).unwrap();
+        emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["i"]), &program, false, &[]).unwrap();
         let int_64_signed = builder.module_ref().types_global_values.iter().any(|inst| {
             inst.class.opcode == rspirv::spirv::Op::TypeInt
                 && inst.operands.get(0)
@@ -1007,7 +1010,7 @@ mod tests {
             other => panic!("expected transaction, got {other:?}"),
         };
         let mut builder = SpirvBuilder::new();
-        let err = emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["s"]), &program, false)
+        let err = emit_kernel(&mut builder, "sk", &raw_shape("i", stmts, &[], &["s"]), &program, false, &[])
             .err()
             .expect("String state must be rejected");
         assert!(err.contains("String"), "{err}");
@@ -1097,7 +1100,7 @@ mod tests {
         let analysis = analyze(&program);
         let shape = eligible_shape(&analysis).clone();
         let mut builder = SpirvBuilder::new();
-        emit_kernel(&mut builder, "scale", &shape, &program, false).unwrap();
+        emit_kernel(&mut builder, "scale", &shape, &program, false, &[]).unwrap();
         let asm = validate_and_disassemble(&builder.build().unwrap(), "harness_scale");
 
         // Entry point: GLCompute on "scale" (spirv-dis quotes the name).
@@ -1262,7 +1265,7 @@ mod tests {
             reduction: None,
         };
         let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
-        emit_kernel(&mut builder, "main", &shape, &program, false).unwrap();
+        emit_kernel(&mut builder, "main", &shape, &program, false, &[]).unwrap();
         let m = builder.module_ref();
         // The vec4 type exists, and the array-of-vec4 member type carries
         // ArrayStride 16.
@@ -1411,6 +1414,7 @@ mod tests {
             &test_universe(),
             64,
             &analysis.accel,
+            &Default::default(),
         )
         .expect("multi-kernel build");
         let mut names: Vec<String> = kernels.iter().map(|k| k.name.clone()).collect();
@@ -1422,6 +1426,122 @@ mod tests {
             assert_eq!(entries, 1, "kernel '{}' must be its own module:\n{}", k.name, asm);
             assert!(asm.contains("\"main\""), "entry must stay 'main':\n{}", asm);
         }
+    }
+
+    /// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): a kernel
+    /// whose write array carries an image storage plan emits OpTypeImage +
+    /// OpImageWrite, EXCLUDES the array from the SSBO field surface, and
+    /// passes spirv-val. Guards the SSBO/image binding partition end to end.
+    #[test]
+    fn image_plan_partitions_ssbo_and_writes_texel() {
+        // The pipeline route (parse + check + normalize): the texel type
+        // registration into the universe is what the real compiler does —
+        // hand-built fixtures miss invisible registration state.
+        let src = r#"
+!> accel: try_all;
+
+const N: Int = 4096;
+
+type R32: Float {
+    spec Bits: 32;
+    spec Format: R32Float;
+};
+
+let i: Int = 0;
+let x: Float[4096];
+let img: R32[4096];
+
+async node fill [i < N][i == N] {
+    let pix: Int = i % 64;
+    let row: Int = i / 64;
+    img[i] = x[i];
+    i = i + 1;
+    term;
+};
+"#;
+        let path = "examples/gpu/_img_pipeline_test.abv";
+        std::fs::write(path, src).expect("write fixture");
+        let opts = crate::pipeline::BuildOptions {
+            run: false,
+            config_dir: None,
+            file_path: path.to_string(),
+            emit_ir_only: false,
+            out_dir: None,
+            optimize_budget: 256,
+            emit_beast_stages: vec![],
+            backend: crate::target::BackendKind::Vm,
+            no_stdlib: false,
+            stdlib_path: None,
+            disable_plugins: vec![],
+            enable_plugins: vec![],
+            trg_unresolved_action: crate::pipeline::TrgUnresolvedAction::Warn,
+            extra_objects: vec![],
+            shared: false,
+            library_mode: false,
+            int_bits: 64,
+            glue_config: None,
+            stack_threshold: 65536,
+            allow_read: false,
+            allow_write: false,
+            allow_run: false,
+            allow_sys_query: false,
+            allow_net: false,
+            macro_budget: 0,
+            dump_vfs: false,
+            update_lockfile: false,
+            dump_traces: false,
+            diff_mode: false,
+            sysquery_overrides: std::collections::HashMap::new(),
+            target: None,
+            sysquery_pairs: vec![],
+            sysquery_files: vec![],
+            style_css: None,
+            view_html: None,
+            view_bindings: vec![],
+            ssr: false,
+            dev: false,
+            accel_cpu_fallback: None,
+        };
+        let (mut items, mut universe) =
+            crate::pipeline::compile_to_typed(path, src, &opts).expect("pipeline");
+        // The CLI normalizes (registering source types like R32 into the
+        // universe) BEFORE the backend analysis — mirror that exactly.
+        crate::backend::spirv::normalizer::normalize(&mut items, &mut universe, 64)
+            .expect("normalize");
+        // NOT the test analyze() helper — it builds a FRESH universe and
+        // would lose the normalizer's R32 registration (fundamentals are
+        // seeded in every universe, source types are not).
+        let analysis = crate::backend::analyze_program(&items, false, 1, Some(&universe));
+        let plan = crate::analysis::image_storage::ImageStoragePlan {
+            array: "img".into(),
+            width: 64,
+            height: 64,
+            format: "R32Float".into(),
+        };
+        let mut plans = std::collections::HashMap::new();
+        plans.insert("fill".to_string(), vec![plan.clone()]);
+        let kernels = crate::backend::spirv::runner::build_kernels(
+            &items,
+            &universe,
+            64,
+            &analysis.accel,
+            &plans,
+        )
+        .expect("image kernel build");
+        let _ = std::fs::remove_file(path);
+        assert_eq!(kernels.len(), 1);
+        assert_eq!(kernels[0].image_plans, vec![plan.clone()]);
+        let asm = validate_and_disassemble(&kernels[0].spirv, "image_plan");
+        assert!(asm.contains("OpTypeImage %float 2D 0 0 0 2 R32f"), "image type:\n{}", asm);
+        assert!(asm.contains("OpImageWrite"), "image write:\n{}", asm);
+        // The SSBO keeps i + x — img is device-image resident, not a
+        // buffer member.
+        let ssbo_members = asm
+            .lines()
+            .find(|l| l.contains("OpTypeStruct"))
+            .map(|l| l.matches("%float").count() + l.matches("%long").count())
+            .unwrap_or(0);
+        assert!(ssbo_members <= 3, "SSBO must exclude the image array:\n{}", asm);
     }
 
     /// 2026-09-02 (plan 2026-09-02-graphics-ray-and-images): the GLSL.std.450
@@ -1510,7 +1630,7 @@ mod tests {
                 reduction: None,
             };
             let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
-            emit_kernel(&mut builder, "main", &shape, &program, false).unwrap();
+            emit_kernel(&mut builder, "main", &shape, &program, false, &[]).unwrap();
             let asm = validate_and_disassemble(&builder.build().unwrap(), "math_intrinsics");
             // Disasm shape: `%id = OpExtInst %float %set Exp %x` — the result
             // id sits between the type and the GL opcode name.

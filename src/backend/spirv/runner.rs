@@ -46,6 +46,10 @@ pub struct RunnerField {
 pub struct RunnerKernel {
     pub name: String,
     pub spirv: Vec<u8>,
+    /// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): this
+    /// kernel's image storage plans — the SSBO field table and the runtime
+    /// (step 4: VkImage bindings + download) key off these.
+    pub image_plans: Vec<crate::analysis::image_storage::ImageStoragePlan>,
     pub index_var: String,
     pub count_expr: Expr,
     /// 2D dispatch width (None = 1D). Mirrors `KernelShape::work_cols` —
@@ -77,9 +81,21 @@ pub fn ssbo_layout(
     items: &[TopLevel],
     universe: &TypeUniverse,
     int_bits: u64,
+    image_plans: &std::collections::HashMap<
+        String,
+        Vec<crate::analysis::image_storage::ImageStoragePlan>,
+    >,
 ) -> Result<Vec<RunnerField>, String> {
     let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
     let mut fields = collect_state_fields(items);
+    // 2026-09-02: arrays planned as images in ANY kernel are device-image
+    // resident — excluded from the SSBO projection (the blob's SSBO struct
+    // excluded them via set_image_plans; the field table must agree).
+    let planned: std::collections::HashSet<&str> = image_plans
+        .values()
+        .flat_map(|v| v.iter().map(|p| p.array.as_str()))
+        .collect();
+    fields.retain(|f| !planned.contains(f.name.as_str()));
     fields.sort_by(|a, b| a.name.cmp(&b.name));
     // Device offsets come from the ONE layout rule the kernel also uses
     // (vec4-eligible arrays 16B-aligned) — they can never drift.
@@ -300,7 +316,15 @@ pub fn emit_runner(
     int_bits: u64,
     kernels: &[RunnerKernel],
 ) -> Result<String, String> {
-    let fields = ssbo_layout(program, universe, int_bits)?;
+    let fields = ssbo_layout(
+        program,
+        universe,
+        int_bits,
+        &kernels
+            .iter()
+            .map(|k| (k.name.clone(), k.image_plans.clone()))
+            .collect(),
+    )?;
     // Module consts (literals only) usable in conditions, counts and bodies.
     let mut consts: std::collections::HashMap<String, Expr> = Default::default();
     for item in program {
@@ -493,6 +517,10 @@ pub fn build_kernels(
     universe: &TypeUniverse,
     int_bits: u64,
     entries: &std::collections::HashMap<String, AccelEntry>,
+    image_plans: &std::collections::HashMap<
+        String,
+        Vec<crate::analysis::image_storage::ImageStoragePlan>,
+    >,
 ) -> Result<Vec<RunnerKernel>, String> {
     let mut out = Vec::new();
     // .abv is PURE GPU: every eligible body is a kernel. The Gpu/Probe/Cpu
@@ -532,10 +560,15 @@ pub fn build_kernels(
                     _ => false,
                 }
             };
-        crate::backend::spirv::kernel::emit_kernel(&mut sb, "main", &e.shape, program, cooperative)?;
+        let kplans: Vec<crate::analysis::image_storage::ImageStoragePlan> =
+            image_plans.get(name).cloned().unwrap_or_default();
+        crate::backend::spirv::kernel::emit_kernel(
+            &mut sb, "main", &e.shape, program, cooperative, &kplans,
+        )?;
         out.push(RunnerKernel {
             name: name.clone(),
             spirv: sb.build()?,
+            image_plans: kplans,
             index_var: e.shape.index_var.clone(),
             count_expr: e.shape.count_expr.clone().unwrap_or(Expr::Decimal(0)),
             work_cols: e.shape.work_cols,
@@ -753,7 +786,15 @@ pub fn prepare_run(
     int_bits: u64,
     kernels: &[RunnerKernel],
 ) -> Result<RunProgram, String> {
-    let fields = ssbo_layout(items, universe, int_bits)?;
+    let fields = ssbo_layout(
+        items,
+        universe,
+        int_bits,
+        &kernels
+            .iter()
+            .map(|k| (k.name.clone(), k.image_plans.clone()))
+            .collect(),
+    )?;
 
     // Module consts (name -> literal) for count folding.
     let mut consts: HashMap<String, i64> = HashMap::new();

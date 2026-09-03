@@ -213,15 +213,29 @@ fn module_consts(items: &[TopLevel]) -> HashMap<String, i64> {
     out
 }
 
-/// Array state fields → (element type, element count).
+/// Array state fields → (element type, element count). Handles BOTH
+/// top-level forms — the parser emits `let x: T[N];` as Statement(Let),
+/// hand-built fixtures as StateDecl (the same dual form
+/// collect_state_fields handles; missing an arm silently drops the
+/// field from every plan).
 fn state_arrays(items: &[TopLevel]) -> HashMap<String, (Type, i64)> {
     let mut out = HashMap::new();
     for item in items {
-        if let TopLevel::StateDecl(sd) = item {
-            if let Type::Vector(elem, dims) = &sd.ty {
-                if let Some(Dimension::Anonymous(n)) = dims.first() {
-                    out.insert(sd.name.clone(), ((**elem).clone(), *n as i64));
-                }
+        let (name, ty): (String, Type) = match item {
+            TopLevel::StateDecl(sd) => (sd.name.clone(), sd.ty.clone()),
+            TopLevel::Statement(stmt) => match stmt.as_ref() {
+                Statement::Let {
+                    name,
+                    ty: Some(ty),
+                    ..
+                } => (name.clone(), ty.clone()),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        if let Type::Vector(elem, dims) = ty {
+            if let Some(Dimension::Anonymous(n)) = dims.first() {
+                out.insert(name, ((*elem).clone(), *n as i64));
             }
         }
     }
