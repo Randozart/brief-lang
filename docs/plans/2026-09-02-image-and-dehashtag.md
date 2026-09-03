@@ -334,3 +334,27 @@ max_err 0.0; img[0]=1.0, img[N-1]=32768.5 on the x+1 fixture).
 - brievc run (the in-process Rust machine) has no image readback yet —
   image kernels through `brievc run` run but don't read images back;
   the C runner/harness path is the verified surface.
+
+---
+
+## Step 5 landed (2026-09-02) — MILESTONE COMPLETE
+
+The ray-through-image gate: `ray_texel.abv` renders the identical scene
+and folds to Rec.601 luminance, writing ONE R32Float texel per pixel
+through the full device image path (OpImageWrite → VkImage →
+CopyImageToBuffer → host state).
+
+**Gate: max_lum_err 4.79e-05** (f32 device vs f64 reference).
+**0.176 ms/frame — 11805 Mrays/s — 487× single-thread CPU.**
+
+Image vs SSBO on the same scene: the image path writes 8.3 MB of texels
+vs the SSBO path's 24.9 MB of 3-float pixels → 0.176 ms vs 0.246 ms
+wall — the write-traffic reduction is the whole difference (same
+compute). The texel format is doing exactly what the primitive design
+predicted: the element type carries the format; the storage strategy
+buys the bandwidth.
+
+Both `spirv_image_storage` gate states verified; the knob ships default
+OFF (opt-in) pending a promotion benchmark. Harness:
+`benchmarks/gpu/ray_texel_check.c` (gate 1e-3, PPM-free — the
+luminance array IS the artifact).

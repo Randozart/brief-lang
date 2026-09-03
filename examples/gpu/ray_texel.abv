@@ -1,0 +1,144 @@
+// ray.abv — deterministic raytracer kernel (plan 2026-09-02-graphics-ray-
+// and-images, Milestone A): 1920×1080 = 2,073,600 work items, one pixel
+// each. Scene: three spheres + ground plane, one directional light, sky
+// gradient. No RNG — the correctness gate is the image itself (the C
+// harness re-renders in f64 and diffs every channel).
+//
+// All control flow is two-way value selection (`match cond { true => …,
+// false => … }`) — the form the SPIR-V kernel surface lowers to structured
+// OpSelectionMerge + OpPhi (2026-09-02). Nearest-hit priority is an exact
+// A-over-B-over-C-over-plane chain; no ties are possible (distinct
+// spheres). Lambert clamp = max(l, 0) = (l + Fabs#(l)) / 2.
+//
+// Texel variant (plan 2026-09-02-image-and-dehashtag, step 5): the color
+// folds to Rec.601 luminance and writes a single R32Float texel per pixel
+// — the image storage path's gate. Fields: i (counter), lum (R32[W·H],
+// one affine write lum[i]). Idempotent: separate destination.
+const W: Int = 1920;
+const H: Int = 1080;
+const N: Int = 2073600;
+
+type R32: Float {
+    spec Bits: 32;
+    spec Format: R32Float;
+};
+
+let i: Int = 0;
+let lum: R32[2073600];
+
+async node render_lum [i < N][i == N] {
+    let pix: Int = i % W;
+    let py: Int = i / W;
+    let u: Float = pix as Float / 1919.0;
+    let v: Float = py as Float / 1079.0;
+    let sx: Float = (u * 2.0 - 1.0) * 1.7778;
+    let sy: Float = 1.0 - v * 2.0;
+    // Primary ray d = normalize(sx, sy, 1) from o = (0, 0, -3).
+    let inv: Float = 1.0 / Sqrt#(sx * sx + sy * sy + 1.0);
+    let dx: Float = sx * inv;
+    let dy: Float = sy * inv;
+    let dz: Float = inv;
+    let big: Float = 1.0e30;
+
+    // Sphere A: c = (-0.6, 0.1, 2.0), r = 0.7
+    let ax: Float = 0.6;
+    let ay: Float = 0.0 - 0.1;
+    let az: Float = -3.0 - 2.0;
+    let abh: Float = ax * dx + ay * dy + az * dz;
+    let acc: Float = ax * ax + ay * ay + az * az - 0.49;
+    let adisc: Float = abh * abh - acc;
+    let at: Float = match adisc >= 0.0 { true => 0.0 - abh - Sqrt#(adisc), false => big };
+
+    // Sphere B: c = (0.7, -0.2, 2.6), r = 0.5
+    let bx: Float = 0.0 - 0.7;
+    let by: Float = 0.2;
+    let bz: Float = -3.0 - 2.6;
+    let bbh: Float = bx * dx + by * dy + bz * dz;
+    let bcc: Float = bx * bx + by * by + bz * bz - 0.25;
+    let bdisc: Float = bbh * bbh - bcc;
+    let bt: Float = match bdisc >= 0.0 { true => 0.0 - bbh - Sqrt#(bdisc), false => big };
+
+    // Sphere C: c = (0.1, 0.75, 3.4), r = 0.4
+    let cx: Float = 0.0 - 0.1;
+    let cy: Float = 0.0 - 0.75;
+    let cz: Float = -3.0 - 3.4;
+    let cbh: Float = cx * dx + cy * dy + cz * dz;
+    let ccc: Float = cx * cx + cy * cy + cz * cz - 0.16;
+    let cdisc: Float = cbh * cbh - ccc;
+    let ct: Float = match cdisc >= 0.0 { true => 0.0 - cbh - Sqrt#(cdisc), false => big };
+
+    // Ground plane y = -1: oy = 0, t = -1 / dy, hit only looking down.
+    let pt: Float = match dy < 0.0 { true => 0.0 - 1.0 / dy, false => big };
+
+    // Nearest hit: comparison-based min (the arithmetic min
+    // (a+b-|a-b|)/2 catastrophically cancels when a=1e30 and b=1.8 in
+    // f32 — the sentinel swallows real hits). Exact priority chain
+    // A > B > C > plane; no ties between distinct spheres.
+    let tmin0: Float = match at < bt { true => at, false => bt };
+    let tmin1: Float = match tmin0 < ct { true => tmin0, false => ct };
+    let tmin: Float = match tmin1 < pt { true => tmin1, false => pt };
+    let hitA2: Bool = match at < big * 0.5 { true => at <= tmin, false => false };
+    let hitB: Bool = match bt < big * 0.5 { true => bt <= tmin, false => false };
+    let hitC: Bool = match ct < big * 0.5 { true => ct <= tmin, false => false };
+    let hitP: Bool = match pt < big * 0.5 { true => pt <= tmin, false => false };
+
+    // Sphere A shading: p = o + at*d, n = (p - cA) / 0.7
+    let apx: Float = at * dx;
+    let apy: Float = at * dy;
+    let apz: Float = -3.0 + at * dz;
+    let anx: Float = (apx + 0.6) / 0.7;
+    let any: Float = (apy - 0.1) / 0.7;
+    let anz: Float = (apz - 2.0) / 0.7;
+    let alam0: Float = anx * 0.4969 + any * 0.7950 - anz * 0.3479;
+    let alam: Float = (alam0 + Fabs#(alam0)) * 0.5;
+    let ar: Float = 0.9 * alam;
+    let ag: Float = 0.25 * alam;
+    let ab: Float = 0.2 * alam;
+
+    // Sphere B shading
+    let bpx: Float = bt * dx;
+    let bpy: Float = bt * dy;
+    let bpz: Float = -3.0 + bt * dz;
+    let bnx: Float = (bpx - 0.7) / 0.5;
+    let bny: Float = (bpy + 0.2) / 0.5;
+    let bnz: Float = (bpz - 2.6) / 0.5;
+    let blam0: Float = bnx * 0.4969 + bny * 0.7950 - bnz * 0.3479;
+    let blam: Float = (blam0 + Fabs#(blam0)) * 0.5;
+    let br: Float = 0.2 * blam;
+    let bg: Float = 0.4 * blam;
+    let bb: Float = 0.9 * blam;
+
+    // Sphere C shading
+    let cpx: Float = ct * dx;
+    let cpy: Float = ct * dy;
+    let cpz: Float = -3.0 + ct * dz;
+    let cnx: Float = (cpx - 0.1) / 0.4;
+    let cny: Float = (cpy - 0.75) / 0.4;
+    let cnz: Float = (cpz - 3.4) / 0.4;
+    let clam0: Float = cnx * 0.4969 + cny * 0.7950 - cnz * 0.3479;
+    let clam: Float = (clam0 + Fabs#(clam0)) * 0.5;
+    let cr: Float = 0.9 * clam;
+    let cg: Float = 0.75 * clam;
+    let cb: Float = 0.15 * clam;
+
+    // Plane: flat lambert, n = (0, 1, 0), lam = Ly = 0.795 constant
+    let pr: Float = 0.35 * 0.795;
+    let pg: Float = 0.35 * 0.795;
+    let pb: Float = 0.4 * 0.795;
+
+    // Sky gradient by ray elevation dy: horizon (0.8, 0.85, 0.9) to
+    // zenith (0.35, 0.55, 0.85).
+    let f: Float = dy * 0.5 + 0.5;
+    let sr: Float = 0.8 - 0.45 * f;
+    let sg: Float = 0.85 - 0.30 * f;
+    let sb: Float = 0.9 - 0.05 * f;
+
+    // Priority: A > B > C > plane > sky. Nested exact selection.
+    let r1: Float = match hitA2 { true => ar, false => match hitB { true => br, false => match hitC { true => cr, false => match hitP { true => pr, false => sr } } } };
+    let g1: Float = match hitA2 { true => ag, false => match hitB { true => bg, false => match hitC { true => cg, false => match hitP { true => pg, false => sg } } } };
+    let b1: Float = match hitA2 { true => ab, false => match hitB { true => bb, false => match hitC { true => cb, false => match hitP { true => pb, false => sb } } } };
+
+    lum[i] = (0.299 * r1 + 0.587 * g1 + 0.114 * b1) as R32;
+    i = i + 1;
+    term;
+};

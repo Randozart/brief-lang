@@ -185,6 +185,7 @@ applied to the benchmark suite itself:
 | `pairs.abv` | 2D dispatch infra | grid geometry | ✅ infra |
 | stencil (neighbor + boundary) | local windows | needs guarded bodies or .bv+accel lane | 📝 deferred — SPIR-V rejects when/[]; gather fills the non-contiguous slot |
 | `ray.abv` + `ray_bench` | per-pixel raytracer | divergence + transcendental shading | ✅ 1.01e-04 gate, 0.246ms, 8437 Mrays/s = 436× CPU (plan 2026-09-02-graphics-ray-and-images) |
+| `ray_texel.abv` + `ray_texel_check` | SAME ray through the device IMAGE path | texel-write bandwidth + the image stack's gate | ✅ 4.79e-05 gate, 0.176ms, 11805 Mrays/s = 487× CPU; image vs SSBO: fewer write bytes (8.3 vs 24.9MB) → faster wall (plan 2026-09-02-image-and-dehashtag) |
 
 Doctrine notes:
 - Every entry gates on correctness BEFORE timing; the C harness is
