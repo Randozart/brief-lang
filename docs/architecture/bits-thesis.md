@@ -5,6 +5,15 @@
 **Status:** Foundational  
 **Applies to:** Briev compiler core architecture, interpreter, type system, backends
 
+> **2026-09-02 (shape law):** this thesis predates the de-hashtagged
+> fundamentals. In every example below, read a type-declaration parent
+> `#Int`/`#String`/`#Float` as the plain name (`Int`/`String`/`Float`)
+> and `!> bits: N` as `spec Bits: N` (§8.2). The `#` survives only as
+> backend directives in op signatures and cast edges
+> (`op Add(#Float): …`, `axiom CastTo(#Float<IEEE754>)`), plus the
+> casting graph's internal category keys. The shape law:
+> `type Int32: Int { spec Bits: 32; };` — AGENTS.md pillar.
+
 ---
 
 ## 2026-07-20 Update: Hashword Protocol Architecture

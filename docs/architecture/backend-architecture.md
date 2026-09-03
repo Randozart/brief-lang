@@ -111,7 +111,7 @@ if cat == "String" { /* emit SSO string */ }
 ```
 
 **Why this matters:**
-1. A user-defined `type MyString: #String` would NOT match `name == "String"` but WOULD match `Cast.#String`. Programs using custom String-like types silently produce wrong codegen.
+1. A user-defined `type MyString: String` would NOT match `name == "String"` but WOULD match `Cast.String`. Programs using custom String-like types silently produce wrong codegen.
 2. Every name match is a place where type system evolution must be manually tracked.
 3. The backend was refactored to protocol-based dispatch (Phases 0-3). Name matches are leftovers.
 
@@ -119,11 +119,11 @@ if cat == "String" { /* emit SSO string */ }
 
 ```
 Normalizer (normalizer.rs)
-  │  Injects Cast.#<Category> properties during universe registration
-  │  e.g., type String: #String → { "Cast.#String": true }
+  │  Injects Cast.<Category> properties during universe registration
+  │  e.g., type String: String → { "Cast.String": true }
   ▼
 Casting Graph (graph.rs)
-  │  type_to_protocol(universe, ty) — queries Cast.#<Category> properties
+  │  type_to_protocol(universe, ty) — queries Cast.<Category> properties
   │  resolve_llvm_type(universe, ty, int_bits) — resolves LLVM type string
   ▼
 LLVM Backend
@@ -675,7 +675,7 @@ These are resolved by `resolve_llvm_type()` in the casting graph. Never hardcode
 
 1. Define the type in stdlib `.bv` with protocol membership:
    ```briev
-   type MyType: #String { !> bytes: 16; op CastTo(#Int): my_parse(#L); };
+   type MyType: String { spec Bytes: 16; op CastTo(#Int): my_parse(#L); };
    ```
 2. If a new protocol category is needed, add a lane in `graph.rs::new()`:
    ```rust

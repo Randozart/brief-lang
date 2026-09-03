@@ -171,7 +171,9 @@ clang -O3 -flto -march=native -ffast-math -fdata-sections -ffunction-sections \
 
 - **Types are protocol + metadata.** Nothing else: no cached LLVM type, no
   precomputed layout, no name-based lookup.
-  `type Int32: #Int { !> bits: 32; };` is the complete definition. Everything
+  `type Int32: Int { spec Bits: 32; };` is the complete definition (plain
+  parent name — fundamentals carry no `#` in type positions; physical
+  metadata is `spec`, §8.2). Everything
   else is derived from `(protocol, metadata)` by the casting graph at codegen
   time.
 - **The casting graph is the single source of truth.** Cast paths

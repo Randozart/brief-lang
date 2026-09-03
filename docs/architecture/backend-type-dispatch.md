@@ -33,7 +33,7 @@ Every type is `Bits(N)` at minimum:
 ```briev
 type Int : Bits { !> maxbits: 64; !> ctd: Int; !> alu: Int; op Add ~> "int.add"; }
 type Float : Bits { !> maxbits: 32; !> ctd: Float; !> alu: Float; op Add ~> "float.add"; }
-type String : #String { prop Size: chars(#Lh); prop Bytes: byte_len(#Lh); };
+type String : String { prop Size: chars(#Lh); prop Bytes: byte_len(#Lh); };
 ```
 
 - **`!> maxbits: N`** — Every backend reads this. `maxbits=64` = 64-bit storage. For struct types with `fields`, maxbits is derived from field type sizes (summed). Explicit `!> maxbits: N` overrides the derivation.
