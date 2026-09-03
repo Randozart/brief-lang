@@ -1381,7 +1381,7 @@ mod tests {
                 doc: None,
             }),
         ];
-        for (intrinsic, gl_name) in [("Exp#", "Exp"), ("Sqrt#", "Sqrt")] {
+        for (intrinsic, gl_name) in [("Exp#", "Exp"), ("Sqrt#", "Sqrt"), ("Fabs#", "FAbs")] {
             let program = program_for(intrinsic);
             let txn_stmts = match &program.last().unwrap() {
                 TopLevel::Transaction(t) => t.body.clone(),

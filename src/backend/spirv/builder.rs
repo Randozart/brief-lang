@@ -250,6 +250,31 @@ impl SpirvBuilder {
         id
     }
 
+    /// Emit `GLSL.std.450 FAbs(x)` — single-argument elementwise absolute
+    /// value (2026-09-02: shading clamps, max(a, 0) = (a + |a|) / 2).
+    /// Same lazy-import mechanism as Exp/Sqrt.
+    pub fn glsl_fabs(&mut self, result_ty: Word, x: Word) -> Word {
+        let id = self.gen_id();
+        let set = match self.glsl_set {
+            Some(s) => s,
+            None => {
+                let s = self.builder.ext_inst_import("GLSL.std.450");
+                self.glsl_set = Some(s);
+                s
+            }
+        };
+        self.builder
+            .ext_inst(
+                result_ty,
+                Some(id),
+                set,
+                spirv::GLOp::FAbs as u32,
+                [Operand::IdRef(x)],
+            )
+            .expect("FAbs emission inside a function block");
+        id
+    }
+
     // ── Briev type lowering (typed, internally deduped by rspirv) ───────
 
     /// Lower a Briev type to a SPIR-V type id.

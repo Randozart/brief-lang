@@ -353,7 +353,8 @@ fn expr_is_pure(expr: &Expr) -> bool {
                 || name == "GetGlobalId#"
                 || name == "GetLocalId#"
                 || name == "Exp#"
-                || name == "Sqrt#" =>
+                || name == "Sqrt#"
+                || name == "Fabs#" =>
         {
             args.iter().all(expr_is_pure)
         }
