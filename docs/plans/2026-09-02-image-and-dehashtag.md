@@ -232,3 +232,70 @@ green at commit `step-2`.
 Tree clean, 2045 green. Step 3 (SPIR-V lowering) → step 4 (runtime
 VkImage + download) → step 5 (ray-through-image gate + benchmark row +
 docs) remain, all scoped above.
+
+---
+
+## Step 3 landed (2026-09-02). Step 4 ABI decisions + implementation notes
+
+Step 3 is committed and device-shaped: the blob partitions the SSBO
+(planned arrays out), binds storage images at set 0 binding 1+, writes
+via OpImageWrite with plan-derived coords — spirv-val clean, guarded by
+`image_plan_partitions_ssbo_and_writes_texel` (which goes through the
+REAL pipeline: compile_to_typed + spirv normalizer + analyze_program —
+the old `analyze()` test helper builds a fresh universe and silently
+drops source-type registrations; fundamentals are seeded everywhere,
+source types are not).
+
+### Step 4 (C runtime) — decisions made here, implementation next session
+
+1. **Do NOT extend BrievField.** The .bv descriptor constants (the LLVM
+   `%briev.field` emitter) and every C harness construct it positionally.
+   Add a parallel table instead:
+   ```c
+   typedef struct {
+       const char* name;
+       uint64_t host_offset;   // flat %State array destination
+       uint32_t width, height;
+       uint32_t format;        // 0 = R32Float (extend with the table)
+   } BrievImageDesc;
+   ```
+   BrievKernelDesc GROWS at the END: `uint32_t n_images; const
+   BrievImageDesc* images;` — positional C initializers zero-fill the
+   tail (all existing harnesses still compile); the .bv `.ll` constant
+   emitter (llvm/kernel.rs kernel_desc constants) must append the two
+   zero members to its `%briev.kernel` constants and widen the type
+   declaration in lockstep (kernel.rs `%briev.kernel = type {...}`).
+2. **runner.rs emit_runner**: emit the BrievImageDesc table from
+   RunnerKernel.image_plans (host_offset from the state layout — NOTE:
+   the offset must be computed with the image array INCLUDED in the host
+   layout but EXCLUDED from the SSBO projection — today ssbo_layout
+   drops planned arrays BEFORE offsets are computed, so host offsets for
+   fields AFTER an image array are already image-inclusive ✓ verify).
+3. **Vulkan driver** (briev_dev_vulkan.c create_kernel):
+   - descriptor set layout gains binding 1..n = STORAGE_IMAGE (the
+     layout is per-kernel from n_fields — thread n_images through);
+   - per image: VkImage (2D, R32Float, width×height, USAGE
+     STORAGE_IMAGE|TRANSFER_SRC), VkImageView (2D), initial layout
+     GENERAL (a one-time transition or create-preinitialized + barrier
+     in the first command buffer);
+   - writeDescriptorSet with VkDescriptorImageInfo{imageView,
+     VK_IMAGE_LAYOUT_GENERAL}.
+4. **launch_dev2d**: before dispatch, if the command buffer is the first
+   for this kernel, barrier UNDEFINED→GENERAL for each image (the
+   storage writes need GENERAL).
+5. **download**: images are NOT in fields[], so the existing
+   unpack loop never touches them; add: for each BrievImageDesc —
+   barrier GENERAL→TRANSFER_SRC, vkCmdCopyImageToBuffer into a mapped
+   linear scratch (width*height*4), TRANSFER_SRC→GENERAL, then memcpy
+   scratch → state + host_offset. The staging window is sized from
+   fields[] only — the scratch is a separate small allocation.
+6. **Gate (step 5)**: ray.abv variant with `spec Format: R32Float` on a
+   Float child array; harness builds the BrievImageDesc; compare the
+   image path's download against the SSBO path's pixels at 1e-6;
+   benchmark row (image vs SSBO write bandwidth, same kernel shape).
+
+### Session checkpoint
+
+Tree clean at `feat(spirv): image storage lowering` — 2047 green. All
+compiler-side image machinery is in place behind `spirv_image_storage`
+(default OFF); steps 4-5 are the runtime + gate, scoped above.
