@@ -1,0 +1,18 @@
+// gather_8.abv — strided gather: dst[i] = src[i * 8] for i in 0..N.
+// Each work item reads from a non-sequential location (stride 8 elements =
+// 32 bytes = one cache line apart) and writes contiguously. This tests
+// DRAM's random-read throughput — the complement of saxpy's sequential
+// stream and the scatter pattern. Three fields (i/src/dst) — the proven
+// shape. Idempotent (separate src/dst), so pass count cannot corrupt
+// the gate. N = 16.7M; src must be >= N*8 elements to avoid OOB.
+const N: Int = 16777216;
+
+let i: Int = 0;
+let src: Float[134217728];
+let dst: Float[16777216];
+
+async node gather [i < N][i == N] {
+    dst[i] = src[i * 8];
+    i = i + 1;
+    term;
+};
