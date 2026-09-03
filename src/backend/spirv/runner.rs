@@ -77,6 +77,18 @@ pub struct RunnerKernel {
 /// The SSBO layout EXACTLY as the kernel sees it (name-sorted, real element
 /// widths) — derived with the same builder helpers the emitter uses so the
 /// two can never drift.
+pub struct SsboLayout {
+    /// SSBO-resident fields (image arrays excluded) — the BrievField table.
+    pub fields: Vec<RunnerField>,
+    /// Image-resident arrays with their HOST offsets (the BrievImageDesc
+    /// table's host_offset). proj_offset unused.
+    pub images: Vec<RunnerField>,
+    /// The FULL host state size — image arrays count (the host %State
+    /// still holds the flat arrays; only the device projection excludes
+    /// them).
+    pub state_bytes: u64,
+}
+
 pub fn ssbo_layout(
     items: &[TopLevel],
     universe: &TypeUniverse,
@@ -85,26 +97,40 @@ pub fn ssbo_layout(
         String,
         Vec<crate::analysis::image_storage::ImageStoragePlan>,
     >,
-) -> Result<Vec<RunnerField>, String> {
+) -> Result<SsboLayout, String> {
     let mut sb = SpirvBuilder::new().with_universe(universe, int_bits);
     let mut fields = collect_state_fields(items);
     // 2026-09-02: arrays planned as images in ANY kernel are device-image
     // resident — excluded from the SSBO projection (the blob's SSBO struct
     // excluded them via set_image_plans; the field table must agree).
-    let planned: std::collections::HashSet<&str> = image_plans
-        .values()
-        .flat_map(|v| v.iter().map(|p| p.array.as_str()))
-        .collect();
-    fields.retain(|f| !planned.contains(f.name.as_str()));
+    // The HOST layout KEEPS them: the host %State still holds the flat
+    // arrays, so host offsets of every field after an image array must
+    // account for its bytes — the offset walk covers ALL fields.
+    let mut plans_by_array: std::collections::HashMap<&str, u64> =
+        std::collections::HashMap::new(); // array -> element count (w*h)
+    for v in image_plans.values() {
+        for p in v {
+            plans_by_array.insert(p.array.as_str(), p.width as u64 * p.height as u64);
+        }
+    }
     fields.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut buffer_fields: Vec<crate::backend::spirv::lower::StateField> = Vec::new();
+    for f in &fields {
+        if !plans_by_array.contains_key(f.name.as_str()) {
+            buffer_fields.push(f.clone());
+        }
+    }
     // Device offsets come from the ONE layout rule the kernel also uses
-    // (vec4-eligible arrays 16B-aligned) — they can never drift.
+    // (vec4-eligible arrays 16B-aligned) — they can never drift. Computed
+    // over the BUFFER fields only (the blob's SSBO struct).
     let proj_offsets = crate::backend::spirv::lower::FnLowerer::projection_offsets(
-        &mut sb, &fields,
+        &mut sb, &buffer_fields,
     )?;
-    let mut out = Vec::with_capacity(fields.len());
+    let mut out = Vec::new();
+    let mut images = Vec::new();
     let mut offset: u64 = 0;
-    for (fidx, f) in fields.into_iter().enumerate() {
+    let mut proj_idx: usize = 0;
+    for f in fields.into_iter() {
         let (elem, count, is_array, is_float) = match &f.ty {
             Type::Vector(inner, dims) => {
                 let elems: u64 = dims
@@ -125,18 +151,37 @@ pub fn ssbo_layout(
                 (e, 1, false, flt)
             }
         };
-        out.push(RunnerField {
-            name: f.name.clone(),
-            offset,
-            proj_offset: proj_offsets[fidx] as u64,
-            elem_bytes: elem,
-            count,
-            is_array,
-            type_is_float: is_float,
-        });
+        if let Some(&img_count) = plans_by_array.get(f.name.as_str()) {
+            // Image-resident: host offset only; the texel count comes from
+            // the plan (w*h — the R32F texel is 4 bytes).
+            images.push(RunnerField {
+                name: f.name.clone(),
+                offset,
+                proj_offset: 0,
+                elem_bytes: 4,
+                count: img_count,
+                is_array: true,
+                type_is_float: true,
+            });
+        } else {
+            out.push(RunnerField {
+                name: f.name.clone(),
+                offset,
+                proj_offset: proj_offsets[proj_idx] as u64,
+                elem_bytes: elem,
+                count,
+                is_array,
+                type_is_float: is_float,
+            });
+            proj_idx += 1;
+        }
         offset += elem as u64 * count;
     }
-    Ok(out)
+    Ok(SsboLayout {
+        state_bytes: offset,
+        fields: out,
+        images,
+    })
 }
 
 fn c_ident(name: &str) -> String {
@@ -316,7 +361,7 @@ pub fn emit_runner(
     int_bits: u64,
     kernels: &[RunnerKernel],
 ) -> Result<String, String> {
-    let fields = ssbo_layout(
+    let layout = ssbo_layout(
         program,
         universe,
         int_bits,
@@ -325,6 +370,7 @@ pub fn emit_runner(
             .map(|k| (k.name.clone(), k.image_plans.clone()))
             .collect(),
     )?;
+    let fields = layout.fields;
     // Module consts (literals only) usable in conditions, counts and bodies.
     let mut consts: std::collections::HashMap<String, Expr> = Default::default();
     for item in program {
@@ -334,7 +380,7 @@ pub fn emit_runner(
             }
         }
     }
-    let total: u64 = fields.iter().map(|f| f.elem_bytes as u64 * f.count).sum();
+    let total: u64 = layout.state_bytes;
     let mut out = String::new();
 
     out.push_str("// Generated by brievc - .abv standalone runner. Do not edit.\n");
@@ -379,14 +425,46 @@ pub fn emit_runner(
         ));
     }
     out.push_str("};\n");
+    // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): the image
+    // tables — one shared table per kernel set (the kernel's SSBO excluded
+    // image arrays; the host %State still holds the flat arrays).
+    // The image table's host offsets come from the layout (image arrays
+    // sit in the HOST state layout; the projection excludes them); the
+    // width/height come from the plans.
+    let mut all_images: Vec<(&RunnerField, u32, u32)> = Vec::new(); // (field, w, h)
+    for img in &layout.images {
+        for k in kernels {
+            if let Some(p) = k.image_plans.iter().find(|p| p.array == img.name) {
+                all_images.push((img, p.width as u32, p.height as u32));
+                break;
+            }
+        }
+    }
+    if all_images.is_empty() {
+        // Zero-size arrays are invalid C — a dummy row every kernel
+        // ignores (its n_images is 0).
+        out.push_str("static BrievImageDesc images[1] = { { 0, 0, 0, 0, 0 } };\n");
+    } else {
+        out.push_str("static BrievImageDesc images[] = {\n");
+        for (img, w, h) in &all_images {
+            out.push_str(&format!(
+                "    {{ \"{}\", {}, {}, {}, {} }},\n",
+                img.name, img.offset, w, h, 1u32 /* BRIEV_IMAGE_FORMAT_R32F */
+            ));
+        }
+        out.push_str("};\n");
+    }
     out.push_str("static BrievKernelDesc descs[] = {\n");
     for (i, k) in kernels.iter().enumerate() {
+        // host_offset patch: the runner emits the table with placeholder
+        // offsets, then computes them from the state layout below.
         out.push_str(&format!(
-            "    {{ \"{}\", k{}, k{}_len, {}, fields }},\n",
+            "    {{ \"{}\", k{}, k{}_len, {}, fields, {}, images }},\n",
             c_ident(&k.name),
             i,
             i,
-            fields.len()
+            fields.len(),
+            k.image_plans.len()
         ));
     }
     out.push_str(&format!(
@@ -786,7 +864,7 @@ pub fn prepare_run(
     int_bits: u64,
     kernels: &[RunnerKernel],
 ) -> Result<RunProgram, String> {
-    let fields = ssbo_layout(
+    let layout = ssbo_layout(
         items,
         universe,
         int_bits,
@@ -795,6 +873,7 @@ pub fn prepare_run(
             .map(|k| (k.name.clone(), k.image_plans.clone()))
             .collect(),
     )?;
+    let fields = layout.fields;
 
     // Module consts (name -> literal) for count folding.
     let mut consts: HashMap<String, i64> = HashMap::new();
@@ -839,10 +918,9 @@ pub fn prepare_run(
         });
     }
 
-    let state_bytes = fields.iter().map(|f| f.elem_bytes as u64 * f.count).sum();
     Ok(RunProgram {
         fields,
-        state_bytes,
+        state_bytes: layout.state_bytes,
         kernels: run_kernels,
     })
 }

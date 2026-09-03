@@ -1459,8 +1459,11 @@ async node fill [i < N][i == N] {
     term;
 };
 "#;
-        let path = "examples/gpu/_img_pipeline_test.abv";
-        std::fs::write(path, src).expect("write fixture");
+        // The fixture name carries the sweep-exclusion prefix
+        // (conformance.rs class 3): the file exists only mid-test and a
+        // concurrent sweep would otherwise race it.
+        let path = format!("examples/gpu/briev_img_pipeline_test_{}.abv", std::process::id());
+        std::fs::write(&path, src).expect("write fixture");
         let opts = crate::pipeline::BuildOptions {
             run: false,
             config_dir: None,
@@ -1503,7 +1506,7 @@ async node fill [i < N][i == N] {
             accel_cpu_fallback: None,
         };
         let (mut items, mut universe) =
-            crate::pipeline::compile_to_typed(path, src, &opts).expect("pipeline");
+            crate::pipeline::compile_to_typed(&path, src, &opts).expect("pipeline");
         // The CLI normalizes (registering source types like R32 into the
         // universe) BEFORE the backend analysis — mirror that exactly.
         crate::backend::spirv::normalizer::normalize(&mut items, &mut universe, 64)
@@ -1528,7 +1531,7 @@ async node fill [i < N][i == N] {
             &plans,
         )
         .expect("image kernel build");
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(&path);
         assert_eq!(kernels.len(), 1);
         assert_eq!(kernels[0].image_plans, vec![plan.clone()]);
         let asm = validate_and_disassemble(&kernels[0].spirv, "image_plan");

@@ -192,7 +192,16 @@ pub fn discover_active_sources() -> Vec<(PathBuf, SourceKind)> {
         // 2. lib/compiler/*.bv are the meta-circular tamer track's WIP —
         //    owned by that agent; coordinate before migrating.
         let is_tamer_wip = p.components().any(|c| c.as_os_str() == "compiler");
-        !is_glue_dbv && !is_tamer_wip
+        // 3. 2026-09-02: test-time generated fixtures (SPIR-V image tests)
+        //    are written mid-run and removed by their owning test — a
+        //    concurrent sweep can observe a partial file. The owning test
+        //    validates the fixture through the full pipeline.
+        let is_generated_fixture = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with("briev_img_pipeline_test_"))
+            .unwrap_or(false);
+        !is_glue_dbv && !is_tamer_wip && !is_generated_fixture
     });
     found
 }
