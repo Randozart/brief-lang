@@ -246,6 +246,10 @@ pub struct BuildOptions {
     pub sysquery_pairs: Vec<(String, String)>,
     /// 2026-07-23: Raw --sysquery-file paths (unresolved, for run_build).
     pub sysquery_files: Vec<String>,
+    /// 2026-09-02: Minimum work-item count for GPU dispatch. Shapes with
+    /// fewer work items fall to the CPU loop (--accel-cpu-fallback N).
+    /// None = no fallback (current default). Only applies to .bv accel paths.
+    pub accel_cpu_fallback: Option<u64>,
 }
 
 pub struct PreprocessedSource {
@@ -690,6 +694,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         view_bindings: vec![],
         ssr: false,
         dev: false,
+        accel_cpu_fallback: None,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");

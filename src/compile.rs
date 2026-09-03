@@ -1235,6 +1235,7 @@ fn codegen(
                 .with_shared_lib(opts.shared)
                 .with_library_mode(opts.library_mode)
                 .with_stack_threshold(opts.stack_threshold)
+                .with_accel_cpu_fallback(opts.accel_cpu_fallback)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_operator_defs(operator_defs)
@@ -1301,6 +1302,7 @@ fn codegen(
                 .with_alloc_strategies(alloc_strategies)
                 .with_needs_arena(needs_arena)
                 .with_stack_threshold(opts.stack_threshold)
+                .with_accel_cpu_fallback(opts.accel_cpu_fallback)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_operator_defs(operator_defs)
                 .with_cast_from_bit_overrides(cast_from_bit_overrides)
@@ -1394,6 +1396,7 @@ fn codegen(
                 .with_shared_lib(opts.shared)
                 .with_library_mode(opts.library_mode)
                 .with_stack_threshold(opts.stack_threshold)
+                .with_accel_cpu_fallback(opts.accel_cpu_fallback)
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_resolved_frgns(resolved_frgns)
@@ -2083,6 +2086,7 @@ node go [done == false][done == true] {
             view_bindings: vec![],
             ssr: false,
             dev: false,
+            accel_cpu_fallback: None,
         }
     }
 

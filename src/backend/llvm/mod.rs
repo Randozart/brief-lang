@@ -1395,6 +1395,14 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-09-02: Minimum work-item count for GPU dispatch. Shapes with
+    /// fewer work items fall to the CPU loop at the dispatch gate
+    /// (--accel-cpu-fallback N). None = no threshold (default).
+    pub fn with_accel_cpu_fallback(mut self, threshold: Option<u64>) -> Self {
+        self.ctx.accel_cpu_fallback = threshold;
+        self
+    }
+
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
         self.ctx.spec = Some(spec);
         self

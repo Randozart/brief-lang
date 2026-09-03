@@ -3943,6 +3943,29 @@ impl LlvmBackend {
         writeln!(out, "  br i1 %use, label %accel_gpu, label %accel_cpu").ok();
         writeln!(out, "accel_gpu:").ok();
         let work = self.emit_work_item_count(out, name);
+        // 2026-09-02 (--accel-cpu-fallback N, plan 2026-09-02-gpu-portfolio-and-fallback):
+        // shapes below the work-item threshold fall to the CPU loop. The
+        // NVIDIA 576.99 driver nondeterministically loses stores on small
+        // dispatches (BUGS.md) and a tiny grid cannot amortize the launch.
+        // Const-bound shapes fold the gate at compile time; runtime-bound
+        // shapes icmp+branch. Only the .bv mixed lane carries this — .abv
+        // stays GPU-only by charter.
+        let folded_to_cpu = matches!(
+            self.ctx.accel_cpu_fallback,
+            Some(threshold)
+                if work.parse::<u64>().map(|lit| lit < threshold).unwrap_or(false)
+        );
+        if folded_to_cpu {
+            writeln!(out, "  br label %accel_cpu").ok();
+        } else {
+            if let Some(threshold) = self.ctx.accel_cpu_fallback {
+                if work.parse::<u64>().is_err() {
+                    // Runtime-bound shape: gate at run time.
+                    writeln!(out, "  %wg_ok = icmp uge i64 {}, {}", work, threshold).ok();
+                    writeln!(out, "  br i1 %wg_ok, label %accel_dispatch, label %accel_cpu").ok();
+                    writeln!(out, "accel_dispatch:").ok();
+                }
+            }
         // 2026-09-01 (Track B): kernel-pinned programs use the RESIDENT path
         // (push dirty scalars, dispatch, pull written fields back) instead of
         // the full-copy launch (pack ALL fields, push, pull, unpack ALL).
@@ -3963,6 +3986,7 @@ impl LlvmBackend {
             writeln!(out, "  store i64 {}, ptr {}, align 8", work, gp).ok();
         }
         writeln!(out, "  ret void").ok();
+        } // folded_to_cpu else
         writeln!(out, "accel_cpu:").ok();
         writeln!(out, "  call void @txn_{}_cpu(ptr %state)", name).ok();
         // Track B coherence: the CPU body wrote HOST state — the VRAM
@@ -4078,7 +4102,12 @@ impl LlvmBackend {
         writeln!(out, "entry:").ok();
         writeln!(out, "  %v = call i32 @briev_accel_probe(").ok();
         writeln!(out, "    ptr @briev_accel_probe_cpu_{}, ptr @briev_accel_probe_gpu_{},", name, name).ok();
-        writeln!(out, "    ptr %state, i64 {}, i64 {}, double {:e}, double {:e},", state_size, tuning.accel_probe_k, tuning.accel_probe_tolerance, tuning.accel_probe_margin).ok();
+        //    {:?} (not {:e}): LLVM IR float literals must carry a decimal
+        //    point — `1e-4` parses as an integer token and fails clang/opt
+        //    ("integer constant must have integer type"); Rust's Debug
+        //    format prints 1e-4 as "0.0001" (round-trip shortest, always
+        //    with '.').
+        writeln!(out, "    ptr %state, i64 {}, i64 {}, double {:?}, double {:?},", state_size, tuning.accel_probe_k, tuning.accel_probe_tolerance, tuning.accel_probe_margin).ok();
         writeln!(out, "    ptr @briev_accel_gpu_ok_{})", name).ok();
         writeln!(out, "  store i32 %v, ptr @briev_accel_verdict_{}", name).ok();
         writeln!(out, "  ret void").ok();

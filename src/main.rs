@@ -97,6 +97,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --dump-traces            Print macro expansion traces after build", name);
     eprintln!("  {} build <file.bv> --diff                   Show macro changes (dry-run, no output)", name);
     eprintln!("  {} build <file.bv> --target <name>           Build for a specific target profile from briev.toml", name);
+    eprintln!("  {} build <file.bv> --accel-cpu-fallback <n>  Min work items for GPU dispatch; below n runs the CPU loop", name);
     eprintln!("  {} build <file.bv> --sysquery <key=value>    Override a SysQuery$ result (repeatable, highest priority)", name);
     eprintln!("  {} build <file.bv> --sysquery-file <path>    Load SysQuery$ overrides from a key=value file", name);
     eprintln!("  {} build <file.bv> --update-lockfile        Regenerate macro-lock.toml from plugin files", name);
@@ -244,6 +245,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut sysquery_pairs: Vec<(String, String)> = Vec::new();
     let mut sysquery_files: Vec<String> = Vec::new();
     let mut int_bits = 64u64;
+    let mut accel_cpu_fallback: Option<u64> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -316,6 +318,11 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             if int_bits != 8 && int_bits != 16 && int_bits != 32 && int_bits != 64 {
                 return Err(format!("--int-bits must be 8, 16, 32, or 64, got: {}", int_bits));
             }
+            i += 2;
+        } else if arg == "--accel-cpu-fallback" {
+            let val = args.get(i + 1).ok_or("--accel-cpu-fallback requires a number argument (min work items for GPU)")?;
+            accel_cpu_fallback = Some(val.parse()
+                .map_err(|_| format!("invalid --accel-cpu-fallback value: '{}'", val))?);
             i += 2;
         } else if arg == "--disable-plugin" {
             let name = args.get(i + 1).ok_or("--disable-plugin requires a plugin name argument")?;
@@ -446,6 +453,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         view_bindings: vec![],
         ssr: false,
         dev: false,
+        accel_cpu_fallback,
     })
 }
 
@@ -499,6 +507,7 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         view_bindings: vec![],
         ssr: false,
         dev: false,
+        accel_cpu_fallback: None,
     };
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;

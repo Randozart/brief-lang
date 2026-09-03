@@ -136,6 +136,9 @@ pub struct CompilerContext {
     /// 2026-09-01 (Track B): the whole program's accel kernels may use the
     /// resident launch path (all-readers-are-kernels proven per field).
     pub accel_resident_ok: bool,
+    /// 2026-09-02: Minimum work-item count for GPU dispatch (--accel-cpu-fallback).
+    /// Shapes with fewer work items fall to the CPU loop instead.
+    pub accel_cpu_fallback: Option<u64>,
 
     // MMIO & Schema
     pub mmio_fields: HashMap<String, u64>,
@@ -431,6 +434,7 @@ impl CompilerContext {
             collection_iterables: std::collections::HashSet::new(),
             has_reactor_tick: false,
             accel_resident_ok: false,
+            accel_cpu_fallback: None,
             state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,

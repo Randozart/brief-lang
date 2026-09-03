@@ -275,9 +275,14 @@ fn field_entry_ir(
     } else {
         (2u32, llvm_agg_size(ty), 1u64, 0u32)
     };
+    // 2026-09-02: field order MUST match the C BrievField layout
+    // (name, kind, host_offset, elem_bytes, count, is_write, proj_offset) —
+    // the old order slotted proj_offset at index 3, which misaligns the
+    // runtime's reads and fails opt/clang verification (element type
+    // mismatch at is_write).
     format!(
-        "%briev.field {{ ptr @str.briev.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i64 {}, i32 {} }}",
-        txn, name, kind, host_off, proj_off, elem_bytes, count, w
+        "%briev.field {{ ptr @str.briev.{}.{}, i32 {}, i64 {}, i64 {}, i64 {}, i32 {}, i64 {} }}",
+        txn, name, kind, host_off, elem_bytes, count, w, proj_off
     )
 }
 

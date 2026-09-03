@@ -1862,9 +1862,11 @@ fn test_accel_descriptors_emit() {
     assert!(ir.contains("@briev_accel_descs"), "descs table");
     assert!(ir.contains("declare i32 @briev_accel_init(ptr, i32)"), "init decl");
     assert!(ir.contains("declare i32 @briev_accel_launch(i32, ptr, i64)"), "launch decl");
-    // a: array, host_offset 0 (fidx 0), proj_offset 0 (a is first — already
-    // 16B-aligned), elem 4 (float), count 16, write.
-    assert!(ir.contains("i32 1, i64 0, i64 0, i64 4, i64 16, i32 1"), "field entry: {ir}");
+    // a: array, host_offset 0 (fidx 0), elem 4 (float), count 16, write,
+    // proj_offset 0 (a is first — already 16B-aligned). 2026-09-02: the
+    // field-entry order matches the C BrievField layout exactly
+    // (kind, host_offset, elem_bytes, count, is_write, proj_offset).
+    assert!(ir.contains("i32 1, i64 0, i64 4, i64 16, i32 1, i64 0"), "field entry: {ir}");
 }
 
 #[test]
