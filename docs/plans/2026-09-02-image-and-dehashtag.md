@@ -112,3 +112,65 @@ img[i] = color;               // → OpImageWrite(x = i % 1920, y = i / 1920)
 4. B1 items 1-2 (registry + graph)
 5. B1 items 3-4 (descriptor + lowering)
 6. B1 item 5 (runtime) 7 (gate) 8 (docs)
+
+---
+
+## SUPERSESSION (2026-09-02, later — user stopped the Image-category work)
+
+> The user challenged Part 2 mid-implementation: "Is image the right
+> primitive?" Verdict: **no**. Part 2's `Image` protocol category is
+> abandoned before any of its items shipped. Reasons (recorded so the
+> reasoning survives):
+>
+> 1. An Image fundamental grows the fundamental set with the hardware
+>    spec (samplers, acceleration structures next) — the set must stay
+>    closed around arithmetic.
+> 2. The house already answers this pattern: vec4 projection,
+>    materialization, tuple slots — device-side storage REALIZATIONS of
+>    plain types with zero type-system participation. An image is the
+>    same move.
+> 3. Rule 5: an Image type needs interpreter semantics; a plain array
+>    needs none — the CPU reference stays the flat buffer.
+> 4. Rule 2 verbatim: storage realization is one more codegen decision
+>    the compiler makes from the access pattern.
+
+### Revised B1 — texel + strategy (user-confirmed)
+
+- **Primitive**: the texel — an ordinary element type with `spec
+  Format` (§8.2 physical metadata). First slice: `type R32: Float {
+  spec Bits: 32; spec Format: R32Float; };`.
+- **Image-ness**: a frontend storage strategy (the vec4-projection
+  family): eligible when the element type carries `spec Format` AND the
+  kernel body computes `(i % K, i / K)` for a module const K AND the
+  count clears a config threshold. No plan → plain SSBO (every existing
+  program unchanged).
+- **VkImage**: a runtime implementation detail (readback/present) —
+  invisible to the language.
+- Supersedes the user's earlier multi-dim pick (the container type
+  dissolved; dims derive from the kernel's index math).
+
+### Work items (revised)
+
+0. Reverse the four uncommitted graph.rs hunks (Image category) via
+   targeted inverse edits; slim the parser registry to `Format` (Dims +
+   Access are container/resource-tier — wrong level under the texel
+   design).
+1. Verify a fundamental-child with `spec Format` registers the property
+   into the universe (the `bits` path).
+2. `src/analysis/image_storage.rs` — first-class frontend pass emitting
+   `ImageStoragePlan { array, width, height, format }` into
+   AnalysisResults; config threshold in ir-lowering.dbvl.
+3. SPIR-V lowering: planned field leaves the SSBO member list →
+   STORAGE_IMAGE binding 1; typed `type_image(f32, Dim2D, …, R32f)`;
+   `img[i]` → OpImageWrite((i % W, i / W)). Dispatch unchanged.
+4. Runtime: VkImage (2D, R32Float, TRANSFER_SRC) + view + layout
+   transitions + image→buffer download copy.
+5. Gate: ray-through-image == ray-through-buffer (1e-6); benchmark row
+   (image vs SSBO write bandwidth, same kernel); docs (SPEC texel key,
+   backend-contracts law, HANDOFF, benchmark-strategy).
+
+### Rollback note
+
+The parser registry commit (e7ad1d9e) is corrected by a follow-up edit,
+not reverted (rule 8 discipline). The graph.rs hunks were never
+committed; they are reversed by inverse edits.
