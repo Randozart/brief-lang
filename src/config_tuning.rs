@@ -94,6 +94,11 @@ pub struct IrLoweringSettings {
     /// acc regs/lane). Shapes not divisible by 16R clamp down the
     /// power-of-two ladder (kernel + runner share the clamp).
     pub spirv_coopmat_tile_rows: u32,
+    /// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image
+    /// storage strategy — realize texel-formatted write buffers as device
+    /// storage images when the kernel's index math yields dimensions.
+    /// Opt-in until measured (coopmat precedent).
+    pub spirv_image_storage: bool,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -175,6 +180,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_row_cooperative: false,
     spirv_coopmat: false,
     spirv_coopmat_tile_rows: 4,
+    spirv_image_storage: false,
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
@@ -326,6 +332,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_tile_rows", 0)
             .map(|v| v.max(1) as u32)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_tile_rows),
+        spirv_image_storage: db
+            .field_int("spirv_image_storage", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_image_storage),
     }
 }
 

@@ -44,6 +44,7 @@ pub mod protocol_graph;
 pub mod swan_song;
 pub mod loop_shape;
 pub mod density;
+pub mod image_storage;
 pub mod modulo_partition;
 pub mod inline_cost;
 pub mod batch_shape;

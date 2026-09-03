@@ -45,6 +45,12 @@ pub struct AnalysisResults {
     //   inline_decisions  — callable-txn alwaysinline decision (weighted cost)
     pub density: HashMap<String, crate::analysis::density::ComputeDensity>,
     pub modulo_partition: Option<crate::analysis::modulo_partition::ModuloPartition>,
+    // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image
+    // storage plans per txn — the frontend's storage-strategy decision for
+    // texel-formatted write buffers. Consumed by the SPIR-V backend
+    // (binding partition + OpTypeImage + OpImageWrite) and the runtime
+    // (VkImage materialization). Empty = plain SSBOs everywhere.
+    pub image_storage: HashMap<String, Vec<crate::analysis::image_storage::ImageStoragePlan>>,
     pub has_unguarded_ffi: std::collections::HashSet<String>,
     pub inline_decisions: HashMap<String, crate::analysis::inline_cost::InlineDecision>,
     // 2026-07-31: Batch-loop decomposition (plan 2026-07-31-regain-kalman-float-
@@ -204,6 +210,16 @@ pub fn analyze_program(
         .collect();
     let module_metadata = collect_module_metadata(items);
     let accel = crate::analysis::accel::analyze(items, &module_metadata, type_universe);
+    // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image
+    // storage strategy — the frontend's storage decision for texel-formatted
+    // write buffers. Opt-in until measured (the coopmat precedent; promote
+    // on ledger evidence).
+    let image_storage = crate::analysis::image_storage::detect(
+        items,
+        &accel,
+        type_universe,
+        crate::config_tuning::ir_lowering().spirv_image_storage,
+    );
     // 2026-08-31 (boundary ownership plan): classify every export/frgn
     // parameter and return. The calling convention is defaulted to c_abi here
     // (the glue config lives in compile.rs); the GLUE wiring refines
@@ -236,6 +252,7 @@ pub fn analyze_program(
         coll_pregrow,
         module_metadata,
         accel,
+        image_storage,
         spawn_pools,
         dependent_pools,
         spawn_storage,
