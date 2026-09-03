@@ -843,6 +843,16 @@ impl<'a> FnLowerer<'a> {
                 }
             }
             Expr::Call(name, args, _) => self.emit_intrinsic_call(name, args),
+            Expr::If(cond, then_e, else_e) => {
+                let Some(else_expr) = else_e.as_deref() else {
+                    return self.err(
+                        "if-expression without an else branch produces no value — \
+                         add an else arm or use `when` outside kernels",
+                    );
+                };
+                self.emit_bool_selection(cond, then_e, else_expr)
+            }
+            Expr::Match(scrutinee, arms) => self.emit_bool_match(scrutinee, arms),
             other => self.err(format!(
                 "unsupported expression in kernel ({:?}) — integer scalar \
                  compute is the supported surface",
@@ -1016,6 +1026,106 @@ impl<'a> FnLowerer<'a> {
             }
             other => self.err(format!("unsupported intrinsic '{}'", other)),
         }
+    }
+
+    /// 2026-09-02 (plan 2026-09-02-graphics-ray-and-images): two-way value
+    /// selection in a kernel. The `if_expr: true` capability is declared, so
+    /// the emitter owes the construct: structured selection (the same
+    /// OpSelectionMerge + OpBranchConditional shape the bounds guard emits),
+    /// values joined by an OpPhi at the merge — the loop-phi emission
+    /// pattern, no storage slots (function OpVariables must stay in the
+    /// entry block; a phi needs no state).
+    fn emit_bool_selection(
+        &mut self,
+        cond: &Expr,
+        then_e: &Expr,
+        else_e: &Expr,
+    ) -> Result<(Word, Type), String> {
+        let (c, _cty) = self.emit_expr(cond)?;
+        let then_bb = self.builder.gen_id();
+        let else_bb = self.builder.gen_id();
+        let merge_bb = self.builder.gen_id();
+        self.builder
+            .builder
+            .selection_merge(merge_bb, rspirv::spirv::SelectionControl::NONE);
+        self.builder
+            .builder
+            .branch_conditional(c, then_bb, else_bb, [] as [u32; 0]);
+        self.builder.begin_block(Some(then_bb));
+        let (tv, tty) = self.emit_expr(then_e)?;
+        self.builder.builder.branch(merge_bb);
+        self.builder.begin_block(Some(else_bb));
+        let (ev, ety) = self.emit_expr(else_e)?;
+        if tty != ety {
+            return self.err(
+                "selection arms have different types — both arms must produce \
+                 the same type in a kernel",
+            );
+        }
+        self.builder.builder.branch(merge_bb);
+        self.builder.begin_block(Some(merge_bb));
+        let ty_id = self.type_id(&tty)?;
+        let joined = self
+            .builder
+            .builder
+            .phi(ty_id, None, [(tv, then_bb), (ev, else_bb)])
+            .map_err(|e| format!("selection phi: {:?}", e))?;
+        Ok((joined, tty))
+    }
+
+    /// `match cond { true => a, false => b }` (SPEC's exhaustive two-way
+    /// form) lowers to the same structured selection. Only Bool-scrutinee
+    /// literal/wildcard arms are in the kernel surface — other pattern
+    /// kinds name their target.
+    fn emit_bool_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[crate::ast::MatchArm],
+    ) -> Result<(Word, Type), String> {
+        let mut then_e: Option<&Expr> = None;
+        let mut else_e: Option<&Expr> = None;
+        for arm in arms {
+            if arm.guard.is_some() {
+                return self.err(
+                    "match-arm guards are not kernel-computable — move the \
+                     condition into the arm pattern or outside the kernel",
+                );
+            }
+            match &arm.pattern {
+                crate::ast::Pattern::Literal(Expr::Bool(true)) => {
+                    if then_e.is_some() {
+                        return self.err("duplicate `true` match arm");
+                    }
+                    then_e = Some(&arm.body);
+                }
+                crate::ast::Pattern::Literal(Expr::Bool(false)) => {
+                    if else_e.is_some() {
+                        return self.err("duplicate `false` match arm");
+                    }
+                    else_e = Some(&arm.body);
+                }
+                crate::ast::Pattern::Wildcard => {
+                    if else_e.is_none() {
+                        else_e = Some(&arm.body);
+                    } else if then_e.is_none() {
+                        then_e = Some(&arm.body);
+                    }
+                }
+                _ => {
+                    return self.err(
+                        "only `true`/`false`/`_` match arms are kernel-computable — \
+                         other patterns belong on the host side",
+                    );
+                }
+            }
+        }
+        let (Some(then_e), Some(else_e)) = (then_e, else_e) else {
+            return self.err(
+                "kernel match must be exhaustive — provide both a `true` and a \
+                 `false` arm (or `_`)",
+            );
+        };
+        self.emit_bool_selection(scrutinee, then_e, else_e)
     }
 
     /// O2: lower float `mul + addend` (either order) as a single Fma.

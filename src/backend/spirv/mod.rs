@@ -54,7 +54,12 @@ pub const CAPABILITIES: crate::backend::capabilities::BackendCapabilities =
         // needs.
         foreach: true,
         slices_ranges: true,
+        // 2026-09-02 (plan 2026-09-02-graphics-ray-and-images): two-way
+        // value selection — `if` expressions and exhaustive Bool-scrutinee
+        // `match` (true/false/_) lower to structured OpSelectionMerge +
+        // OpPhi. Other pattern kinds are rejected at emission.
         if_expr: true,
+        match_expr: true,
         let_stmt: true,
         assign_stmt: true,
         term_endprogram: true,

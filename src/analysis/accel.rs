@@ -340,6 +340,30 @@ fn expr_is_pure(expr: &Expr) -> bool {
         | Expr::Identifier(_) => true,
         Expr::BinaryOp(_, l, r) => expr_is_pure(l) && expr_is_pure(r),
         Expr::UnaryOp(_, e) => expr_is_pure(e),
+        // 2026-09-02 (plan 2026-09-02-graphics-ray-and-images): an
+        // if-expression is pure selection — no side effects, deterministic
+        // given its inputs. Both arms + the condition must be pure.
+        Expr::If(c, t, e) => {
+            expr_is_pure(c)
+                && expr_is_pure(t)
+                && e.as_deref().map(expr_is_pure).unwrap_or(true)
+        }
+        // `match cond { true => …, false => … }` — the two-way selection
+        // form the SPIR-V kernel surface lowers. Guards or non-bool-literal
+        // patterns are rejected at emission; purity here mirrors that
+        // surface (scrutinee + arm bodies).
+        Expr::Match(s, arms) => {
+            expr_is_pure(s)
+                && arms.iter().all(|arm| {
+                    arm.guard.is_none()
+                        && matches!(
+                            arm.pattern,
+                            crate::ast::Pattern::Literal(Expr::Bool(_))
+                                | crate::ast::Pattern::Wildcard
+                        )
+                        && expr_is_pure(&arm.body)
+                })
+        }
         Expr::Index(a, i) => expr_is_pure(a) && expr_is_pure(i),
         Expr::Cast(e, _) => expr_is_pure(e),
         Expr::Tuple(items) => items.iter().all(expr_is_pure),
