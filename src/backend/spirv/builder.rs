@@ -225,6 +225,31 @@ impl SpirvBuilder {
         id
     }
 
+    /// Emit `GLSL.std.450 Sqrt(x)` — single-argument elementwise square
+    /// root (2026-09-02, plan 2026-09-02-graphics-ray-and-images: ray
+    /// shading). Same lazy-import mechanism as Exp.
+    pub fn glsl_sqrt(&mut self, result_ty: Word, x: Word) -> Word {
+        let id = self.gen_id();
+        let set = match self.glsl_set {
+            Some(s) => s,
+            None => {
+                let s = self.builder.ext_inst_import("GLSL.std.450");
+                self.glsl_set = Some(s);
+                s
+            }
+        };
+        self.builder
+            .ext_inst(
+                result_ty,
+                Some(id),
+                set,
+                spirv::GLOp::Sqrt as u32,
+                [Operand::IdRef(x)],
+            )
+            .expect("Sqrt emission inside a function block");
+        id
+    }
+
     // ── Briev type lowering (typed, internally deduped by rspirv) ───────
 
     /// Lower a Briev type to a SPIR-V type id.

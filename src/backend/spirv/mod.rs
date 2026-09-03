@@ -1315,6 +1315,109 @@ mod tests {
             String::from_utf8_lossy(&out.stderr));
     }
 
+    /// 2026-09-02 (plan 2026-09-02-graphics-ray-and-images): the GLSL.std.450
+    /// math intrinsics lower as single-operand OpExtInst on floats. Locks the
+    /// emission shape for `Exp#` and `Sqrt#` (the raytracer's dependence):
+    /// ext-inst import present, OpExtInst %float with the right opcode name,
+    /// spirv-val clean.
+    #[test]
+    fn test_math_intrinsics_emit_glsl_ext_inst() {
+        let float_state = |name: &str, n: i64| TopLevel::StateDecl(StateDecl {
+            name: name.into(),
+            ty: Type::Vector(Box::new(Type::float()), vec![Dimension::Anonymous(n as usize)]),
+            span: None,
+        });
+        let program_for = |intrinsic: &str| vec![
+            float_state("a", 1024),
+            float_state("out", 1024),
+            TopLevel::Transaction(Transaction {
+                name: "map".into(),
+                is_reactive: true,
+                is_async: false,
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![],
+                contract: Contract {
+                    pre_condition: Expr::BinaryOp(
+                        BinaryOpKind::Lt,
+                        Box::new(Expr::Identifier("i".into())),
+                        Box::new(Expr::Decimal(1024)),
+                    ),
+                    post_condition: Expr::Bool(true),
+                    watchdog: None,
+                    explicit: false,
+                    span: None,
+                    post_authority: false,
+                },
+                body: vec![
+                    Statement::Assign(
+                        Expr::Index(
+                            Box::new(Expr::Identifier("out".into())),
+                            Box::new(Expr::Identifier("i".into())),
+                        ),
+                        Expr::Call(
+                            intrinsic.to_string(),
+                            vec![Expr::Index(
+                                Box::new(Expr::Identifier("a".into())),
+                                Box::new(Expr::Identifier("i".into())),
+                            )],
+                            None,
+                        ),
+                    ),
+                    Statement::Assign(
+                        Expr::Identifier("i".into()),
+                        Expr::BinaryOp(
+                            BinaryOpKind::Add,
+                            Box::new(Expr::Identifier("i".into())),
+                            Box::new(Expr::Decimal(1)),
+                        ),
+                    ),
+                ],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                span: None,
+                doc: None,
+            }),
+        ];
+        for (intrinsic, gl_name) in [("Exp#", "Exp"), ("Sqrt#", "Sqrt")] {
+            let program = program_for(intrinsic);
+            let txn_stmts = match &program.last().unwrap() {
+                TopLevel::Transaction(t) => t.body.clone(),
+                other => panic!("expected transaction, got {other:?}"),
+            };
+            let shape = crate::analysis::accel::KernelShape {
+                index_var: "i".into(),
+                count_expr: Some(Expr::Decimal(1024)),
+                kernel_stmts: txn_stmts,
+                host_stmts: vec![],
+                read_buffers: vec!["a".into()],
+                write_buffers: vec!["out".into()],
+                scalar_ins: vec![],
+                eligible: true,
+                reasons: vec![],
+                work_cols: None,
+                reduction: None,
+            };
+            let mut builder = SpirvBuilder::new().with_universe(&test_universe(), 64);
+            emit_kernel(&mut builder, "main", &shape, &program, false).unwrap();
+            let asm = validate_and_disassemble(&builder.build().unwrap(), "math_intrinsics");
+            // Disasm shape: `%id = OpExtInst %float %set Exp %x` — the result
+            // id sits between the type and the GL opcode name.
+            assert!(
+                asm.lines().any(|l| {
+                    let mut tok = l.split_whitespace();
+                    tok.any(|t| t == "OpExtInst")
+                        && tok.any(|t| t == "%float")
+                        && tok.any(|t| t == &format!("{gl_name}"))
+                }),
+                "{intrinsic} must lower to GLSL.std.450 {gl_name}:\n{}",
+                asm
+            );
+        }
+    }
+
 }
 pub mod runner;
 

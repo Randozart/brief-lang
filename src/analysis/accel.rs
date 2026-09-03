@@ -352,7 +352,8 @@ fn expr_is_pure(expr: &Expr) -> bool {
             if name == "SubgroupFAdd#"
                 || name == "GetGlobalId#"
                 || name == "GetLocalId#"
-                || name == "Exp#" =>
+                || name == "Exp#"
+                || name == "Sqrt#" =>
         {
             args.iter().all(expr_is_pure)
         }
