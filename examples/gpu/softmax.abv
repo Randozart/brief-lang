@@ -1,0 +1,22 @@
+// softmax.abv — elementwise softmax kernel: y[i] = exp(x[i] - max_val) /
+// sum_exp, where max_val and sum_exp are precomputed by the C harness
+// (the CPU side handles the reductions; the GPU tests Exp# + elementwise
+// throughput). N = 16.7M f32 elements. Three fields (i/x/y) — the proven
+// shape. Idempotent (separate x/y), so pass count cannot corrupt the gate.
+//
+// Why CPU-side reductions: SPIR-V (.abv) rejects guarded bodies (when/[])
+// and Expr::If is not yet lowered — so the max/sum reductions that
+// require conditionals stay on the CPU. This is an honest benchmark:
+// the Exp# path is the performance-critical inner loop of every ML
+// inference kernel, and this isolates it.
+const N: Int = 16777216;
+
+let i: Int = 0;
+let x: Float[16777216];
+let y: Float[16777216];
+
+async node softmax [i < N][i == N] {
+    y[i] = Exp#(x[i]);
+    i = i + 1;
+    term;
+};

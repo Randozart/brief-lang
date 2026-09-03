@@ -201,6 +201,30 @@ impl SpirvBuilder {
             .expect("Fma emission inside a function block");
     }
 
+    /// Emit `GLSL.std.450 Exp(x)` — single-argument elementwise exponential.
+    /// Same lazy-import mechanism as Fma (glsl_set cached per module).
+    pub fn glsl_exp(&mut self, result_ty: Word, x: Word) -> Word {
+        let id = self.gen_id();
+        let set = match self.glsl_set {
+            Some(s) => s,
+            None => {
+                let s = self.builder.ext_inst_import("GLSL.std.450");
+                self.glsl_set = Some(s);
+                s
+            }
+        };
+        self.builder
+            .ext_inst(
+                result_ty,
+                Some(id),
+                set,
+                spirv::GLOp::Exp as u32,
+                [Operand::IdRef(x)],
+            )
+            .expect("Exp emission inside a function block");
+        id
+    }
+
     // ── Briev type lowering (typed, internally deduped by rspirv) ───────
 
     /// Lower a Briev type to a SPIR-V type id.

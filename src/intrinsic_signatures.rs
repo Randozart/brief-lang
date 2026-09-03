@@ -107,6 +107,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Fabs#"  => Some(Signature { name: "Fabs#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
         "Ceil#"  => Some(Signature { name: "Ceil#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
         "Floor#" => Some(Signature { name: "Floor#", parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
+        "Exp#"   => Some(Signature { name: "Exp#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false, variadic: false }),
         "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
 
         // ── Runtime (observable) ────────────────────────────────────
@@ -390,7 +391,7 @@ mod tests {
             "Add#", "Sub#", "Mul#", "Div#", "Rem#", "Neg#", "Abs#",
             "BitReverse#", "Popcount#", "LeadingZeros#", "TrailingZeros#",
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
-            "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
+            "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Exp#", "Pow#",
             "Malloc#", "Alloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
             "VolatileLoad#", "VolatileStore#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",

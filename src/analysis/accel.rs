@@ -351,7 +351,8 @@ fn expr_is_pure(expr: &Expr) -> bool {
         Expr::Call(name, args, _)
             if name == "SubgroupFAdd#"
                 || name == "GetGlobalId#"
-                || name == "GetLocalId#" =>
+                || name == "GetLocalId#"
+                || name == "Exp#" =>
         {
             args.iter().all(expr_is_pure)
         }

@@ -881,6 +881,18 @@ impl<'a> FnLowerer<'a> {
                 ));
                 Ok((res, vty))
             }
+            "Exp#" => {
+                let (x, xty) = match args.first() {
+                    Some(e) => self.emit_expr(e)?,
+                    None => return self.err("Exp# needs an operand"),
+                };
+                if !self.builder.is_float_type(&xty)? {
+                    return self.err("Exp# is a float intrinsic");
+                }
+                let ty_id = self.type_id(&xty)?;
+                let res = self.builder.glsl_exp(ty_id, x);
+                Ok((res, xty))
+            }
             "GetGlobalId#" | "GetLocalId#" => {
                 let dim = match args.first() {
                     Some(Expr::Decimal(d)) if *d >= 0 && *d <= 2 => *d as u32,

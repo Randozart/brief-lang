@@ -57,7 +57,7 @@ fn build_supported_ops() -> HashSet<String> {
     let mut set = HashSet::new();
     for name in &["Add#", "Sub#", "Mul#", "Div#", "Eq#", "Lt#", "Gt#",
                    "BitAnd#", "BitOr#", "BitXor#", "Shl#", "Shr#",
-                   "Malloc#", "Free#", "Print#"] {
+                   "Malloc#", "Free#", "Print#", "Exp#"] {
         set.insert(name.to_string());
     }
     // 2026-09-01 (plan 2026-09-01-cooperative-row-kernels): subgroup
