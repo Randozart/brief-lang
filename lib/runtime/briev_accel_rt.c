@@ -49,6 +49,20 @@ typedef struct {
     uint64_t proj_offset;
 } BrievField;
 
+// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): a texel-
+// formatted state array realized as a device storage image. NOT a
+// BrievField — images are not SSBO members (the blob's SSBO excludes
+// them); the host %State still holds the flat array, so the download
+// copies image -> state+host_offset.
+#define BRIEV_IMAGE_FORMAT_R32F 1u
+typedef struct {
+    const char* name;      // diagnostics
+    uint64_t host_offset;  // byte offset of the flat array in HOST %State
+    uint32_t width;
+    uint32_t height;
+    uint32_t format;       // BRIEV_IMAGE_FORMAT_R32F (the only one so far)
+} BrievImageDesc;
+
 /// One compiled SPIR-V kernel + its layout.
 typedef struct {
     const char* txn_name;  // diagnostics
@@ -56,6 +70,11 @@ typedef struct {
     uint32_t spirv_size;
     uint32_t n_fields;
     const BrievField* fields;
+    // 2026-09-02: image-resident arrays. Grows the struct at the END —
+    // positional C initializers zero-fill the tail, so every existing
+    // descriptor construction compiles unchanged (n_images = 0).
+    uint32_t n_images;
+    const BrievImageDesc* images;
 } BrievKernelDesc;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -113,6 +132,16 @@ typedef struct BrievDeviceDriver {
     // 2026-09-02: optional real device name (vkGetPhysicalDeviceProperties.
     // deviceName). NULL → the static driver `name` is the best answer.
     const char* (*device_name)(void);
+    // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): optional
+    // image-support hooks — TAIL of the struct (positional initializers in
+    // the drivers only ever append). `set_images` allocates the device
+    // storage images + binds them (set 0, binding 1+) after create_kernel;
+    // NULL → the runtime refuses image kernels loudly (the driver cannot
+    // serve them). `download_images` pulls each image into its flat host
+    // array (state + host_offset); NULL → image kernels read back nothing.
+    int (*set_images)(void* kernel, const BrievImageDesc* imgs, uint32_t n);
+    int (*download_images)(void* kernel, const BrievImageDesc* imgs,
+                           uint32_t n, void* state);
 } BrievDeviceDriver;
 
 extern BrievDeviceDriver briev_dev_vulkan;
@@ -217,6 +246,25 @@ int briev_accel_init(const BrievKernelDesc* descs, uint32_t n) {
             fprintf(stderr, "[briev_accel] kernel '%s' compiled on '%s'\n",
                     descs[i].txn_name, g_driver->name);
         }
+        // 2026-09-02: image-resident arrays need the driver's image path.
+        // Absent = loud refusal (a silent skip would leave the image
+        // descriptor unwritten and the kernel reading garbage).
+        if (descs[i].n_images > 0 && g_driver->set_images == NULL) {
+            fprintf(stderr,
+                    "[briev_accel] kernel '%s' has %u image array(s) but "
+                    "driver '%s' has no image support\n",
+                    descs[i].txn_name, descs[i].n_images, g_driver->name);
+            g_driver = NULL;
+            return 0;
+        }
+        if (descs[i].n_images > 0
+            && !g_driver->set_images(g_kernels[i], descs[i].images,
+                                     descs[i].n_images)) {
+            fprintf(stderr, "[briev_accel] image allocation failed for '%s'\n",
+                    descs[i].txn_name);
+            g_driver = NULL;
+            return 0;
+        }
     }
     return 1;
 }
@@ -277,6 +325,19 @@ int briev_accel_download_written(uint32_t idx, void* state) {
         g_driver->download_dev(g_kernels[idx]);
     }
     const BrievKernelDesc* k = &g_descs[idx];
+    // 2026-09-02: image-resident arrays pull via the driver's image path —
+    // they are not in fields[] (not SSBO members).
+    if (k->n_images > 0) {
+        if (g_driver->download_images == NULL) {
+            fprintf(stderr,
+                    "[briev_accel] kernel has %u image array(s) but the device "
+                    "driver cannot download images — no readback\n",
+                    k->n_images);
+        } else if (!g_driver->download_images(g_kernels[idx], k->images,
+                                              k->n_images, state)) {
+            fprintf(stderr, "[briev_accel] image download failed\n");
+        }
+    }
     for (uint32_t i = 0; i < k->n_fields; i++) {
         const BrievField* f = &k->fields[i];
         if (!f->is_write) {
@@ -366,7 +427,16 @@ int briev_accel_launch_resident_2d(uint32_t idx, void* state,
     }
     void* mapped = g_driver->mapped(g_kernels[idx]);
     if (mapped == NULL) {
-        return briev_accel_launch(idx, state, nx * ny);
+        // The vulkan driver creates its buffer + map LAZILY on the first
+        // full-copy launch — prime it once, then take the resident path.
+        // A second NULL means the driver genuinely cannot go resident.
+        if (!briev_accel_launch(idx, state, nx * ny)) {
+            return 0;
+        }
+        mapped = g_driver->mapped(g_kernels[idx]);
+        if (mapped == NULL) {
+            return 0;
+        }
     }
     const BrievKernelDesc* k = &g_descs[idx];
     int full_sync = 0;
@@ -488,6 +558,20 @@ int briev_accel_download(uint32_t idx, void* state) {    if (!briev_accel_availa
         g_driver->download_dev(g_kernels[idx]);
     }
     const BrievKernelDesc* k = &g_descs[idx];
+    // 2026-09-02: image-resident arrays pull via the driver's image path —
+    // they are not SSBO fields (their bytes never touch the staging window).
+    if (k->n_images > 0) {
+        if (g_driver->download_images == NULL) {
+            fprintf(stderr,
+                    "[briev_accel] kernel '%s' has %u image array(s) but the "
+                    "driver cannot download images — no readback\n",
+                    k->txn_name, k->n_images);
+        } else if (!g_driver->download_images(g_kernels[idx], k->images,
+                                              k->n_images, state)) {
+            fprintf(stderr, "[briev_accel] image download failed for '%s'\n",
+                    k->txn_name);
+        }
+    }
     for (uint32_t i = 0; i < k->n_fields; i++) {
         const BrievField* f = &k->fields[i];
         memcpy((uint8_t*)state + f->host_offset,

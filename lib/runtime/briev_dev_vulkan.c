@@ -44,6 +44,11 @@ typedef VkInstance_T* VkInstance;
 typedef VkPhysicalDevice_T VkPhysicalDevice;
 typedef VkDevice_T* VkDevice;
 typedef VkBuffer_T* VkBuffer;
+// 2026-09-02: image handles (same non-dispatchable-handle pattern).
+typedef uint64_t VkImage_T;
+typedef VkImage_T* VkImage;
+typedef uint64_t VkImageView_T;
+typedef VkImageView_T* VkImageView;
 typedef VkDeviceMemory_T* VkDeviceMemory;
 typedef VkShaderModule_T* VkShaderModule;
 typedef VkPipeline_T* VkPipeline;
@@ -89,11 +94,29 @@ typedef enum {
 #define VK_BUFFER_USAGE_TRANSFER_SRC_BIT 0x2000u
 #define VK_BUFFER_USAGE_TRANSFER_DST_BIT 0x4000u
 #define VK_DESCRIPTOR_TYPE_STORAGE_BUFFER 7u
+// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image support.
+#define VK_DESCRIPTOR_TYPE_STORAGE_IMAGE 3u
+#define VK_IMAGE_TYPE_2D 1u
+#define VK_FORMAT_R32_SFLOAT 100u
+#define VK_IMAGE_TILING_OPTIMAL 0u
+#define VK_IMAGE_LAYOUT_UNDEFINED 0u
+#define VK_IMAGE_LAYOUT_GENERAL 1u
+#define VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL 6u
+#define VK_IMAGE_USAGE_STORAGE_BIT 0x8u
+#define VK_IMAGE_USAGE_TRANSFER_SRC_BIT 0x1u
+#define VK_IMAGE_VIEW_TYPE_2D 1u
+#define VK_IMAGE_ASPECT_COLOR_BIT 0x1u
+#define VK_SHARING_MODE_EXCLUSIVE 0u
+#define VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO 14u
+#define VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO 15u
+#define VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER 45u
+#define BRIEV_VULKAN_MAX_IMAGES 4u
 #define VK_PIPELINE_BIND_POINT_COMPUTE 1u
 #define VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT 0x2u
 #define VK_MEMORY_PROPERTY_HOST_COHERENT_BIT 0x8u
 #define VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT 0x1u
 #define VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT 0x00000800u
+#define VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT 0x00000001u
 #define VK_PIPELINE_STAGE_TRANSFER_BIT 0x00001000u
 #define VK_ACCESS_SHADER_READ_BIT 0x00000020u
 #define VK_ACCESS_SHADER_WRITE_BIT 0x00000040u
@@ -148,6 +171,41 @@ typedef struct { uint32_t sType; const void* pNext; uint64_t descriptorPool;
                  uint32_t descriptorSetCount;
                  const VkDescriptorSetLayout* pSetLayouts; } VkDescriptorSetAllocateInfo;
 typedef struct { uint64_t buffer; uint64_t offset; uint64_t range; } VkDescriptorBufferInfo;
+// 2026-09-02: image resources (raw layouts — the dlopen surface has no
+// Vulkan headers; every field must match the spec exactly).
+typedef struct { uint32_t sType; const void* pNext; uint32_t flags;
+                 uint32_t imageType; uint32_t format; uint32_t extentWidth;
+                 uint32_t extentHeight; uint32_t extentDepth; uint32_t mipLevels;
+                 uint32_t arrayLayers; uint32_t samples; uint32_t tiling;
+                 uint32_t usage; uint32_t sharingMode; uint32_t queueFamilyIndexCount;
+                 const uint32_t* pQueueFamilyIndices; uint32_t initialLayout; } VkImageCreateInfo;
+typedef struct { uint32_t aspectMask; uint32_t baseMipLevel; uint32_t levelCount;
+                 uint32_t baseArrayLayer; uint32_t layerCount; } VkImageSubresourceRange;
+typedef struct { uint32_t r; uint32_t g; uint32_t b; uint32_t a; } VkComponentMapping;
+typedef struct { uint32_t sType; const void* pNext; uint32_t flags; uint64_t image;
+                 uint32_t viewType; uint32_t format; VkComponentMapping components;
+                 VkImageSubresourceRange subresourceRange; } VkImageViewCreateInfo;
+typedef struct { uint32_t sType; const void* pNext; uint32_t srcAccessMask;
+                 uint32_t dstAccessMask; uint32_t srcQueueFamilyIndex;
+                 uint32_t dstQueueFamilyIndex; uint64_t image;
+                 VkImageSubresourceRange subresourceRange; } VkImageMemoryBarrier;
+typedef struct { uint32_t aspectMask; uint32_t mipLevel; uint32_t baseArrayLayer;
+                 uint32_t layerCount; } VkImageSubresourceLayers;
+// 2026-09-02: MUST be 5 members (aspectMask, baseMipLevel, levelCount,
+// baseArrayLayer, layerCount) — a 4-member inline version made every image
+// barrier 4 bytes short and the driver read garbage past the struct.
+typedef struct { uint32_t aspectMask; uint32_t baseMipLevel; uint32_t levelCount;
+                 uint32_t baseArrayLayer; uint32_t layerCount; } VkImageSubresourceRangeB;
+typedef struct { uint32_t sType; const void* pNext; uint32_t srcAccessMask;
+                 uint32_t dstAccessMask; uint32_t srcQueueFamilyIndex;
+                 uint32_t dstQueueFamilyIndex; uint64_t image;
+                 VkImageSubresourceRangeB subresourceRange; } VkImageMemoryBarrierB;
+typedef struct { int32_t x; int32_t y; int32_t z; } VkOffset3D;
+typedef struct { uint32_t width; uint32_t height; uint32_t depth; } VkExtent3D;
+typedef struct { uint64_t bufferOffset; uint32_t bufferRowLength;
+                 uint32_t bufferImageHeight; VkImageSubresourceLayers imageSubresource;
+                 VkOffset3D imageOffset; VkExtent3D imageExtent; } VkBufferImageCopy;
+typedef struct { uint64_t sampler; uint64_t imageView; uint32_t imageLayout; } VkDescriptorImageInfo;
 typedef struct { uint32_t sType; const void* pNext; uint64_t dstSet;
                  uint32_t dstBinding; uint32_t dstArrayElement;
                  uint32_t descriptorCount; uint32_t descriptorType;
@@ -218,12 +276,21 @@ static int (*vkResetDescriptorPool)(VkDevice, VkDescriptorPool, uint32_t) = NULL
 static void (*vkUpdateDescriptorSets)(VkDevice, uint32_t, const void*, uint32_t, const void*) = NULL;
 static int (*vkCreateCommandPool)(VkDevice, const void*, const void*, VkCommandPool*) = NULL;
 static int (*vkAllocateCommandBuffers)(VkDevice, const void*, VkCommandBuffer*) = NULL;
+static void (*vkFreeCommandBuffers)(VkDevice, uint64_t, uint32_t, const VkCommandBuffer*) = NULL;
 static int (*vkResetCommandBuffer)(VkCommandBuffer, uint32_t) = NULL;
 static int (*vkBeginCommandBuffer)(VkCommandBuffer, const void*) = NULL;
 static void (*vkCmdBindPipeline)(VkCommandBuffer, uint32_t, VkPipeline) = NULL;
 static void (*vkCmdBindDescriptorSets)(VkCommandBuffer, uint32_t, VkPipelineLayout, uint32_t, uint32_t, const VkDescriptorSet*, uint32_t, const uint32_t*) = NULL;
 static void (*vkCmdDispatch)(VkCommandBuffer, uint32_t, uint32_t, uint32_t) = NULL;
 static void (*vkCmdCopyBuffer)(VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, const void*) = NULL;
+// 2026-09-02: image lifecycle + transfer.
+static int (*vkCreateImage)(VkDevice, const void*, const void*, VkImage*) = NULL;
+static void (*vkDestroyImage)(VkDevice, uint64_t, const void*) = NULL;
+static void (*vkGetImageMemoryRequirements)(VkDevice, uint64_t, void*) = NULL;
+static int (*vkBindImageMemory)(VkDevice, uint64_t, uint64_t, uint64_t) = NULL;
+static int (*vkCreateImageView)(VkDevice, const void*, const void*, VkImageView*) = NULL;
+static void (*vkDestroyImageView)(VkDevice, uint64_t, const void*) = NULL;
+static void (*vkCmdCopyImageToBuffer)(VkCommandBuffer, uint64_t, uint32_t, uint64_t, uint32_t, const void*) = NULL;
 static void (*vkCmdPipelineBarrier)(VkCommandBuffer, uint32_t, uint32_t, uint32_t, uint32_t, const void*, uint32_t, const void*, uint32_t, const void*) = NULL;
 static int (*vkEndCommandBuffer)(VkCommandBuffer) = NULL;
 static int (*vkQueueSubmit)(VkQueue, uint32_t, const void*, VkFence) = NULL;
@@ -276,12 +343,20 @@ static int load_vulkan_symbols(void) {
     LOAD(vkUpdateDescriptorSets);
     LOAD(vkCreateCommandPool);
     LOAD(vkAllocateCommandBuffers);
+    LOAD(vkFreeCommandBuffers);
     LOAD(vkResetCommandBuffer);
     LOAD(vkBeginCommandBuffer);
     LOAD(vkCmdBindPipeline);
     LOAD(vkCmdBindDescriptorSets);
     LOAD(vkCmdDispatch);
     LOAD(vkCmdCopyBuffer);
+    LOAD(vkCreateImage);
+    LOAD(vkDestroyImage);
+    LOAD(vkGetImageMemoryRequirements);
+    LOAD(vkBindImageMemory);
+    LOAD(vkCreateImageView);
+    LOAD(vkDestroyImageView);
+    LOAD(vkCmdCopyImageToBuffer);
     LOAD(vkCmdPipelineBarrier);
     LOAD(vkEndCommandBuffer);
     LOAD(vkQueueSubmit);
@@ -583,15 +658,26 @@ static int briev_dev_vulkan_init(void) {
     vk_coopmat_enabled = dev_ext_count > 0;
     vkGetDeviceQueue(vk_device, vk_queue_family_index, 0, &vk_queue);
 
+    // 2026-09-02: binding 1 = STORAGE_IMAGE (image-resident arrays). The
+    // binding is ALWAYS in the layout — buffers-only shaders simply don't
+    // use it (Vulkan permits unused bindings; pipeline compatibility holds).
+    VkDescriptorSetLayoutBinding bindings[2];
     VkDescriptorSetLayoutBinding binding = {0};
     binding.binding = 0;
     binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     binding.descriptorCount = 1;
     binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[0] = binding;
+    VkDescriptorSetLayoutBinding img_binding = {0};
+    img_binding.binding = 1;
+    img_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    img_binding.descriptorCount = 1;
+    img_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[1] = img_binding;
     VkDescriptorSetLayoutCreateInfo dlci = {0};
     dlci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dlci.bindingCount = 1;
-    dlci.pBindings = &binding;
+    dlci.bindingCount = 2;
+    dlci.pBindings = bindings;
     if (vkCreateDescriptorSetLayout(vk_device, &dlci, NULL, &vk_desc_set_layout) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] descriptor set layout failed\n");
         goto fail;
@@ -655,6 +741,22 @@ typedef struct {
     // global constant — cooperative row kernels declare LocalSize 32 while
     // flat kernels declare 256; a wrong divisor yields 8x too few workgroups.
     size_t local_x;
+    // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image-
+    // resident arrays (set 0, binding 1+). Download = image -> host-visible
+    // scratch -> host %State (the runtime's memcpy target).
+    struct {
+        VkImage image;
+        VkDeviceMemory memory;
+        VkImageView view;
+        uint32_t width, height;
+    } images[BRIEV_VULKAN_MAX_IMAGES];
+    uint32_t n_images;
+    VkBuffer image_scratch;
+    VkDeviceMemory image_scratch_memory;
+    void* image_scratch_mapped;
+    size_t image_scratch_bytes;
+    int images_general;  // 0 = the first dispatch must barrier UNDEFINED->GENERAL
+    int images_bound;    // 0 = the descriptor write (binding 1+) is pending
 } BrievVulkanKernel;
 
 static int briev_dev_vulkan_create_kernel(const uint8_t* spirv, size_t size, void** out) {
@@ -725,6 +827,8 @@ static int briev_dev_vulkan_create_kernel(const uint8_t* spirv, size_t size, voi
 // VRAM→staging (download). `dirty` is flat (offset, bytes) pairs; full copy
 // when n_dirty == 0 or too many ranges.
 #define VK_BRIEV_MAX_RANGES 16u
+
+static void bind_image_descriptors(BrievVulkanKernel* k);
 
 static void record_copy(BrievVulkanKernel* k, int to_device,
                         const size_t* dirty, uint32_t n_dirty) {
@@ -876,9 +980,13 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
         VkDescriptorPoolCreateInfo dpi = {0};
         dpi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         dpi.maxSets = 1;
-        VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
-        dpi.poolSizeCount = 1;
-        dpi.pPoolSizes = &ps;
+        VkDescriptorPoolSize ps[2];
+        ps[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        ps[0].descriptorCount = 1;
+        ps[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        ps[1].descriptorCount = 1;
+        dpi.poolSizeCount = 2;
+        dpi.pPoolSizes = ps;
         if (vkCreateDescriptorPool(vk_device, &dpi, NULL, &k->pool) != VK_SUCCESS) {
             if (verbose) fprintf(stderr, "[briev_accel/vulkan] pool create failed\n");
             k->buffer = VK_NULL_HANDLE;
@@ -908,6 +1016,7 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
         wds.pBufferInfo = &bi;
         vkUpdateDescriptorSets(vk_device, 1, &wds, 0, NULL);
     }
+    bind_image_descriptors(k);
 
     memcpy(k->mapped, proj, proj_bytes);
 
@@ -987,6 +1096,211 @@ static void* briev_dev_vulkan_mapped(void* handle) {
 // the flat ceil(nx*ny/64) grid, but the hardware hands each invocation its
 // (x, y) position directly (the kernel reconstructs i = y*nx + x).
 static int briev_dev_vulkan_launch_dev(void* handle, size_t global_n);
+
+
+// 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): allocate the
+// storage images for a kernel's image-resident arrays and bind them at
+// set 0, binding 1+. The scratch (host-visible, TRANSFER_DST) is sized to
+// the largest image — the download path copies image -> scratch -> host.
+static int briev_dev_vulkan_set_images(void* handle, const BrievImageDesc* imgs,
+                                       uint32_t n) {
+    BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
+    int verbose = g_verbose;
+    if (!k || n == 0 || n > BRIEV_VULKAN_MAX_IMAGES) {
+        return 0;
+    }
+    size_t max_bytes = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (imgs[i].format != BRIEV_IMAGE_FORMAT_R32F) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] unsupported image format %u\n", imgs[i].format);
+            return 0;
+        }
+        k->images[i].width = imgs[i].width;
+        k->images[i].height = imgs[i].height;
+        VkImageCreateInfo ici = {0};
+        ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ici.imageType = VK_IMAGE_TYPE_2D;
+        ici.format = VK_FORMAT_R32_SFLOAT;
+        ici.extentWidth = imgs[i].width;
+        ici.extentHeight = imgs[i].height;
+        ici.extentDepth = 1;
+        ici.mipLevels = 1;
+        ici.arrayLayers = 1;
+        ici.samples = 1;
+        ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ici.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+        if (vkCreateImage(vk_device, &ici, NULL, &k->images[i].image) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] image %u create failed\n", i);
+            k->n_images = i;
+            return 0;
+        }
+        struct { uint64_t size; uint64_t alignment; uint32_t memoryTypeBits; } reqs = {0};
+        vkGetImageMemoryRequirements(vk_device, (uint64_t)k->images[i].image, &reqs);
+        struct { uint32_t sType; const void* pNext; uint64_t allocationSize;
+                 uint32_t memoryTypeIndex; } alloc = {0};
+        alloc.sType = 5; // VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        alloc.allocationSize = reqs.size;
+        alloc.memoryTypeIndex = vk_device_local_type;
+        int amr = vkAllocateMemory(vk_device, &alloc, NULL, &k->images[i].memory);
+        int bmr = vkBindImageMemory(vk_device, (uint64_t)k->images[i].image,
+                                 (uint64_t)k->images[i].memory, 0);
+        if (amr != VK_SUCCESS || bmr != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] image %u alloc failed\n", i);
+            k->n_images = i;
+            return 0;
+        }
+        VkImageViewCreateInfo vci = {0};
+        vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vci.image = (uint64_t)k->images[i].image;
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format = VK_FORMAT_R32_SFLOAT;
+        vci.components.r = 0; vci.components.g = 0;
+        vci.components.b = 0; vci.components.a = 0; // VK_COMPONENT_SWIZZLE_IDENTITY
+        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vci.subresourceRange.baseMipLevel = 0;
+        vci.subresourceRange.levelCount = 1;
+        vci.subresourceRange.baseArrayLayer = 0;
+        vci.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(vk_device, &vci, NULL, &k->images[i].view) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] image %u view failed\n", i);
+            k->n_images = i;
+            return 0;
+        }
+        size_t bytes = (size_t)imgs[i].width * imgs[i].height * 4u;
+        if (bytes > max_bytes) { max_bytes = bytes; }
+    }
+    k->n_images = n;
+    // Scratch: host-visible + TRANSFER_DST (CopyImageToBuffer target).
+    struct { uint32_t sType; const void* pNext; uint32_t flags; uint64_t size;
+             uint32_t usage; uint32_t sharingMode; uint32_t queueFamilyIndexCount;
+             const uint32_t* pQueueFamilyIndices; } binfo = {0};
+    binfo.sType = 8; // VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+    binfo.size = max_bytes;
+    binfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (vkCreateBuffer(vk_device, &binfo, NULL, &k->image_scratch) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] image scratch create failed\n");
+        return 0;
+    }
+    struct { uint64_t size; uint64_t alignment; uint32_t memoryTypeBits; } reqs = {0};
+    vkGetBufferMemoryRequirements(vk_device, k->image_scratch, &reqs);
+    struct { uint32_t sType; const void* pNext; uint64_t allocationSize;
+             uint32_t memoryTypeIndex; } alloc = {0};
+    alloc.sType = 5;
+    alloc.allocationSize = reqs.size;
+    alloc.memoryTypeIndex = vk_host_visible_type;
+    if (vkAllocateMemory(vk_device, &alloc, NULL, &k->image_scratch_memory) != VK_SUCCESS
+        || vkBindBufferMemory(vk_device, k->image_scratch, k->image_scratch_memory, 0) != VK_SUCCESS
+        || vkMapMemory(vk_device, k->image_scratch_memory, 0, VK_WHOLE_SIZE_MACRO, 0,
+                       &k->image_scratch_mapped) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] image scratch alloc failed\n");
+        return 0;
+    }
+    // The descriptor write happens at first launch: the descriptor SET is
+    // allocated lazily in the launch path (k->desc_set is NULL here —
+    // writing binding 1 into a null set segfaults the ICD).
+    k->images_general = 1;   // created GENERAL — no pre-dispatch barrier needed
+    k->images_bound = 0;
+    if (k->image_scratch_mapped) {
+        ((float*)k->image_scratch_mapped)[0] = 77.7f;
+        ((float*)k->image_scratch_mapped)[1] = 77.7f;
+    }
+    return 1;
+}
+
+// Bind the image views into the descriptor set (binding 1+) — called from
+// the launch path right after the SSBO descriptor write (the set exists
+// there). Idempotent.
+static void bind_image_descriptors(BrievVulkanKernel* k) {
+    if (k->n_images == 0 || k->images_bound || k->desc_set == VK_NULL_HANDLE) {
+        if (g_verbose) fprintf(stderr, "[briev_accel/vulkan] bind_images skip: n=%u bound=%d set=%d\n",
+            k ? k->n_images : 0u, k ? k->images_bound : -1, k->desc_set != VK_NULL_HANDLE);
+        return;
+    }
+    if (g_verbose) fprintf(stderr, "[briev_accel/vulkan] bind_images: writing %u image binding(s)\n", k->n_images);
+    for (uint32_t i = 0; i < k->n_images; i++) {
+        VkDescriptorImageInfo dii = {0};
+        dii.imageView = (uint64_t)k->images[i].view;
+        dii.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        VkWriteDescriptorSet wds = {0};
+        wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        wds.dstSet = (uint64_t)k->desc_set;
+        wds.dstBinding = 1 + i;
+        wds.descriptorCount = 1;
+        wds.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        wds.pImageInfo = &dii;
+        vkUpdateDescriptorSets(vk_device, 1, &wds, 0, NULL);
+    }
+    k->images_bound = 1;
+}
+
+// Pull each image into its flat host array: GENERAL -> TRANSFER_SRC,
+// CopyImageToBuffer into the scratch, TRANSFER_SRC -> GENERAL, then memcpy
+// scratch -> state + host_offset. One submission for all images.
+static int briev_dev_vulkan_download_images(void* handle, const BrievImageDesc* imgs,
+                                            uint32_t n, void* state) {
+    BrievVulkanKernel* k = (BrievVulkanKernel*)handle;
+    int verbose = g_verbose;
+    if (!k || n == 0 || n > k->n_images || k->image_scratch == VK_NULL_HANDLE) {
+        return 0;
+    }
+    // Record into the SHARED command buffer with the kernel's fence — the
+    // exact pattern the launch path uses (a private one-shot buffer from a
+    // non-reset pool segfaulted this driver's vkCmdPipelineBarrier).
+    VkCommandBufferBeginInfo bbi = {0};
+    bbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(vk_cmd_buf, &bbi) != VK_SUCCESS) {
+        return 0;
+    }
+    size_t base = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        // GENERAL is valid for CopyImageToBuffer's source — no layout
+        // transitions needed (image barriers segfault driver 580.178 here;
+        // the fence provides the write->copy ordering).
+        VkBufferImageCopy region = {0};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent.width = k->images[i].width;
+        region.imageExtent.height = k->images[i].height;
+        region.imageExtent.depth = 1;
+        vkCmdCopyImageToBuffer(vk_cmd_buf, (uint64_t)k->images[i].image,
+                               VK_IMAGE_LAYOUT_GENERAL,
+                               (uint64_t)k->image_scratch, 1, &region);
+        base += (size_t)k->images[i].width * k->images[i].height * 4u;
+    }
+    if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
+        return 0;
+    }
+    if (k->fence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fci = {0};
+        fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(vk_device, &fci, NULL, &k->fence) != VK_SUCCESS) {
+            return 0;
+        }
+    } else {
+        vkResetFences(vk_device, 1, &k->fence);
+    }
+    VkSubmitInfo si = {0};
+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &vk_cmd_buf;
+    if (vkQueueSubmit(vk_queue, 1, &si, k->fence) != VK_SUCCESS
+        || vkWaitForFences(vk_device, 1, &k->fence, 1, UINT64_MAX) != VK_SUCCESS) {
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] image download submit failed\n");
+        return 0;
+    }
+    // Scatter the scratch contents into the flat host arrays.
+    size_t off = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        size_t bytes = (size_t)k->images[i].width * k->images[i].height * 4u;
+        memcpy((uint8_t*)state + imgs[i].host_offset,
+               (uint8_t*)k->image_scratch_mapped + off, bytes);
+        off += bytes;
+    }
+    return 1;
+}
 
 static int briev_dev_vulkan_launch_dev2d(void* handle, size_t nx, size_t ny,
                                          int full_sync, const size_t* dirty,
@@ -1212,6 +1526,11 @@ static int briev_dev_vulkan_download_dev(void* handle) {
 
 /// 2026-09-02: the REAL device name captured at init (run diagnostics name
 /// the GPU, not the API). "vulkan" until init succeeds.
+static int briev_dev_vulkan_set_images(void* handle, const BrievImageDesc* imgs, uint32_t n);
+
+static int briev_dev_vulkan_download_images(void* handle, const BrievImageDesc* imgs,
+                                            uint32_t n, void* state);
+
 static const char* briev_dev_vulkan_device_name(void) {
     return vk_device_name;
 }
@@ -1232,4 +1551,7 @@ BrievDeviceDriver briev_dev_vulkan = {
     briev_dev_vulkan_launch_dev2d_batch,
     // 2026-09-02: the real GPU name for run diagnostics.
     briev_dev_vulkan_device_name,
+    // 2026-09-02: image support (tail of the ops struct).
+    briev_dev_vulkan_set_images,
+    briev_dev_vulkan_download_images,
 };

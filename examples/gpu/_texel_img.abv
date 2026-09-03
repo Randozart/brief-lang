@@ -1,0 +1,19 @@
+const N: Int = 65536;
+const W: Int = 256;
+let i: Int = 0;
+let x: Float[65536];
+
+type R32: Float {
+    spec Bits: 32;
+    spec Format: R32Float;
+};
+
+let img: R32[65536];
+
+async node fill [i < N][i == N] {
+    let pix: Int = i % W;
+    let row: Int = i / W;
+    img[i] = (x[i] + 1.0) as R32;
+    i = i + 1;
+    term;
+};
