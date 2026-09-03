@@ -2387,7 +2387,7 @@ impl<'a> Parser<'a> {
             Some(k) => k,
             None => {
                 let msg = format!(
-                    "unknown spec '{}' — known specs: Alignment, Bits, MaxBits, Bytes, Endian",
+                    "unknown spec '{}' — known specs: Access, Alignment, Bits, Bytes, Dims, Endian, Format, MaxBits",
                     name
                 );
                 return self.error_at_current(&msg);
@@ -2403,6 +2403,24 @@ impl<'a> Parser<'a> {
                     );
                     return self.error_at_current(&msg);
                 }
+                metadata.insert(key.into(), PropertyValue::Identifier(id));
+            }
+            // 2026-09-02: image-resource identifiers. Access is validated
+            // here (a closed set); Format is validated by the backend's
+            // image table — the parser does not know device formats.
+            "access" => {
+                let id = self.expect_identifier()?;
+                if !matches!(id.as_str(), "WriteOnly" | "ReadOnly" | "ReadWrite") {
+                    let msg = format!(
+                        "invalid spec Access value '{}' — expected WriteOnly, ReadOnly, or ReadWrite",
+                        id
+                    );
+                    return self.error_at_current(&msg);
+                }
+                metadata.insert(key.into(), PropertyValue::Identifier(id));
+            }
+            "format" => {
+                let id = self.expect_identifier()?;
                 metadata.insert(key.into(), PropertyValue::Identifier(id));
             }
             _ => {
@@ -3022,6 +3040,13 @@ fn spec_name_to_key(name: &str) -> Option<&'static str> {
         "MaxBits" => Some("maxbits"),
         "Bytes" => Some("bytes"),
         "Endian" => Some("endian"),
+        // 2026-09-02 (plan 2026-09-02-image-and-dehashtag): image-resource
+        // keys — the casting graph's Image category consumes them to derive
+        // the target image shape. Format/Access values are validated by the
+        // backend's image table (the parser does not know device formats).
+        "Format" => Some("format"),
+        "Access" => Some("access"),
+        "Dims" => Some("dims"),
         _ => None,
     }
 }
@@ -3303,6 +3328,35 @@ mod tests {
     fn test_spec_endian_invalid_value_rejected() {
         let err = parse_top("type W: #Int { spec Endian: Sideways; };").unwrap_err();
         assert!(err.contains("invalid spec Endian value"), "got: {err}");
+    }
+
+    #[test]
+    fn test_spec_image_keys_parse() {
+        // 2026-09-02 (plan 2026-09-02-image-and-dehashtag): the image
+        // resource keys — Format/Access identifiers, Dims integer.
+        let tl = parse_top(
+            "type Rgba8: Image { spec Bits: 32; spec Format: R8G8B8A8Unorm; spec Access: WriteOnly; spec Dims: 2; };",
+        )
+        .unwrap();
+        let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
+        assert_eq!(
+            td.body.metadata["format"],
+            crate::ast::PropertyValue::Identifier("R8G8B8A8Unorm".into())
+        );
+        assert_eq!(
+            td.body.metadata["access"],
+            crate::ast::PropertyValue::Identifier("WriteOnly".into())
+        );
+        assert_eq!(td.body.metadata["dims"], crate::ast::PropertyValue::Int(2));
+    }
+
+    #[test]
+    fn test_spec_access_invalid_value_rejected() {
+        let err = parse_top(
+            "type Img: Image { spec Format: R8G8B8A8Unorm; spec Access: Sometimes; };",
+        )
+        .unwrap_err();
+        assert!(err.contains("invalid spec Access value"), "got: {err}");
     }
 
     #[test]
