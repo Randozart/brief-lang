@@ -60,7 +60,7 @@ check does not exist — the backend silently falls through to external call.
 | Pointers | `Deref#`, `AddrOf#` | `*ptr` and `&x` desugar to these; needed for memory model |
 | Index | `Index#` | `a[b]` desugars to this |
 | Memory | `Malloc#`, `Free#`, `Load#`, `Store#`, `Copy#`, `Fill#` | Heap operations are language primitives |
-| Math hardware | `Sqrt#`, `Sin#`, `Cos#`, `Fabs#`, `Ceil#`, `Floor#`, `Pow#` | Cannot be expressed in Briev without hardware access |
+| Math hardware | `Sqrt#`, `Sin#`, `Cos#`, `Fabs#`, `Ceil#`, `Floor#`, `Exp#`, `Pow#` | Cannot be expressed in Briev without hardware access. `Exp#` (2026-09-02): `GLSL.std.450 Exp` on SPIR-V, `expf` on native. |
 | I/O | — | Migrated to stdlib. `!Print`/`!PrintLn` dispatched via Front plugin; `!GetEnv`/`!GetEnvInt` resolved to pure-Briev environ scan. All use `SysCall#(Write, ...)` or `Load#` underneath. |
 | Atomic | `AtomicLoad#`, `AtomicStore#`, `AtomicCas#`, etc. | Hardware memory model primitives |
 

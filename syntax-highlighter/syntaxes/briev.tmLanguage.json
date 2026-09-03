@@ -349,7 +349,7 @@
           "name": "keyword.other.time-unit.briev"
         },
         {
-          "match": "\\b(Abs\\#|BitReverse\\#|Popcount\\#|LeadingZeros\\#|TrailingZeros\\#|SysCall\\#|Malloc\\#|Free\\#|Print\\#|Sqrt\\#|Capacity\\#|Resize\\#|EnsureCap\\#|TrimCap\\#|Count\\#|At\\#|Slice\\#|InsertAt\\#|ExtractFrom\\#|CopyFrom\\#|CharCount\\#)\\b",
+          "match": "\\b(Abs\\#|BitReverse\\#|Popcount\\#|LeadingZeros\\#|TrailingZeros\\#|SysCall\\#|Malloc\\#|Free\\#|Print\\#|Sqrt\\#|Exp\\#|Capacity\\#|Resize\\#|EnsureCap\\#|TrimCap\\#|Count\\#|At\\#|Slice\\#|InsertAt\\#|ExtractFrom\\#|CopyFrom\\#|CharCount\\#)\\b",
           "name": "support.function.intrinsic.briev"
         },
         {

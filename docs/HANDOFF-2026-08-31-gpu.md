@@ -18,6 +18,23 @@
 >   the coopmat tensor tier run (spirv_coopmat=1, validate against the
 >   naive reference, race the 12.6 TFLOP/s ggml anchor), then the
 >   256³ small-shape generality quirk.
+>
+> **2026-09-02 PORTFOLIO + FALLBACK SESSION** (plan:
+> `docs/plans/2026-09-02-gpu-portfolio-and-fallback.md`):
+> - **Portfolio broadened** (statuses in `benchmark-strategy.md` § GPU
+>   Benchmark Portfolio): `reduce.abv` (0.771ms / 69 GB/s — latency-bound
+>   serial FADD chains; subgroup-coop accumulation is the fix, NOT a
+>   shared-memory tree — see O6 note in the plan), `gather_8.abv`
+>   (69.5 GB/s random-read; stencil deferred — SPIR-V rejects guarded
+>   bodies), `softmax.abv` + the `Exp#` intrinsic (278.9 GB/s).
+> - **saxpy store mystery RESOLVED**: the bench passed `n_fields=3` for
+>   4 fields — z was invisible to the runtime (BUGS.md). Harnesses MUST
+>   mirror the generated runner's field count AND offsets.
+> - **`--accel-cpu-fallback N` shipped** (.bv lane only; .abv stays
+>   GPU-only by doctrine): shapes below the work-item threshold fall to
+>   the CPU loop — const shapes fold at compile time, runtime shapes
+>   icmp-gate. Two latent `.bv`-binary emission bugs fixed en route
+>   (traps 11-12 below); the descriptor/probe path is now opt-verified.
 
 
 **Date:** 2026-08-31 (end of session)
@@ -169,6 +186,23 @@ LocalSize is currently hardcoded 64×1×1 (`VK_LOCAL_SIZE_X` in the driver,
    rebuild, or you debug ghost behavior.
 10. rg `-rn` is "replace with n" — do not use it for searching (cost real
     time twice).
+11. **LLVM IR float literals must carry a decimal point.** Rust's `{:e}`
+    prints `1e-4` — LLVM parses that as an integer token and clang/opt
+    reject the module. Always `{:?}` (round-trip shortest, always `.`).
+    Found when `--accel-cpu-fallback` first forced the probe path through
+    opt-verification.
+12. **`%briev.field` constants must match the C struct order exactly**
+    (name, kind, host_offset, elem_bytes, count, is_write, proj_offset).
+    The old emitter slotted proj_offset at index 3 — misaligned runtime
+    reads AND an opt type error. The generated runner's field tables
+    (.abv path) were always correct; only the LLVM-side constant emitter
+    was wrong. The `.bv` binary descriptor path was never clang-verified
+    before — consider an opt-verify smoke test for .bv accel changes.
+13. **C bench harnesses must mirror the GENERATED RUNNER's field table —
+    count AND offsets AND n_fields.** The saxpy bench carried 4 BrievField
+    entries with n_fields=3: the runtime silently ignored z, which looked
+    exactly like a store-visibility driver bug. The runner is the single
+    layout authority.
 
 ## 8. Session-start checklist
 

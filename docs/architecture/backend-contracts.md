@@ -70,6 +70,8 @@ Hard-won in this effort; each one corresponds to a real defect class.
 | Guards: PRESET the slot, then ONE conditional set. Never two sequential whens where the second reads the mutated slot | EQ returned 0 for equal values (tamer), Abs-style logic corruption |
 | Struct-of-array element reads LOAD; address-handles only for genuine structs | Pointers pushed onto value stacks |
 | Contract placeholder wires forbidden — the condition op IS the definition | Duplicate result definitions |
+| LLVM IR float literals always carry a decimal point (`{:?}`, never `{:e}`) | `1e-4` parses as an integer token — clang/opt reject the module |
+| `%briev.field` constant order = C `BrievField` order (name, kind, host, elem, count, is_write, proj) | proj_offset at the wrong index misaligns runtime reads; opt type error |
 
 ---
 
@@ -150,6 +152,15 @@ contract == tamer behavior.
 - State = ONE Block-decorated StorageBuffer: fields sorted by name,
   explicit MemberOffset layout, ArrayStride on arrays, descriptor set 0
   binding 0. Reads/writes via AccessChain (+Load/Store).
+- **`.bv` dispatch wrapper gate** (2026-09-02,
+  `--accel-cpu-fallback N`): the `@txn_<name>` wrapper's GPU lane checks
+  the WORK-ITEM count (not workgroup count — the wrapper runs before the
+  blob's LocalSize is known; work items are the runtime's dispatch
+  argument) against the threshold. Const-bound shapes fold at compile
+  time (`br` straight to the CPU lane); runtime-bound shapes emit
+  `icmp uge` + branch. `.abv` is GPU-only by charter — the flag never
+  touches it. Probe functions are not threshold-gated in v1 (the probe
+  measures both lanes and commits a verdict regardless).
 - **Load#/Store# take ADDRESS EXPRESSIONS** (2026-08-26, plan §2.3):
   `Load#(field)`, `Load#(field[i])`, `Store#(field[i], v)` lower to
   SSBO AccessChain + OpLoad/OpStore; scalar state fields join the

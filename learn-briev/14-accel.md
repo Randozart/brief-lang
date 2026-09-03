@@ -96,6 +96,23 @@ accel node init_bodies [beginprogram && i < nb][i == nb] {
 
 Here `beginprogram` marks the entry, and `accel` offloads the init pass.
 
+## Keeping tiny shapes on the CPU (`--accel-cpu-fallback N`)
+
+```bash
+brievc build app.bv --accel-cpu-fallback 8
+```
+
+Shapes whose work-item count is below `N` run the native CPU counted loop
+instead of dispatching to the GPU. Useful when very small dispatches are
+common: a sub-8-workgroup launch cannot amortize its own cost, and some
+drivers mishandle it. The threshold applies to the `.bv` offload lane
+only — `.abv` files are pure GPU by design and never fall back. Const
+bounds fold the check at compile time; runtime bounds check per call.
+
+The `.abv` portfolio files under `examples/gpu/` show the supported
+kernel shapes end to end (`gemv`, `gemm`, `reduce`, `gather_8`,
+`softmax`, `saxpy`).
+
 ## What the GPU compiler builds from your loop (2026-09-01)
 
 You write the loop; the compiler picks the kernel. Three forms exist —
@@ -149,6 +166,6 @@ call, expressed as a type.
 **Launch cost matters at small sizes.** A synchronous launch costs ~40µs
 on this class of device regardless of kernel size; a 64-row GEMV compute
 is microseconds. Loop deployments should batch (`launch_resident_batch`):
-K launches in one submission ≈ kernel time per call. The benchmark files
-under `benchmarks/gpu/` show the working shapes (`gemv.abv`, `gemv_m64.abv`,
+K launches in one submission ≈ kernel time per call. The portfolio files
+under `examples/gpu/` show the working shapes (`gemv.abv`, `gemv_m64.abv`,
 `gemm.abv`).

@@ -5489,3 +5489,25 @@ gate.
 **Lesson**: the bench harness field table must exactly mirror the
 generated runner's field count. The runner is always the authority —
 derive offsets AND n_fields from it.
+
+## 2026-09-02 — .bv binary accel path: two latent emission bugs (FIXED)
+
+The `.bv` offload binary's descriptor/probe emission had never been run
+through opt/clang verification — `--accel-cpu-fallback` forced the first
+exercise and surfaced both immediately:
+
+1. **Float literals without a decimal point.** The probe call emitted
+   `double {:e}` → `1e-4`. LLVM IR text requires the decimal form
+   (`0.0001`); `1e-4` parses as an integer token and the module fails
+   verification ("integer constant must have integer type"). Fix: `{:?}`
+   (Rust round-trip shortest, always carries `.`).
+2. **`%briev.field` constants in the wrong order.** Emitted
+   (name, kind, host, proj, elem, count, is_write); the C `BrievField`
+   layout is (name, kind, host, elem, count, is_write, proj) — proj_offset
+   at index 3 misaligns the runtime's reads AND trips opt's struct type
+   check. Fix: emit C order; descriptor test updated.
+
+**Lesson**: the .abv runner path was always clang-compiled (the benches),
+but the .bv descriptor constants were only ever inspected, never
+verified. Any new emission through a text IR format needs an
+`opt -passes=verify` smoke test, and float literals must never use `{:e}`.
