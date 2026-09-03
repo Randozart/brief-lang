@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
         { "y", 1, off_y, 4, N, 1, proj_y },
         { "z", 1, off_z, 4, N, 1, proj_z },
     };
-    BrievKernelDesc desc = { "saxpy", spv, (uint32_t)spv_len, 3, fields };
+    BrievKernelDesc desc = { "saxpy", spv, (uint32_t)spv_len, 4, fields };
 
     float* x = (float*)(state + off_x);
     float* y = (float*)(state + off_y);

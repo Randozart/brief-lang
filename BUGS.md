@@ -5473,35 +5473,19 @@ compute-write→transfer-read barrier on the download (spec-clean defense).
 tier selection (small shapes are CPU-competitive anyway), and re-verify
 against a different vendor/driver when available.
 
-## 2026-09-02 — saxpy bench: 4th-field stores never visible host-side (OPEN)
+## 2026-09-02 — saxpy bench: 4th-field stores never visible host-side (RESOLVED)
 
-The GPU-portfolio saxpy benchmark (examples/gpu/saxpy.abv, z = 2x + y,
-4 SSBO fields i/x/y/z) runs, dispatches correctly (verified verbose:
-65536x256), and its blob is correct by disassembly (loads member 1/2,
-stores member 3; member offsets 0/16/67108880/134217744 match the
-generated runner and the bench's field table exactly) — yet z reads
-ALL ZEROS in the host state after download, at every shape tested
-(65536 and 16777216 elements; 256 and 65536 workgroups).
+**Root cause**: `saxpy_bench.c` declared 4 BrievField entries but passed
+`n_fields = 3` to `BrievKernelDesc`. The runtime only processed the
+first 3 fields (i/x/y) — z was invisible to push/pull/download. A
+simple harness bug, not a runtime or compiler issue.
 
-Evidence:
-- x round-trips perfectly (transport + pack/push/pull/unpack verified
-  for the 2nd field).
-- The 3-field y-accumulating variant DID transport stores — but the
-  device state showed TWO passes applied when the harness expected one
-  (resident launches push only scalars/dirty after the first seed, so
-  host-side re-seeds never reach the device; the pass count still did
-  not reconcile — off by one).
-- The 4096³ GEMM benches (4 fields i/a/b/y) pass end-to-end through the
-  same runtime path — so 4 fields per se work.
+**Resolution**: changed `n_fields` from 3 to 4 in `saxpy_bench.c`.
+Verified: max_abs_err = 0.000e+00 at N=16777216 with WARMUP=3 ITERS=3
+and WARMUP=3 ITERS=5 — z stores land correctly. The idempotent kernel
+(z = 2x + y, separate destination) means pass count cannot corrupt the
+gate.
 
-Suspects (unchecked): the runtime's proj/unpack for a field whose
-proj_offset sits past the 128MB boundary (z @ 134217744); an
-SSBO-member-offset vs descriptor-range interaction; a harness-side
-field-table subtlety. Next step: binary-search the field count/offsets
-with stripped-down blobs, and diff against the generated runner's own
-pack path (brievc run's in-process machine, which is a SECOND
-implementation and may not share the bug).
-
-**Status**: OPEN — bench correctness gate treated as failing; the
-memory-bandwidth numbers are still informative (292-436 GB/s observed
-transport) but not ledger-grade until the gate passes.
+**Lesson**: the bench harness field table must exactly mirror the
+generated runner's field count. The runner is always the authority —
+derive offsets AND n_fields from it.
