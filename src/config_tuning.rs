@@ -194,6 +194,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_image_storage: false,
     spirv_coopmat_f16acc: false,
     spirv_coopmat_subgroups: 1,
+
     firmem_min_depth: 64,
     firmem_max_ports: 4,
     clock_hz: 0,
