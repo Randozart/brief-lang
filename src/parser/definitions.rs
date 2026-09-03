@@ -2387,7 +2387,7 @@ impl<'a> Parser<'a> {
             Some(k) => k,
             None => {
                 let msg = format!(
-                    "unknown spec '{}' — known specs: Access, Alignment, Bits, Bytes, Dims, Endian, Format, MaxBits",
+                    "unknown spec '{}' — known specs: Alignment, Bits, Bytes, Endian, Format, MaxBits",
                     name
                 );
                 return self.error_at_current(&msg);
@@ -2405,20 +2405,8 @@ impl<'a> Parser<'a> {
                 }
                 metadata.insert(key.into(), PropertyValue::Identifier(id));
             }
-            // 2026-09-02: image-resource identifiers. Access is validated
-            // here (a closed set); Format is validated by the backend's
-            // image table — the parser does not know device formats.
-            "access" => {
-                let id = self.expect_identifier()?;
-                if !matches!(id.as_str(), "WriteOnly" | "ReadOnly" | "ReadWrite") {
-                    let msg = format!(
-                        "invalid spec Access value '{}' — expected WriteOnly, ReadOnly, or ReadWrite",
-                        id
-                    );
-                    return self.error_at_current(&msg);
-                }
-                metadata.insert(key.into(), PropertyValue::Identifier(id));
-            }
+            // 2026-09-02 (revised plan): texel format — an identifier,
+            // validated by the backend's image-format table.
             "format" => {
                 let id = self.expect_identifier()?;
                 metadata.insert(key.into(), PropertyValue::Identifier(id));
@@ -3040,13 +3028,14 @@ fn spec_name_to_key(name: &str) -> Option<&'static str> {
         "MaxBits" => Some("maxbits"),
         "Bytes" => Some("bytes"),
         "Endian" => Some("endian"),
-        // 2026-09-02 (plan 2026-09-02-image-and-dehashtag): image-resource
-        // keys — the casting graph's Image category consumes them to derive
-        // the target image shape. Format/Access values are validated by the
-        // backend's image table (the parser does not know device formats).
+        // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): the
+        // TEXEL format key — element-level physical metadata (§8.2's exact
+        // domain). The value is validated by the backend's image-format
+        // table (the parser does not know device formats). Container- and
+        // resource-tier concepts (Dims, Access) deliberately have no spec
+        // key: image-ness is a compiler storage decision, not a type-level
+        // one.
         "Format" => Some("format"),
-        "Access" => Some("access"),
-        "Dims" => Some("dims"),
         _ => None,
     }
 }
@@ -3331,32 +3320,30 @@ mod tests {
     }
 
     #[test]
-    fn test_spec_image_keys_parse() {
-        // 2026-09-02 (plan 2026-09-02-image-and-dehashtag): the image
-        // resource keys — Format/Access identifiers, Dims integer.
+    fn test_spec_texel_format_key_parses() {
+        // 2026-09-02 (revised plan): the texel format is ELEMENT-level
+        // physical metadata on an ordinary fundamental-child type.
+        // Image-ness is a compiler storage decision — no container keys.
         let tl = parse_top(
-            "type Rgba8: Image { spec Bits: 32; spec Format: R8G8B8A8Unorm; spec Access: WriteOnly; spec Dims: 2; };",
+            "type R32: Float { spec Bits: 32; spec Format: R32Float; };",
         )
         .unwrap();
         let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
         assert_eq!(
             td.body.metadata["format"],
-            crate::ast::PropertyValue::Identifier("R8G8B8A8Unorm".into())
+            crate::ast::PropertyValue::Identifier("R32Float".into())
         );
-        assert_eq!(
-            td.body.metadata["access"],
-            crate::ast::PropertyValue::Identifier("WriteOnly".into())
-        );
-        assert_eq!(td.body.metadata["dims"], crate::ast::PropertyValue::Int(2));
+        assert_eq!(td.body.metadata["bits"], crate::ast::PropertyValue::Int(32));
     }
 
     #[test]
-    fn test_spec_access_invalid_value_rejected() {
-        let err = parse_top(
-            "type Img: Image { spec Format: R8G8B8A8Unorm; spec Access: Sometimes; };",
-        )
-        .unwrap_err();
-        assert!(err.contains("invalid spec Access value"), "got: {err}");
+    fn test_spec_container_keys_rejected() {
+        // Image-ness is a storage decision, not type-level metadata —
+        // container/resource-tier keys do not exist.
+        let err = parse_top("type Img: Float { spec Dims: 2; };").unwrap_err();
+        assert!(err.contains("unknown spec"), "got: {err}");
+        let err = parse_top("type Img: Float { spec Access: WriteOnly; };").unwrap_err();
+        assert!(err.contains("unknown spec"), "got: {err}");
     }
 
     #[test]
