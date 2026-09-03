@@ -177,11 +177,13 @@ applied to the benchmark suite itself:
 | `gemv.abv` + `gemv_bench` | row reduction, co-op rows | memory + subgroup ops | ✅ ledger (M1, 0.199ms) |
 | `gemm.abv` + `gemm_bench` | tiled matmul f32 | shared-mem staging, compute | ✅ ledger (M2.1) |
 | `gemm_h.abv` + `gemm_h_bench` | tensor matmul f16 | coopmat fragments, fp32 accumulate | ✅ ledger (14.3 TFLOP/s, past anchor) |
-| `saxpy.abv` + `saxpy_bench` | pure elementwise | achieved DRAM bandwidth | ⚠️ correctness gate OPEN (BUGS.md: 4th-field store visibility) |
-| `reduce.abv` + `reduce_bench` | two-stage reduction | bandwidth + combination | ✅ 0.771ms / 69 GB/s — latency-bound; O6 target |
+| `saxpy.abv` + `saxpy_bench` | pure elementwise | achieved DRAM bandwidth | ✅ RESOLVED (n_fields=3 harness typo; 219.7 GB/s full-transport) |
+| `reduce.abv` + `reduce_bench` | two-stage reduction | bandwidth + combination | ✅ 0.771ms / 69 GB/s — latency-bound; subgroup-coop target |
+| `gather_8.abv` + `gather_bench` | strided gather (32B stride) | random-read throughput | ✅ 1.881ms / 69.5 GB/s — prefetcher penalty vs saxpy's stream |
+| `softmax.abv` + `softmax_bench` | elementwise Exp# | transcendenal compute+memory | ✅ 0.455ms / 278.9 GB/s (Exp# via GLSL.std.450) |
 | `nbody_force.bv` | N-body central force | non-AI compute generality | ✅ pre-existing |
 | `pairs.abv` | 2D dispatch infra | grid geometry | ✅ infra |
-| softmax, stencil | transcendentals + local windows | planned — different eligibility surfaces | 📝 next |
+| stencil (neighbor + boundary) | local windows | needs guarded bodies or .bv+accel lane | 📝 deferred — SPIR-V rejects when/[]; gather fills the non-contiguous slot |
 
 Doctrine notes:
 - Every entry gates on correctness BEFORE timing; the C harness is
