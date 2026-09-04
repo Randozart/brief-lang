@@ -180,7 +180,11 @@ int main(int argc, char** argv) {
     int batch = argc > 7 ? atoi(argv[7]) : 0;
     const int warmup = argc > 8 ? atoi(argv[8]) : DEFAULT_WARMUP;
     // Non-NULL ⇒ in-process A/B: kernel 0 = argv[1], kernel 1 = argv[9].
+    // argv[10] = kernel B's dispatch count — REQUIRED when B has different
+    // tile geometry (e.g. R=2 needs 2× the workgroups of R=4; sharing A's
+    // count under-dispatches B → half the output stays zero, rel = 1.0).
     const char* spv2_path = argc > 9 ? argv[9] : NULL;
+    uint64_t dispatch2_override = argc > 10 ? strtoull(argv[10], NULL, 10) : 0;
     int ab_mode = spv2_path != NULL;
     if (ab_mode && !batch) {
         fprintf(stderr, "A/B mode requires batch=1\n");
@@ -238,8 +242,13 @@ int main(int argc, char** argv) {
     // Dispatch: naive = one work item per output element; a nonzero
     // override mirrors the generated runner's tier geometry.
     uint64_t dispatch_n = dispatch_override != 0 ? dispatch_override : M * N;
+    uint64_t dispatch_n2 = ab_mode
+        ? (dispatch2_override != 0 ? dispatch2_override : dispatch_n)
+        : 0;
 
     // Warm-up: alternating launches keep both kernels' clock state hot.
+    uint64_t disp_by_idx[2] = { dispatch_n, dispatch_n2 };
+    unsigned char* state_by_idx[2] = { stateA, stateB };
     for (int w = 0; w < warmup; w++) {
         *(int64_t*)(stateA + off_i) = 0;
         if (!briev_accel_launch_resident(0, stateA, dispatch_n)) {
@@ -248,7 +257,7 @@ int main(int argc, char** argv) {
         }
         if (ab_mode) {
             *(int64_t*)(stateB + off_i) = 0;
-            if (!briev_accel_launch_resident(1, stateB, dispatch_n)) {
+            if (!briev_accel_launch_resident(1, stateB, dispatch_n2)) {
                 fprintf(stderr, "dispatch failed (B)\n");
                 return 1;
             }
@@ -270,29 +279,40 @@ int main(int argc, char** argv) {
     if (ab_mode) {
         // Interleaved A/B: per round, one batched submission per kernel,
         // back-to-back — one fence gap per round, shared clock window.
+        // ORDER ALTERNATES each round (2026-09-04): a same-SPV self-A/B
+        // showed a monotonic positional bias when the clock state is
+        // transient (first slot 9.9→13.7ms while second 12.5→8.6ms across
+        // rounds) — alternating cancels it in the per-kernel sums.
         double tot_a = 0.0, tot_b = 0.0, min_a = 1e30, min_b = 1e30;
         for (int r = 0; r < AB_ROUNDS; r++) {
-            *(int64_t*)(stateA + off_i) = 0;
+            uint32_t k0 = (r & 1) == 0 ? 0 : 1;
+            uint32_t k1 = 1 - k0;
+            unsigned char* st0 = state_by_idx[k0];
+            unsigned char* st1 = state_by_idx[k1];
+            *(int64_t*)(st0 + off_i) = 0;
             double t0 = now_ms();
-            if (!briev_accel_launch_resident_batch(0, stateA, dispatch_n, 1, iters)) {
-                fprintf(stderr, "batch dispatch failed (A)\n");
+            if (!briev_accel_launch_resident_batch(k0, st0, disp_by_idx[k0], 1, iters)) {
+                fprintf(stderr, "batch dispatch failed (%c)\n", k0 == 0 ? 'A' : 'B');
                 return 1;
             }
-            double dt_a = now_ms() - t0;
-            *(int64_t*)(stateB + off_i) = 0;
+            double dt0 = now_ms() - t0;
+            *(int64_t*)(st1 + off_i) = 0;
             double t1 = now_ms();
-            if (!briev_accel_launch_resident_batch(1, stateB, dispatch_n, 1, iters)) {
-                fprintf(stderr, "batch dispatch failed (B)\n");
+            if (!briev_accel_launch_resident_batch(k1, st1, disp_by_idx[k1], 1, iters)) {
+                fprintf(stderr, "batch dispatch failed (%c)\n", k1 == 0 ? 'A' : 'B');
                 return 1;
             }
-            double dt_b = now_ms() - t1;
+            double dt1 = now_ms() - t1;
+            double dt_a = k0 == 0 ? dt0 : dt1;
+            double dt_b = k0 == 0 ? dt1 : dt0;
             tot_a += dt_a;
             tot_b += dt_b;
             if (dt_a < min_a) min_a = dt_a;
             if (dt_b < min_b) min_b = dt_b;
             double per_a = dt_a / iters, per_b = dt_b / iters;
-            printf("GPU  round %d  A %.3f ms/call (%.0f GF/s)  B %.3f ms/call (%.0f GF/s)  ratio %.3f\n",
-                   r + 1, per_a, 2.0 * (double)M * N * K / (per_a * 1e6),
+            printf("GPU  round %d (%c first)  A %.3f ms/call (%.0f GF/s)  B %.3f ms/call (%.0f GF/s)  ratio %.3f\n",
+                   r + 1, k0 == 0 ? 'A' : 'B',
+                   per_a, 2.0 * (double)M * N * K / (per_a * 1e6),
                    per_b, 2.0 * (double)M * N * K / (per_b * 1e6),
                    dt_a / dt_b);
         }

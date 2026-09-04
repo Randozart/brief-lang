@@ -1,0 +1,27 @@
+// gemm_h.abv - 4096³ GEMM with Float16 operands: the typed tensor-core path
+// (plan 2026-09-01-m2-tensor-cores + float16-float-join-and-purge). Float16
+// fields lower to cooperative-matrix fragments (fp16 in, fp32 accumulate)
+// when the device exposes VK_KHR_cooperative_matrix and the spirv_coopmat
+// knob is on.
+import "std/types/float.bv";
+
+const M: Int = 8192;
+const N: Int = 8192;
+const K: Int = 8192;
+
+let i: Int = 0;
+let a: Float16[67108864];
+let b: Float16[67108864];
+let y: Float16[67108864];
+
+async node gemm [i < M * N][i == M * N] {
+    let acc: Float16 = 0.0;
+    let m: Int = i / N;
+    let n: Int = i % N;
+    foreach k in 0..K {
+        acc = acc + a[m * K + k] * b[k * N + n];
+    }
+    y[i] = acc;
+    i = i + 1;
+    term;
+};
