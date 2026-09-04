@@ -47,6 +47,9 @@ pub struct FnLowerer<'a> {
     pub vars: HashMap<String, (Word, Type)>,
     /// State fields exposed through the SSBO: sorted name → (type, member idx).
     pub state_fields: Vec<StateField>,
+    /// D3: the fields carrying the v2f16 pair view (the smem GEMM's
+    /// a/b/y, set by kernel.rs when the tensor tier + the knobs agree).
+    pair_view_fields: Vec<String>,
     /// SSBO variable id (StorageBuffer storage class); set by setup_state_buffer.
     pub ssbo_var: Option<Word>,
     /// BuiltIn GlobalInvocationId input variable (pre-threaded or lazy).
@@ -104,6 +107,7 @@ impl<'a> FnLowerer<'a> {
             builder,
             vars: HashMap::new(),
             state_fields,
+            pair_view_fields: Vec::new(),
             ssbo_var: None,
             global_id_var: None,
             local_id_var: None,
@@ -125,6 +129,12 @@ impl<'a> FnLowerer<'a> {
     /// Register image storage plans and REMOVE the planned arrays from the
     /// SSBO field list (they are not buffer members). Call before any
     /// setup/buffer work.
+    /// D3: the fields carrying the v2f16 pair view (the smem GEMM's
+    /// a/b/y, set by kernel.rs when the tensor tier + the knobs agree).
+    pub fn set_pair_view_fields(&mut self, fields: Vec<String>) {
+        self.pair_view_fields = fields;
+    }
+
     pub fn set_image_plans(
         &mut self,
         plans: &[crate::analysis::image_storage::ImageStoragePlan],
@@ -1543,6 +1553,82 @@ fn cast_opcode(
         Ok(builder.vec4_array_type(scalar, elems))
     }
 
+    /// D3 (beyond-coopmat Stage 1): f16 arrays with even counts retype
+    /// their SSBO member to array-of-v2f16 (byte-identical: same offsets,
+    /// ArrayStride 4) so the smem fill loads/stores pairs with one op.
+    /// Gated on the fill_pairs knob via `pair_mode`; vec4 eligibility
+    /// never fires for f16 (32-bit float-shaped gate) so the two views
+    /// cannot collide.
+    fn pair_eligible(&mut self, name: &str, ty: &Type) -> Result<bool, String> {
+        if !self.pair_view_fields.iter().any(|n| n == name) {
+            return Ok(false);
+        }
+        let Type::Vector(inner, dims) = ty else {
+            return Ok(false);
+        };
+        let elems: u32 = dims
+            .iter()
+            .map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u32,
+                crate::ast::Dimension::Named(_, n) => *n as u32,
+            })
+            .product::<u32>()
+            .max(1);
+        if elems % 2 != 0 {
+            return Ok(false);
+        }
+        Ok(matches!(
+            self.builder.shape_of(inner),
+            Ok(crate::casting::graph::SpirvShape::Float { bits: 16 })
+        ))
+    }
+
+    /// OpTypeArray(v2f16, N/2) with ArrayStride 4 — byte-identical to the
+    /// half array it replaces (the count is even; see pair_eligible).
+    fn pair_member_type(builder: &mut SpirvBuilder, ty: &Type) -> Result<Word, String> {
+        let Type::Vector(inner, dims) = ty else {
+            return Err("pair_member_type on a non-array".into());
+        };
+        let elems: u32 = dims
+            .iter()
+            .map(|d| match d {
+                crate::ast::Dimension::Anonymous(n) => *n as u32,
+                crate::ast::Dimension::Named(_, n) => *n as u32,
+            })
+            .product::<u32>()
+            .max(1);
+        let scalar = builder.lower_type(inner)?;
+        let v2 = builder.builder.type_vector(scalar, 2);
+        let half_count = builder.u32_const(elems / 2);
+        // rspirv dedups identical OpTypeArrays — a second ArrayStride on
+        // the deduped id would be invalid (the vec4 machinery notes the
+        // same trap). Decorate only on first creation.
+        let existing = builder
+            .module_ref()
+            .types_global_values
+            .iter()
+            .find(|i| {
+                i.class.opcode == spirv::Op::TypeArray
+                    && i.result_type.is_none()
+                    && i.operands.first() == Some(&Operand::IdRef(v2))
+                    && i.operands.get(1) == Some(&Operand::IdRef(half_count))
+            })
+            .and_then(|i| i.result_id);
+        if let Some(arr) = existing {
+            return Ok(arr);
+        }
+        let arr = builder.builder.type_array(v2, half_count);
+        builder.emit_global(Instruction::new(
+            spirv::Op::Decorate, None, None,
+            vec![
+                Operand::IdRef(arr),
+                Operand::Decoration(spirv::Decoration::ArrayStride),
+                Operand::LiteralBit32(4),
+            ],
+        ));
+        Ok(arr)
+    }
+
     /// Declare the StorageBuffer struct over collected fields (sorted by
     /// name — determinism rule) and create its variable. Called BEFORE any
     /// body statement lowers.
@@ -1558,10 +1644,25 @@ fn cast_opcode(
         // 16B-aligned, everything else packed.
         let proj_offsets = Self::projection_offsets(self.builder, &self.state_fields)?;
         let mut vec4_ids: Vec<(String, Word, Type)> = Vec::new();
-        for (f, &off) in self.state_fields.iter().zip(&proj_offsets) {
-            if Self::vec4_eligible(self.builder, &f.ty, off)? {
-                let arr_id = Self::vec4_member_type(self.builder, &f.ty)?;
-                vec4_ids.push((f.name.clone(), arr_id, f.ty.clone()));
+        let mut pair_ids: Vec<(String, Word, Type)> = Vec::new();
+        let state_fields_snapshot: Vec<(String, Type)> = self
+            .state_fields
+            .iter()
+            .map(|f| (f.name.clone(), f.ty.clone()))
+            .collect();
+        for (fname, fty) in state_fields_snapshot.iter() {
+            let off = proj_offsets[self
+                .state_fields
+                .iter()
+                .position(|f| &f.name == fname)
+                .unwrap_or(0)];
+            let f = (fname, fty);
+            if self.pair_eligible(f.0, f.1)? {
+                let arr_id = Self::pair_member_type(self.builder, f.1)?;
+                pair_ids.push((f.0.clone(), arr_id, f.1.clone()));
+            } else if Self::vec4_eligible(self.builder, f.1, off)? {
+                let arr_id = Self::vec4_member_type(self.builder, f.1)?;
+                vec4_ids.push((f.0.clone(), arr_id, f.1.clone()));
             }
         }
         for (name, arr_id, ty) in &vec4_ids {
@@ -1593,10 +1694,15 @@ fn cast_opcode(
         let mut members = Vec::with_capacity(field_types.len());
         for (idx, ty) in field_types.iter().enumerate() {
             // Vec4-typed members use their ARRAY-OF-VEC4 id, not the scalar
-            // array id — byte-identical layout, wide loads possible.
-            match self.vec4_fields.get(&self.state_fields[idx].name) {
-                Some(vf) => members.push(vf.array),
-                None => members.push(self.type_id(ty)?),
+            // array id — byte-identical layout, wide loads possible. Pair
+            // (v2f16) members likewise for the paired smem fill.
+            if let Some(p) = pair_ids.iter().find(|(n, _, _)| *n == self.state_fields[idx].name) {
+                members.push(p.1);
+            } else {
+                match self.vec4_fields.get(&self.state_fields[idx].name) {
+                    Some(vf) => members.push(vf.array),
+                    None => members.push(self.type_id(ty)?),
+                }
             }
         }
         let member_ids: Vec<Word> = members.clone();

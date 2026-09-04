@@ -116,6 +116,12 @@ pub struct IrLoweringSettings {
     /// for the staging experiment. (The dbvl declared this key since the
     /// smem commit but no setting consumed it — dead-knob fix.)
     pub spirv_coopmat_smem: bool,
+    /// 2026-09-04 (beyond-coopmat Stage 1, D3): the smem fill pairs the
+    /// per-element half loads/stores into u32 loads/stores (adjacent flats
+    /// = adjacent DRAM halves = adjacent smem slots). Halves the fill's
+    /// instruction count — the fill is ~8× the mma instruction volume.
+    /// 0 = scalar half fill (the historical form).
+    pub spirv_coopmat_fill_pairs: bool,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -201,6 +207,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_coopmat_f16acc: false,
     spirv_coopmat_subgroups: 1,
     spirv_coopmat_smem: true,
+    spirv_coopmat_fill_pairs: false,
 
     firmem_min_depth: 64,
     firmem_max_ports: 4,
@@ -369,6 +376,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_smem", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_smem),
+        spirv_coopmat_fill_pairs: db
+            .field_int("spirv_coopmat_fill_pairs", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_fill_pairs),
     }
 }
 

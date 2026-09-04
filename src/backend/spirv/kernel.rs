@@ -63,9 +63,41 @@ pub fn emit_kernel(
             }
         }
     }
+    // The GEMM plan + tensor-tier decision must precede the state-buffer
+    // setup: the D3 pair view (array-of-v2f16, byte-identical) applies to
+    // the smem GEMM's fields ONLY — the fallback lanes keep their scalar
+    // half views. (2026-09-04, plan 2026-09-04-beyond-coopmat Stage 1.)
+    let gemm_plan_early = gemm::GemmPlan::match_stmts(shape, items);
+    let pair_view_fields: Vec<String> = {
+        let tensor = gemm_plan_early.as_ref().map_or(false, |plan| {
+            crate::config_tuning::ir_lowering().spirv_coopmat
+                && plan.tensor_tier_eligible()
+                && gemm::GemmPlan::coopmat_smem()
+                && gemm::GemmPlan::coopmat_fill_pairs()
+                && {
+                    let field_elem = |name: &str| -> Option<Type> {
+                        state_fields.iter().find(|f| f.name == name).and_then(|f| match &f.ty {
+                            Type::Vector(inner, _) => Some((**inner).clone()),
+                            other => Some(other.clone()),
+                        })
+                    };
+                    match (field_elem(&plan.a_field), field_elem(&plan.b_field), field_elem(&plan.y_field)) {
+                        (Some(ae), Some(be), Some(ye)) => gemm::fields_are_f16(builder, &ae, &be, &ye),
+                        _ => false,
+                    }
+                }
+        });
+        if tensor {
+            let plan = gemm_plan_early.as_ref().unwrap();
+            vec![plan.a_field.clone(), plan.b_field.clone(), plan.y_field.clone()]
+        } else {
+            Vec::new()
+        }
+    };
     let (ssbo_var, global_id_var, local_id_var, workgroup_id_var, vec4_fields, state_fields_sorted, image_vars, image_types) = {
         let mut warm = FnLowerer::new(builder, state_fields.clone());
         warm.set_image_plans(images);
+        warm.set_pair_view_fields(pair_view_fields);
         warm.materialize_consts(items)?;
         warm.warm_builtins()?;
         warm.setup_state_buffer()?;
@@ -92,7 +124,7 @@ pub fn emit_kernel(
     // graph) + the coopmat knob → tensor fragment kernel; Float32
     // vec4-eligible operands → the shared-memory tiled kernel; anything
     // else → the flat naive kernel. (Plan 2026-09-01-m2-tensor-cores.)
-    let gemm_plan = gemm::GemmPlan::match_stmts(shape, items);
+    let gemm_plan = gemm_plan_early;
     let field_elem = |name: &str| -> Option<Type> {
         state_fields.iter().find(|f| f.name == name)
             .and_then(|f| match &f.ty {
@@ -164,12 +196,32 @@ pub fn emit_kernel(
         let plan = gemm_plan.as_ref().unwrap();
         let r = gemm::GemmPlan::coopmat_tile_rows(plan.m);
         let f16_ty = builder.builder.type_float(16);
+        // Pairs mode (D3): the smem arrays carry the v2f16 view
+        // (byte-identical; the fill stores pairs, the coopmat loads walk
+        // [pair_idx, 0] to a half pointer).
+        let v2_ty = if gemm::GemmPlan::coopmat_fill_pairs() {
+            Some(builder.builder.type_vector(f16_ty, 2))
+        } else {
+            None
+        };
         let a_elems = (2 * r * 16 * 16) as u32;  // 2 stages × R strips × 256
         let b_elems = (2 * 4 * 16 * 16) as u32;   // 2 stages × 4 B-tiles × 256
-        let a_len = builder.u32_const(a_elems);
-        let b_len = builder.u32_const(b_elems);
-        let a_arr_ty = builder.builder.type_array(f16_ty, a_len);
-        let b_arr_ty = builder.builder.type_array(f16_ty, b_len);
+        let (a_len, b_len) = if v2_ty.is_some() {
+            (builder.u32_const(a_elems / 2), builder.u32_const(b_elems / 2))
+        } else {
+            (builder.u32_const(a_elems), builder.u32_const(b_elems))
+        };
+        let (a_arr_ty, b_arr_ty) = if let Some(v2) = v2_ty {
+            (
+                builder.builder.type_array(v2, a_len),
+                builder.builder.type_array(v2, b_len),
+            )
+        } else {
+            (
+                builder.builder.type_array(f16_ty, a_len),
+                builder.builder.type_array(f16_ty, b_len),
+            )
+        };
         let a_ptr_ty = builder.ptr_class(StorageClass::Workgroup, a_arr_ty);
         let b_ptr_ty = builder.ptr_class(StorageClass::Workgroup, b_arr_ty);
         let sa = builder.gen_id();
