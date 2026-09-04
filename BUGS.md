@@ -5535,3 +5535,34 @@ and the C runner are unchanged. Regression guard:
 `multi_kernel_builds_one_module_per_kernel` (per-kernel modules, one
 "main" entry each). End-to-end: two chained kernels (fill → scale) both
 validate and produce correct values via `brievc run`.
+
+## 2026-09-04 — NVIDIA coopmat compiler: three silent-optimization behaviors (INSTRUMENT FINDINGS)
+
+Stage-0 microkernel campaign (plan 2026-09-04-beyond-coopmat) — all three
+were hit while building the mma-ceiling instrument; each is a DRIVER
+behavior (RTX 3060, driver 5xx, vulkan-sdk 1.4.357), not a Briev bug.
+Recorded because every future coopmat micro-benchmark will meet them:
+
+1. **Constant-fragment mmas silently produce zeros.** OpConstantComposite
+   of a coopmat type as an mma operand assembles, passes spirv-val, and
+   the mma executes — the accumulator reads 0. The chain looked "folded"
+   (202 TF/s reported = 4× hardware peak) until the operand source moved
+   to a loaded fragment. Rule: mma operands must be LOADED fragments.
+2. **SSBO coopmat loads with stride 16 (elements) read zeros.** stride-
+   4096 loads from the same member work (the production form). Workgroup-
+   storage stride-16 loads work. Symptom: mma outputs zero despite the
+   seed being verified on device via the download round-trip.
+3. **fma-chain de-fusion/reassociation across coopmat ops ignores
+   NoContraction.** 8 accumulator chains sharing one (A,B) pair ran at
+   "424 TF/s" (8× hardware peak): the driver hoisted/reassociated the
+   shared product into ALU adds. NoContraction decorations on the mma
+   results are ignored for this transform. Rule: a ceiling instrument
+   must give every mma DISTINCT operand pairs (the production GEMM's
+   4×4 register blocking already does).
+
+Also re-confirmed the harness-side saxpy bug class: mma_ceiling_bench
+shipped with n_fields=2 over a 3-field table — y was invisible to the
+runtime, proj_bytes excluded the y region, and the kernel's y stores
+were out-of-range (dropped under robustness = silent zeros; faulting =
+fence-timeout "wedge"). Harness rule: n_fields MUST equal the table
+length; derive offsets from the generated runner (the authority).
