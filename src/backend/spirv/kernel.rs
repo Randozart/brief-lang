@@ -151,6 +151,42 @@ pub fn emit_kernel(
         (None, None)
     };
 
+    // ── Tensor-tier smem staging (2026-09-02): Workgroup arrays for the
+    // cooperative matrix double-buffer pipeline.  The tiled tier's
+    // `OpTypeArray` + `emit_global` + `OpAccessChain` pattern is reused.
+    // Sizes: shared_a = 2×R×256 halves, shared_b = 2×4×256 halves.
+    // With the default R=4: 4096 + 4096 = 8192 halves = 16 KB — trivial.
+    let (coop_shared_a, coop_shared_b) = if gemm_tensor {
+        let plan = gemm_plan.as_ref().unwrap();
+        let r = gemm::GemmPlan::coopmat_tile_rows(plan.m);
+        let f16_ty = builder.builder.type_float(16);
+        let a_elems = (2 * r * 16 * 16) as u32;  // 2 stages × R strips × 256
+        let b_elems = (2 * 4 * 16 * 16) as u32;   // 2 stages × 4 B-tiles × 256
+        let a_len = builder.u32_const(a_elems);
+        let b_len = builder.u32_const(b_elems);
+        let a_arr_ty = builder.builder.type_array(f16_ty, a_len);
+        let b_arr_ty = builder.builder.type_array(f16_ty, b_len);
+        let a_ptr_ty = builder.ptr_class(StorageClass::Workgroup, a_arr_ty);
+        let b_ptr_ty = builder.ptr_class(StorageClass::Workgroup, b_arr_ty);
+        let sa = builder.gen_id();
+        builder.emit_global(Instruction::new(
+            spirv::Op::Variable,
+            Some(a_ptr_ty),
+            Some(sa),
+            vec![Operand::StorageClass(StorageClass::Workgroup)],
+        ));
+        let sb = builder.gen_id();
+        builder.emit_global(Instruction::new(
+            spirv::Op::Variable,
+            Some(b_ptr_ty),
+            Some(sb),
+            vec![Operand::StorageClass(StorageClass::Workgroup)],
+        ));
+        (Some(sa), Some(sb))
+    } else {
+        (None, None)
+    };
+
     // All direct-builder work happens BEFORE the body lowerer borrows it:
     // ids, function, entry block, and every function-scope OpVariable (they
     // must be the first instructions of the entry block).
@@ -270,6 +306,28 @@ pub fn emit_kernel(
                 a_member: member_of(&plan.a_field).ok_or("gemm a field not in state")? as u32,
                 b_member: member_of(&plan.b_field).ok_or("gemm b field not in state")? as u32,
                 y_member: member_of(&plan.y_field).ok_or("gemm y field not in state")? as u32,
+                shared_a: coop_shared_a,
+                shared_b: coop_shared_b,
+                lane_id: {
+                    let lid_ptr = local_id_var.ok_or("gemm coopmat without LocalInvocationId")?;
+                    let u32_ty = builder.u32_type();
+                    let lid = builder.gen_id();
+                    let v3_ty = builder.builder.type_vector(u32_ty, 3);
+                    builder.emit(Instruction::new(
+                        spirv::Op::Load,
+                        Some(v3_ty),
+                        Some(lid),
+                        vec![Operand::IdRef(lid_ptr)],
+                    ));
+                    let lane = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::CompositeExtract,
+                        Some(u32_ty),
+                        Some(lane),
+                        vec![Operand::IdRef(lid), Operand::LiteralBit32(0)],
+                    ));
+                    lane
+                },
             };
             gemm::emit_coopmat(builder, plan, &coopmat_args, exit_bb)?;
             builder.begin_block(Some(exit_bb));
@@ -279,9 +337,9 @@ pub fn emit_kernel(
                 .into_iter()
                 .flatten()
                 .chain(ssbo_var.into_iter())
+                .chain(coop_shared_a.into_iter())
+                .chain(coop_shared_b.into_iter())
                 .chain(image_vars.values().copied())
-                // B2: no new interface entry — the subgroup decode reuses
-                // gl_LocalInvocationID (already listed above).
                 .collect();
             builder.set_entry_point(func_id, kernel_name, ExecutionModel::GLCompute, &interface);
             builder.add_execution_mode(
