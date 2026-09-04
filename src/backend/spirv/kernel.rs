@@ -156,7 +156,11 @@ pub fn emit_kernel(
     // `OpTypeArray` + `emit_global` + `OpAccessChain` pattern is reused.
     // Sizes: shared_a = 2×R×256 halves, shared_b = 2×4×256 halves.
     // With the default R=4: 4096 + 4096 = 8192 halves = 16 KB — trivial.
-    let (coop_shared_a, coop_shared_b) = if gemm_tensor {
+    // Gated on `spirv_coopmat_smem` (2026-09-04): 0 = direct SSBO coopmat
+    // loads — the knob existed in the dbvl but nothing read it.
+    let (coop_shared_a, coop_shared_b) = if gemm_tensor
+        && gemm::GemmPlan::coopmat_smem()
+    {
         let plan = gemm_plan.as_ref().unwrap();
         let r = gemm::GemmPlan::coopmat_tile_rows(plan.m);
         let f16_ty = builder.builder.type_float(16);

@@ -110,6 +110,12 @@ pub struct IrLoweringSettings {
     /// subgroups per workgroup, each owning its own tile_n slice via the
     /// SubgroupId builtin — fewer, fatter workgroups.
     pub spirv_coopmat_subgroups: u32,
+    /// 2026-09-04 (perf-blocks plan): smem double-buffer staging for the
+    /// tensor tier. 1 (default) = Workgroup staging arrays + coopmat loads
+    /// from smem; 0 = direct SSBO coopmat loads (pre-smem form). A/B lever
+    /// for the staging experiment. (The dbvl declared this key since the
+    /// smem commit but no setting consumed it — dead-knob fix.)
+    pub spirv_coopmat_smem: bool,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -194,6 +200,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_image_storage: false,
     spirv_coopmat_f16acc: false,
     spirv_coopmat_subgroups: 1,
+    spirv_coopmat_smem: true,
 
     firmem_min_depth: 64,
     firmem_max_ports: 4,
@@ -358,6 +365,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_subgroups", 0)
             .map(|v| v.max(1).min(4) as u32)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_subgroups),
+        spirv_coopmat_smem: db
+            .field_int("spirv_coopmat_smem", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_smem),
     }
 }
 

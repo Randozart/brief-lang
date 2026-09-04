@@ -184,6 +184,14 @@ impl GemmPlan {
         crate::config_tuning::ir_lowering().spirv_coopmat_subgroups
     }
 
+    /// 2026-09-04 (perf-blocks plan): smem double-buffer staging for the
+    /// tensor tier. 0 = direct SSBO coopmat loads (the pre-smem form).
+    /// A/B lever for the staging experiment — the dbvl declared this knob
+    /// since the smem commit but nothing read it (dead-knob fix).
+    pub(crate) fn coopmat_smem() -> bool {
+        crate::config_tuning::ir_lowering().spirv_coopmat_smem
+    }
+
     pub(crate) fn coopmat_tile_rows(plan_m: i64) -> u32 {
         let mut r = crate::config_tuning::ir_lowering()
             .spirv_coopmat_tile_rows

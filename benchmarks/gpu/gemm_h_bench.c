@@ -3,7 +3,13 @@
 // gemm_bench.c: y[m*N+n] = sum_k A[m*K+k] * B[k*N+n], f16 storage /
 // f32 compute (the kernel widens at the SSBO boundary and stores round
 // back to f16 — one final rounding).
-// Usage: gemm_h_bench <kernel.spv> [M] [N] [K] [iters]
+// Usage:
+//   gemm_h_bench <kernel.spv> [M] [N] [K] [iters] [dispatch] [batch] [warmup]
+//   gemm_h_bench <kernelA.spv> [M] [N] [K] [iters] [dispatch] 1 [warmup] <kernelB.spv>
+// The two-kernel form is the in-process A/B (2026-09-04-gemm-perf-blocks):
+// per round, one batched submission per kernel back-to-back — both kernels
+// share the same DVFS window, so between-round clock skew (8ms boost vs
+// 21ms throttle windows, 2026-09-04 A/B) cancels launch-by-launch.
 // State layout mirrors the generated gemm_h_runner.c exactly
 // (name-sorted: a, b, i, y; f16 arrays 2B/elem, proj == host offsets):
 //   a @ 0          (M*K * 2 bytes)
@@ -18,7 +24,8 @@
 #include <time.h>
 #include "briev_accel_rt.c"
 
-#define WARMUP 5
+#define DEFAULT_WARMUP 5
+#define AB_ROUNDS 5
 #define VERIFY_ROWS 16
 
 static double now_ms(void) {
@@ -88,85 +95,25 @@ static double f16_to_f64(uint16_t h) {
     return (double)f;
 }
 
-static unsigned char* state = NULL;
-
-int main(int argc, char** argv) {
-    if (argc < 2) { fprintf(stderr, "usage: %s <kernel.spv> [M] [N] [K] [iters]\n", argv[0]); return 2; }
-    const uint64_t M = argc > 2 ? strtoull(argv[2], NULL, 10) : 4096;
-    const uint64_t N = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
-    const uint64_t K = argc > 4 ? strtoull(argv[4], NULL, 10) : 4096;
-    const int iters = argc > 5 ? atoi(argv[5]) : 20;
-    // 0 = naive tier (M*N work items). The TENSOR tier's geometry differs
-    // — mirror the generated runner: (M*N / 256) * 32 work items.
-    uint64_t dispatch_override = argc > 6 ? strtoull(argv[6], NULL, 10) : 0;
-    // batch=1: the steady-state loop as ONE batched submission (times =
-    // iters) — no idle gap between launches, so the GPU never drops to
-    // idle clocks mid-measurement (per-launch fence wake ~33us + DVFS
-    // ramp otherwise dominate; 2026-09-02 investigation: clocks pulsed
-    // 1837/139MHz with GPU_IDLE throttle between fence-waited launches).
-    int batch = argc > 7 ? atoi(argv[7]) : 0;
-
-    FILE* f = fopen(argv[1], "rb");
-    if (f == NULL) { perror("spv"); return 2; }
-    fseek(f, 0, SEEK_END);
-    long spv_len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t* spv = malloc((size_t)spv_len);
-    if (spv == NULL || fread(spv, 1, (size_t)spv_len, f) != (size_t)spv_len) {
-        fprintf(stderr, "short read\n"); return 2;
-    }
-    fclose(f);
-
-    uint64_t off_a = 0;
-    uint64_t off_b = off_a + M * K * 2;
-    uint64_t off_i = (off_b + K * N * 2 + 7) & ~(uint64_t)7;
-    uint64_t off_y = off_i + 8;
-    uint64_t state_bytes = off_y + M * N * 2 + 64;
-    state = calloc(1, state_bytes);
-    if (state == NULL) { fprintf(stderr, "oom\n"); return 2; }
-
-    BrievField fields[] = {
-        { "a", 1, off_a, 2, M * K, 1, off_a },
-        { "b", 1, off_b, 2, K * N, 1, off_b },
-        { "i", 2, off_i, 8, 1, 0, off_i },
-        { "y", 1, off_y, 2, M * N, 1, off_y },
-    };
-    BrievKernelDesc desc = { "gemm", spv, (uint32_t)spv_len, 4, fields };
-
+// f16-exact seeds: 0.25/0.5 multiples of small ints — the reference is
+// exact and the kernel's single store-rounding is the only error.
+static void seed_state(unsigned char* state, uint64_t off_a, uint64_t off_b,
+                       uint64_t M, uint64_t K, uint64_t N) {
     uint16_t* a = (uint16_t*)(state + off_a);
     uint16_t* b = (uint16_t*)(state + off_b);
-    uint16_t* y = (uint16_t*)(state + off_y);
-    // f16-EXACT seeds: 0.25/0.5 multiples of small ints — the reference is
-    // exact and the f32 kernel's single store-rounding is the only error.
     for (uint64_t j = 0; j < M * K; j++) a[j] = f32_to_f16((float)((int)(j % 7)) * 0.25f);
     for (uint64_t j = 0; j < K * N; j++) b[j] = f32_to_f16((float)((int)(j % 5)) * 0.5f);
+}
 
-    if (!briev_accel_init(&desc, 1)) {
-        fprintf(stderr, "no GPU device\n"); return 1;
-    }
-    printf("# fingerprint: device=%s spv=%ldB M=%llu N=%llu K=%llu warmup=%d iters=%d\n",
-           briev_accel_device_name(), spv_len,
-           (unsigned long long)M, (unsigned long long)N, (unsigned long long)K,
-           WARMUP, iters);
-
-    // Dispatch: naive = one work item per output element; a nonzero
-    // override mirrors the generated runner's tier geometry.
-    uint64_t dispatch_n = dispatch_override != 0 ? dispatch_override : M * N;
-
-    // Warm-up + download (the state after warm-up holds real outputs).
-    for (int w = 0; w < WARMUP; w++) {
-        *(int64_t*)(state + off_i) = 0;
-        if (!briev_accel_launch_resident(0, state, dispatch_n)) {
-            fprintf(stderr, "dispatch failed\n"); return 1;
-        }
-    }
-    if (!briev_accel_download(0, state)) {
-        fprintf(stderr, "download failed\n"); return 1;
-    }
-
-    // Sampled correctness against a double reference. f16 storage rounds
-    // once per output — bound the relative error at ~2^-10 (f16 epsilon)
-    // plus slack for the ~K-term f32 accumulation.
+// Sampled correctness against a double reference. f16 storage rounds
+// once per output — bound the relative error at ~2^-10 (f16 epsilon)
+// plus slack for the ~K-term f32 accumulation.
+static double max_rel_err(const unsigned char* state, uint64_t off_a,
+                          uint64_t off_b, uint64_t off_y,
+                          uint64_t M, uint64_t N, uint64_t K) {
+    const uint16_t* a = (const uint16_t*)(state + off_a);
+    const uint16_t* b = (const uint16_t*)(state + off_b);
+    const uint16_t* y = (const uint16_t*)(state + off_y);
     double max_rel = 0.0;
     uint64_t rows[VERIFY_ROWS];
     for (int r = 0; r < VERIFY_ROWS; r++) {
@@ -184,15 +131,183 @@ int main(int argc, char** argv) {
             if (rel > max_rel) max_rel = rel;
         }
     }
-    printf("# correctness: max_rel_err = %.3e (%s)\n", max_rel,
-           max_rel <= 5e-3 ? "OK" : "FAIL");
+    return max_rel;
+}
 
-    // Steady-state perf.
-    if (batch) {
-        *(int64_t*)(state + off_i) = 0;
+static void report_correctness(const char* tag, const unsigned char* st,
+                               uint64_t off_a, uint64_t off_b, uint64_t off_y,
+                               uint64_t M, uint64_t N, uint64_t K) {
+    double max_rel = max_rel_err(st, off_a, off_b, off_y, M, N, K);
+    printf("# correctness[%s]: max_rel_err = %.3e (%s)\n", tag, max_rel,
+           max_rel <= 5e-3 ? "OK" : "FAIL");
+}
+
+static uint8_t* read_spv(const char* path, long* len_out) {
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) { perror(path); return NULL; }
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t* buf = malloc((size_t)len);
+    if (buf == NULL || fread(buf, 1, (size_t)len, f) != (size_t)len) {
+        fprintf(stderr, "short read: %s\n", path);
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *len_out = len;
+    return buf;
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <kernel.spv> [M] [N] [K] [iters] [dispatch] [batch] [warmup] [kernelB.spv]\n", argv[0]);
+        return 2;
+    }
+    const uint64_t M = argc > 2 ? strtoull(argv[2], NULL, 10) : 4096;
+    const uint64_t N = argc > 3 ? strtoull(argv[3], NULL, 10) : 4096;
+    const uint64_t K = argc > 4 ? strtoull(argv[4], NULL, 10) : 4096;
+    const int iters = argc > 5 ? atoi(argv[5]) : 20;
+    // 0 = naive tier (M*N work items). The TENSOR tier's geometry differs
+    // — mirror the generated runner: (M*N / (16*R*64)) * 32 work items.
+    uint64_t dispatch_override = argc > 6 ? strtoull(argv[6], NULL, 10) : 0;
+    // batch=1: the steady-state loop as ONE batched submission (times =
+    // iters) — no idle gap between launches, so the GPU never drops to
+    // idle clocks mid-measurement (per-launch fence wake ~33us + DVFS
+    // ramp otherwise dominate; 2026-09-02 investigation: clocks pulsed
+    // 1837/139MHz with GPU_IDLE throttle between fence-waited launches).
+    int batch = argc > 7 ? atoi(argv[7]) : 0;
+    const int warmup = argc > 8 ? atoi(argv[8]) : DEFAULT_WARMUP;
+    // Non-NULL ⇒ in-process A/B: kernel 0 = argv[1], kernel 1 = argv[9].
+    const char* spv2_path = argc > 9 ? argv[9] : NULL;
+    int ab_mode = spv2_path != NULL;
+    if (ab_mode && !batch) {
+        fprintf(stderr, "A/B mode requires batch=1\n");
+        return 2;
+    }
+
+    long spv_len = 0;
+    uint8_t* spv = read_spv(argv[1], &spv_len);
+    if (spv == NULL) return 2;
+    long spv2_len = 0;
+    uint8_t* spv2 = NULL;
+    if (ab_mode) {
+        spv2 = read_spv(spv2_path, &spv2_len);
+        if (spv2 == NULL) return 2;
+    }
+
+    uint64_t off_a = 0;
+    uint64_t off_b = off_a + M * K * 2;
+    uint64_t off_i = (off_b + K * N * 2 + 7) & ~(uint64_t)7;
+    uint64_t off_y = off_i + 8;
+    uint64_t state_bytes = off_y + M * N * 2 + 64;
+    unsigned char* stateA = calloc(1, state_bytes);
+    unsigned char* stateB = ab_mode ? calloc(1, state_bytes) : NULL;
+    if (stateA == NULL || (ab_mode && stateB == NULL)) {
+        fprintf(stderr, "oom\n");
+        return 2;
+    }
+
+    BrievField fields[] = {
+        { "a", 1, off_a, 2, M * K, 1, off_a },
+        { "b", 1, off_b, 2, K * N, 1, off_b },
+        { "i", 2, off_i, 8, 1, 0, off_i },
+        { "y", 1, off_y, 2, M * N, 1, off_y },
+    };
+    BrievKernelDesc descs[2] = {
+        { "gemm", spv, (uint32_t)spv_len, 4, fields },
+        { "gemm", spv2, (uint32_t)spv2_len, 4, fields },
+    };
+    uint32_t n_kernels = ab_mode ? 2 : 1;
+
+    seed_state(stateA, off_a, off_b, M, K, N);
+    if (ab_mode) seed_state(stateB, off_a, off_b, M, K, N);
+
+    if (!briev_accel_init(descs, n_kernels)) {
+        fprintf(stderr, "no GPU device\n");
+        return 1;
+    }
+    printf("# fingerprint: device=%s spv=%ldB%s M=%llu N=%llu K=%llu warmup=%d iters=%d%s\n",
+           briev_accel_device_name(), spv_len,
+           ab_mode ? "" : " (single)",
+           (unsigned long long)M, (unsigned long long)N, (unsigned long long)K,
+           warmup, iters,
+           ab_mode ? " MODE=ab-alternating-batch" : "");
+
+    // Dispatch: naive = one work item per output element; a nonzero
+    // override mirrors the generated runner's tier geometry.
+    uint64_t dispatch_n = dispatch_override != 0 ? dispatch_override : M * N;
+
+    // Warm-up: alternating launches keep both kernels' clock state hot.
+    for (int w = 0; w < warmup; w++) {
+        *(int64_t*)(stateA + off_i) = 0;
+        if (!briev_accel_launch_resident(0, stateA, dispatch_n)) {
+            fprintf(stderr, "dispatch failed (A)\n");
+            return 1;
+        }
+        if (ab_mode) {
+            *(int64_t*)(stateB + off_i) = 0;
+            if (!briev_accel_launch_resident(1, stateB, dispatch_n)) {
+                fprintf(stderr, "dispatch failed (B)\n");
+                return 1;
+            }
+        }
+    }
+    if (!briev_accel_download(0, stateA)) {
+        fprintf(stderr, "download failed (A)\n");
+        return 1;
+    }
+    report_correctness("A", stateA, off_a, off_b, off_y, M, N, K);
+    if (ab_mode) {
+        if (!briev_accel_download(1, stateB)) {
+            fprintf(stderr, "download failed (B)\n");
+            return 1;
+        }
+        report_correctness("B", stateB, off_a, off_b, off_y, M, N, K);
+    }
+
+    if (ab_mode) {
+        // Interleaved A/B: per round, one batched submission per kernel,
+        // back-to-back — one fence gap per round, shared clock window.
+        double tot_a = 0.0, tot_b = 0.0, min_a = 1e30, min_b = 1e30;
+        for (int r = 0; r < AB_ROUNDS; r++) {
+            *(int64_t*)(stateA + off_i) = 0;
+            double t0 = now_ms();
+            if (!briev_accel_launch_resident_batch(0, stateA, dispatch_n, 1, iters)) {
+                fprintf(stderr, "batch dispatch failed (A)\n");
+                return 1;
+            }
+            double dt_a = now_ms() - t0;
+            *(int64_t*)(stateB + off_i) = 0;
+            double t1 = now_ms();
+            if (!briev_accel_launch_resident_batch(1, stateB, dispatch_n, 1, iters)) {
+                fprintf(stderr, "batch dispatch failed (B)\n");
+                return 1;
+            }
+            double dt_b = now_ms() - t1;
+            tot_a += dt_a;
+            tot_b += dt_b;
+            if (dt_a < min_a) min_a = dt_a;
+            if (dt_b < min_b) min_b = dt_b;
+            double per_a = dt_a / iters, per_b = dt_b / iters;
+            printf("GPU  round %d  A %.3f ms/call (%.0f GF/s)  B %.3f ms/call (%.0f GF/s)  ratio %.3f\n",
+                   r + 1, per_a, 2.0 * (double)M * N * K / (per_a * 1e6),
+                   per_b, 2.0 * (double)M * N * K / (per_b * 1e6),
+                   dt_a / dt_b);
+        }
+        double per_a = tot_a / (AB_ROUNDS * iters);
+        double per_b = tot_b / (AB_ROUNDS * iters);
+        printf("GPU  A avg %.3f ms/call (%.0f GF/s, min-round %.3f)  B avg %.3f ms/call (%.0f GF/s, min-round %.3f)  avg-ratio %.3f\n",
+               per_a, 2.0 * (double)M * N * K / (per_a * 1e6), min_a / iters,
+               per_b, 2.0 * (double)M * N * K / (per_b * 1e6), min_b / iters,
+               tot_a / tot_b);
+    } else if (batch) {
+        *(int64_t*)(stateA + off_i) = 0;
         double t0 = now_ms();
-        if (!briev_accel_launch_resident_batch(0, state, dispatch_n, 1, iters)) {
-            fprintf(stderr, "batch dispatch failed\n"); return 1;
+        if (!briev_accel_launch_resident_batch(0, stateA, dispatch_n, 1, iters)) {
+            fprintf(stderr, "batch dispatch failed\n");
+            return 1;
         }
         double wall = now_ms() - t0;
         double per = wall / iters;
@@ -201,9 +316,9 @@ int main(int argc, char** argv) {
     } else {
         double sum = 0, mn = 1e30, mx = 0;
         for (int it = 0; it < iters; it++) {
-            *(int64_t*)(state + off_i) = 0;
+            *(int64_t*)(stateA + off_i) = 0;
             double t1 = now_ms();
-            int ok = briev_accel_launch_resident(0, state, dispatch_n);
+            int ok = briev_accel_launch_resident(0, stateA, dispatch_n);
             double dt = now_ms() - t1;
             if (!ok) { fprintf(stderr, "dispatch failed\n"); return 1; }
             sum += dt; if (dt < mn) mn = dt; if (dt > mx) mx = dt;
@@ -213,5 +328,9 @@ int main(int argc, char** argv) {
     }
 
     briev_accel_shutdown();
+    free(stateA);
+    free(stateB);
+    free(spv);
+    free(spv2);
     return 0;
 }
