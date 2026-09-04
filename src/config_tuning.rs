@@ -122,6 +122,11 @@ pub struct IrLoweringSettings {
     /// instruction count — the fill is ~8× the mma instruction volume.
     /// 0 = scalar half fill (the historical form).
     pub spirv_coopmat_fill_pairs: bool,
+    /// 2026-09-04 (beyond-coopmat Stage 1, D1): panels per double-buffer
+    /// stage — 2 halves the barrier count per panel and doubles the mma
+    /// per barrier pair. Falls back to 1 when (K/16) is odd (the tail
+    /// pair would double-count a clamped panel).
+    pub spirv_coopmat_panels_per_stage: u32,
     /// CIRCT: state arrays at/above this depth default to the seq.firmem
     /// memory macro (below: register files). 2026-08-25, seq-firmem plan.
     pub firmem_min_depth: usize,
@@ -208,6 +213,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_coopmat_subgroups: 1,
     spirv_coopmat_smem: true,
     spirv_coopmat_fill_pairs: false,
+    spirv_coopmat_panels_per_stage: 2,
 
     firmem_min_depth: 64,
     firmem_max_ports: 4,
@@ -380,6 +386,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_fill_pairs", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_fill_pairs),
+        spirv_coopmat_panels_per_stage: db
+            .field_int("spirv_coopmat_panels_per_stage", 0)
+            .map(|v| v.max(1).min(4) as u32)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_panels_per_stage),
     }
 }
 

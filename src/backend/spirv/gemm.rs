@@ -202,6 +202,20 @@ impl GemmPlan {
         crate::config_tuning::ir_lowering().spirv_coopmat_fill_pairs
     }
 
+    /// D1 (beyond-coopmat Stage 1): panels per double-buffer stage — 2
+    /// halves the barrier count per panel. Falls back to 1 when (K/16)
+    /// is odd: the tail pair would double-count a clamped duplicate panel.
+    pub(crate) fn coopmat_panels_per_stage(plan_k: i64) -> u32 {
+        let knob = crate::config_tuning::ir_lowering()
+            .spirv_coopmat_panels_per_stage
+            .max(1);
+        if knob >= 2 && (plan_k / 16) % 2 == 0 {
+            2
+        } else {
+            1
+        }
+    }
+
     pub(crate) fn coopmat_tile_rows(plan_m: i64) -> u32 {
         let mut r = crate::config_tuning::ir_lowering()
             .spirv_coopmat_tile_rows
@@ -2334,9 +2348,10 @@ fn emit_coopmat_smem(
     let f16_wg_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
     let f16_ssbo_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
     let lane = io.lane_id;
-    let a_stage_elems = tile_rows * 256;
+    let pps = GemmPlan::coopmat_panels_per_stage(plan.k);
+    let a_stage_elems = pps * tile_rows * 256; // pps: u32, tile_rows: u32
     let a_stage_elems_c = u32_const(builder, a_stage_elems);
-    let total_elems = (tile_rows + 4) * 256;
+    let total_elems = pps * (tile_rows + 4) * 256;
     let pairs = GemmPlan::coopmat_fill_pairs();
     // Pairs mode: the SSBO members AND the smem arrays are retyped
     // array-of-v2f16 (byte-identical; lower.rs pair_eligible) — the fill
@@ -2391,20 +2406,47 @@ fn emit_coopmat_smem(
         }
     };
 
-    // Stage 0: offsets 0, panel kt=0.
-    emit_smem_fill(builder, &fill_params, zero_u32, zero_u32, zero_u32);
-    emit_wg_barrier(builder);
-    // Stage 1: A at offset a_stage_elems, B at offset 4*256.
-    let a_s1 = u32_const(builder, a_stage_elems);
-    let b_s1 = u32_const(builder, 4 * 256);
-    emit_smem_fill(builder, &fill_params, a_s1, b_s1, panel1_kt);
-    emit_wg_barrier(builder);
+    // D1: pps panels per stage. The prologue fills stage 0 with the
+    // panels 0..pps-1 (sub-offsets tile_rows*256 / 1024 apart), then
+    // stage 1 with the panels pps..2pps-1; every panel clamps at last.
+    let last_kt = ((plan.k / 16 - 1) * 16) as u32;
+    let last_c = u32_const(builder, last_kt);
+    for stage in 0..2u32 {
+        for pi in 0..pps {
+            let a_off = u32_const(
+                builder,
+                (stage * a_stage_elems + pi * tile_rows * 256) as u32,
+            );
+            let b_off = u32_const(builder, (stage * pps * 4 * 256 + pi * 4 * 256) as u32);
+            let kt_panel = {
+                let raw = u32_const(builder, ((stage * pps + pi) * 16) as u32);
+                let over = {
+                    let id = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::UGreaterThan, Some(bool_ty), Some(id),
+                        vec![Operand::IdRef(raw), Operand::IdRef(last_c)],
+                    ));
+                    id
+                };
+                {
+                    let id = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::Select, Some(u32_ty), Some(id),
+                        vec![Operand::IdRef(over), Operand::IdRef(last_c), Operand::IdRef(raw)],
+                    ));
+                    id
+                }
+            };
+            emit_smem_fill(builder, &fill_params, a_off, b_off, kt_panel);
+        }
+        emit_wg_barrier(builder);
+    }
 
     // ── Loop ──
     let sig = CoopLoopSig {
         int_ty,
         bool_ty,
-        groups: (plan.k / 16) as i64,
+        groups: (plan.k / 16 / pps as i64),
     };
     let (bbs, acc_ids, cond_next, _cond0, kt_phi, kt_backedge) =
         begin_structured_loop(builder, &sig, &acc_phis)?;
@@ -2425,94 +2467,132 @@ fn emit_coopmat_smem(
         u32_binop(builder, spirv::Op::BitwiseAnd, kt_u, one)
     };
 
-    // Load A fragments from smem. Pairs mode: the smem arrays are
-    // array-of-v2f16 — the AccessChain walks [pair_idx, 0] to a half
-    // pointer (the pair's first half); the stride-16 fragment walk is
-    // unchanged (the production form).
+    // Load A fragments from smem: pps panels × tile_rows strips. Pairs
+    // mode: the smem arrays are array-of-v2f16 — the AccessChain walks
+    // [pair_idx, 0] to a half pointer (the pair's first half); the
+    // stride-16 fragment walk is unchanged (the production form).
     let c_a_se = u32_const(builder, a_stage_elems);
     let stage_off_a = u32_binop(builder, spirv::Op::IMul, s, c_a_se);
-    let frag_as: Vec<Word> = a_row_bases.iter().enumerate().map(|(r, _)| {
-        let r_c = u32_const(builder, (r * 256) as u32);
-        let base = u32_binop(builder, spirv::Op::IAdd, stage_off_a, r_c);
-        let ptr = builder.gen_id();
-        if pairs {
-            let c2 = u32_const(builder, 2);
-            let c0 = u32_const(builder, 0);
-            let pair_base = u32_binop(builder, spirv::Op::UDiv, base, c2);
-            let v2_half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
+    let a_panel_stride = (tile_rows * 256) as usize;
+    let mut frag_as: Vec<Word> = Vec::new();
+    for pi in 0..pps as usize {
+        let pi_c = u32_const(builder, (pi * a_panel_stride) as u32);
+        let panel_off = u32_binop(builder, spirv::Op::IAdd, stage_off_a, pi_c);
+        for r in 0..a_row_bases.len() {
+            let r_c = u32_const(builder, (r * 256) as u32);
+            let base = u32_binop(builder, spirv::Op::IAdd, panel_off, r_c);
+            let ptr = builder.gen_id();
+            if pairs {
+                let c2 = u32_const(builder, 2);
+                let c0 = u32_const(builder, 0);
+                let pair_base = u32_binop(builder, spirv::Op::UDiv, base, c2);
+                let v2_half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(v2_half_ptr), Some(ptr),
+                    vec![Operand::IdRef(smem_a), Operand::IdRef(pair_base), Operand::IdRef(c0)],
+                ));
+            } else {
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(f16_wg_ptr), Some(ptr),
+                    vec![Operand::IdRef(smem_a), Operand::IdRef(base)],
+                ));
+            }
+            let frag = builder.gen_id();
             builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(v2_half_ptr), Some(ptr),
-                vec![Operand::IdRef(smem_a), Operand::IdRef(pair_base), Operand::IdRef(c0)],
+                spirv::Op::CooperativeMatrixLoadKHR, Some(cm_a16), Some(frag),
+                vec![Operand::IdRef(ptr), Operand::IdRef(layout_row), Operand::IdRef(s16c)],
             ));
-        } else {
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(f16_wg_ptr), Some(ptr),
-                vec![Operand::IdRef(smem_a), Operand::IdRef(base)],
-            ));
-        }
-        let frag = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::CooperativeMatrixLoadKHR, Some(cm_a16), Some(frag),
-            vec![Operand::IdRef(ptr), Operand::IdRef(layout_row), Operand::IdRef(s16c)],
-        ));
-        frag
-    }).collect();
-
-    // Load B fragments from smem.
-    let b_stage_size = 4 * 256;
-    let c_b_ss = u32_const(builder, b_stage_size);
-    let stage_off_b = u32_binop(builder, spirv::Op::IMul, s, c_b_ss);
-    let frag_bs: Vec<Word> = (0..4usize).map(|j| {
-        let j_c = u32_const(builder, (j * 256) as u32);
-        let base = u32_binop(builder, spirv::Op::IAdd, stage_off_b, j_c);
-        let ptr = builder.gen_id();
-        if pairs {
-            let c2 = u32_const(builder, 2);
-            let c0 = u32_const(builder, 0);
-            let pair_base = u32_binop(builder, spirv::Op::UDiv, base, c2);
-            let v2_half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(v2_half_ptr), Some(ptr),
-                vec![Operand::IdRef(smem_b), Operand::IdRef(pair_base), Operand::IdRef(c0)],
-            ));
-        } else {
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(f16_wg_ptr), Some(ptr),
-                vec![Operand::IdRef(smem_b), Operand::IdRef(base)],
-            ));
-        }
-        let frag = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::CooperativeMatrixLoadKHR, Some(cm_b16), Some(frag),
-            vec![Operand::IdRef(ptr), Operand::IdRef(layout_row), Operand::IdRef(s16c)],
-        ));
-        frag
-    }).collect();
-
-    // MMA.
-    for (r, frag_a) in frag_as.iter().enumerate() {
-        for (j, frag_b) in frag_bs.iter().enumerate() {
-            builder.emit(Instruction::new(
-                spirv::Op::CooperativeMatrixMulAddKHR, Some(acc_cm),
-                Some(acc_backedges[r * 4 + j]),
-                vec![
-                    Operand::IdRef(*frag_a),
-                    Operand::IdRef(*frag_b),
-                    Operand::IdRef(acc_phis_live[r * 4 + j]),
-                ],
-            ));
+            frag_as.push(frag);
         }
     }
 
-    // Smem refill: fill smem[s] with panel kt+2, barrier.
+    // Load B fragments from smem: pps panels × 4 tiles.
+    let b_stage_size = pps * 4 * 256;
+    let c_b_ss = u32_const(builder, b_stage_size);
+    let stage_off_b = u32_binop(builder, spirv::Op::IMul, s, c_b_ss);
+    let mut frag_bs: Vec<Word> = Vec::new();
+    for pi in 0..pps as usize {
+        let pi_c = u32_const(builder, (pi * 4 * 256) as u32);
+        let panel_off = u32_binop(builder, spirv::Op::IAdd, stage_off_b, pi_c);
+        for j in 0..4usize {
+            let j_c = u32_const(builder, (j * 256) as u32);
+            let base = u32_binop(builder, spirv::Op::IAdd, panel_off, j_c);
+            let ptr = builder.gen_id();
+            if pairs {
+                let c2 = u32_const(builder, 2);
+                let c0 = u32_const(builder, 0);
+                let pair_base = u32_binop(builder, spirv::Op::UDiv, base, c2);
+                let v2_half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(v2_half_ptr), Some(ptr),
+                    vec![Operand::IdRef(smem_b), Operand::IdRef(pair_base), Operand::IdRef(c0)],
+                ));
+            } else {
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(f16_wg_ptr), Some(ptr),
+                    vec![Operand::IdRef(smem_b), Operand::IdRef(base)],
+                ));
+            }
+            let frag = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::CooperativeMatrixLoadKHR, Some(cm_b16), Some(frag),
+                vec![Operand::IdRef(ptr), Operand::IdRef(layout_row), Operand::IdRef(s16c)],
+            ));
+            frag_bs.push(frag);
+        }
+    }
+
+    // MMA: every panel's (r,j) products accumulate into the SAME 16
+    // accs — the k-dimension sums across the panels of the step. The
+    // panels SERIALIZE per accumulator: phi → mma(p0) → mma(p1) →
+    // back-edge (only the last panel's mma defines the back-edge id;
+    // two definitions of the same id = the spirv-val duplicate trap).
+    let mut cur: Vec<Word> = acc_phis_live.clone();
+    for pi in 0..pps as usize {
+        for r in 0..tile_rows as usize {
+            for j in 0..4usize {
+                let idx = r * 4 + j;
+                let res = if pi == pps as usize - 1 {
+                    acc_backedges[idx]
+                } else {
+                    builder.gen_id()
+                };
+                let frag_a = frag_as[pi * tile_rows as usize + r];
+                let frag_b = frag_bs[pi * 4 + j];
+                builder.emit(Instruction::new(
+                    spirv::Op::CooperativeMatrixMulAddKHR, Some(acc_cm),
+                    Some(res),
+                    vec![
+                        Operand::IdRef(frag_a),
+                        Operand::IdRef(frag_b),
+                        Operand::IdRef(cur[idx]),
+                    ],
+                ));
+                cur[idx] = res;
+            }
+        }
+    }
+
+    // Smem refill: fill smem[s] with the panels kt+pps..kt+2pps-1,
+    // clamped at last (the clamped duplicates are never loaded — the
+    // pair loop's bound is groups/pps).
     {
         emit_wg_barrier(builder);
 
-        let kt_plus_2 = {
-            let two = u32_const(builder, 2);
-            let raw = u32_binop(builder, spirv::Op::IAdd, kt_u, two);
-            let last = ((plan.k / 16 - 1) * 16) as u32;
-            let last_c = u32_const(builder, last);
+        for pi in 0..pps {
+            // The panel index is RUNTIME: (kt_pair + 2)*pps + pi — stage
+            // s is re-read at pair-iteration kt+2 (its next same-parity
+            // visit), so it must hold the panels of THAT step. (+2, not
+            // +1: an off-by-one-pair filled the panels the other stage
+            // needed, and every read after the first got stale data.)
+            let raw = {
+                let two = u32_const(builder, 2);
+                let pps_c = u32_const(builder, pps);
+                let pi_c = u32_const(builder, pi as u32);
+                let pair2 = u32_binop(builder, spirv::Op::IAdd, kt_u, two);
+                let base = u32_binop(builder, spirv::Op::IMul, pair2, pps_c);
+                u32_binop(builder, spirv::Op::IAdd, base, pi_c)
+            };
             let over = {
                 let id = builder.gen_id();
                 builder.emit(Instruction::new(
@@ -2521,17 +2601,21 @@ fn emit_coopmat_smem(
                 ));
                 id
             };
-            {
+            let kt_fill = {
                 let id = builder.gen_id();
                 builder.emit(Instruction::new(
                     spirv::Op::Select, Some(u32_ty), Some(id),
                     vec![Operand::IdRef(over), Operand::IdRef(last_c), Operand::IdRef(raw)],
                 ));
                 id
-            }
-        };
+            };
+            let a_off_c = u32_const(builder, (pi as usize * a_panel_stride) as u32);
+            let a_off = u32_binop(builder, spirv::Op::IAdd, stage_off_a, a_off_c);
+            let b_off_c = u32_const(builder, (pi as usize * 4 * 256) as u32);
+            let b_off = u32_binop(builder, spirv::Op::IAdd, stage_off_b, b_off_c);
 
-        emit_smem_fill(builder, &fill_params, stage_off_a, stage_off_b, kt_plus_2);
+            emit_smem_fill(builder, &fill_params, a_off, b_off, kt_fill);
+        }
         emit_wg_barrier(builder);
     }
 
@@ -2653,7 +2737,8 @@ pub(crate) fn emit_coopmat(
     // is f16 already). The f32-acc path is byte-identical to before.
     let f16acc = GemmPlan::coopmat_f16acc();
     let sub_check = GemmPlan::coopmat_subgroups();
-    eprintln!("DBG knobs: f16acc={} subgroups={}", f16acc, sub_check);
+    eprintln!("DBG knobs: f16acc={} subgroups={} pps={} pairs={}", f16acc, sub_check,
+        GemmPlan::coopmat_panels_per_stage(plan.k), GemmPlan::coopmat_fill_pairs());
     let acc_cm = if f16acc { cm_c16 } else { cm_c32 };
 
     // Memory layout constant: RowMajorKHR = 0.

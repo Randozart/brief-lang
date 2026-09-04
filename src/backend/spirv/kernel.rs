@@ -204,8 +204,10 @@ pub fn emit_kernel(
         } else {
             None
         };
-        let a_elems = (2 * r * 16 * 16) as u32;  // 2 stages × R strips × 256
-        let b_elems = (2 * 4 * 16 * 16) as u32;   // 2 stages × 4 B-tiles × 256
+        // D1: panels per stage doubles the per-stage footprint.
+        let pps = gemm::GemmPlan::coopmat_panels_per_stage(plan.k);
+        let a_elems = (2 * pps * r * 16 * 16) as u32;  // 2 stages × pps panels × R strips × 256
+        let b_elems = (2 * pps * 4 * 16 * 16) as u32;   // 2 stages × pps panels × 4 B-tiles × 256
         let (a_len, b_len) = if v2_ty.is_some() {
             (builder.u32_const(a_elems / 2), builder.u32_const(b_elems / 2))
         } else {
