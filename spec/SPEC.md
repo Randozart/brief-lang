@@ -1115,14 +1115,40 @@ divisible by 64. Synthesized: one workgroup per 64×64 output tile
 (two barriers per panel), 4×4 register tiles per invocation, loop-carried
 accumulator phis. Falls back to Tier 0 for any non-matching body.
 
-**Tier 3 — cooperative matrix (planned).** Operand types choose the
-hardware path: `Bit`-rooted **Float16** array fields qualify the GEMM for
-`VK_KHR_cooperative_matrix` tensor-core lowering (f16 operands, f32
-accumulate, 16×16×16 fragments). Float32 fields keep the Tier 2 exact
-kernel — the 3060-class hardware exposes no f32×f32 tensor shape, so
-tensor precision is a TYPE-LEVEL decision the author makes, never a
-silent compiler trade. Gate: the device extension must be present at
-runtime; absent devices take the Tier 2 kernel.
+**Tier 3 — cooperative matrix (tensor).** LANDED 2026-09-02 (plan
+`2026-09-01-m2-tensor-cores`); smem staging default + f16acc sub-tier
+2026-09-04. Operand types choose the hardware path: `Bit`-rooted
+**Float16** array fields qualify the GEMM for
+`VK_KHR_cooperative_matrix` tensor-core lowering (f16 operands,
+16×16×16 fragments). Float32 fields keep the Tier 2 exact kernel — the
+3060-class hardware exposes no f32×f32 tensor shape, so tensor
+precision is a TYPE-LEVEL decision the author makes, never a silent
+compiler trade. Gate: the device extension must be present at runtime;
+absent devices take the Tier 2 kernel. Two disclosed sub-forms:
+- **smem staging** (default, `spirv_coopmat_smem: 1`): scalar fills
+  stage A/B k-panels through Workgroup arrays; cooperative-matrix
+  loads read from the staging arrays; 2-stage double-buffer pipeline,
+  one barrier pair per panel. 0 = direct SSBO fragment loads (the
+  pre-staging form; validated +23% slower at 8192³, parity at 4096³ —
+  ledger 2026-09-04b).
+- **f16 accumulate** (`spirv_coopmat_f16acc`, gate ≤1e-2 vs the
+  f32-acc tier, which stays the correctness reference): the mma
+  accumulates in f16 — the Ampere double-pump class. The staged
+  pipeline's dispatch geometry follows the SAME dispatch predicate as
+  Tier 2 (`(M*N / (16*R*64)) * 32`, R = `spirv_coopmat_tile_rows`,
+  default 4 — sweep-confirmed optimal, ledger 2026-09-04b).
+
+**Tier 4 — native backend tier (planned).** Per-vendor native codegen
+as a projection of the SAME frontend plans: a Briev-owned PTX emitter
+(`mma.sync`/`ldmatrix`/`cp.async`) for NVIDIA tensor-class workloads,
+selected by device probe, with the portable Tier 0–3 path remaining
+the base tier and the fallback. Motivation is measured, not assumed:
+the portable ceiling through vendor SPIR-V lowering is a structural
+variable (the f16acc-vs-f32acc delta bounds it); the coopmat ceiling
+microkernel measures it per driver era and the number gates this
+tier's mandate. Doctrine and tier architecture:
+`docs/architecture/abv-gpu-doctrine.md`; campaign:
+`docs/plans/2026-09-04-beyond-coopmat.md`.
 
 **Vec4 eligibility gate.** A field participates in wide loads only when
 its element is 32-bit float-shaped, its count is a multiple of 4, its

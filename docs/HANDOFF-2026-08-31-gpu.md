@@ -1,5 +1,28 @@
 # HANDOFF — GPU backend (.abv / SPIR-V): state, doctrine, next steps
 
+> **2026-09-04 STATUS UPDATE** (read first; everything below is history):
+>
+> - **DOCTRINE UPGRADE (user-locked):** `.abv` = one program, peak on
+>   every probed device, Briev-owned codegen only — no nvcc, no cuBLAS
+>   in the compiler path. Backend tier architecture: portable SPIR-V
+>   tier + per-vendor projections of ONE frontend plan (PTX tier
+>   planned). Doctrine: `docs/architecture/abv-gpu-doctrine.md`.
+> - **TENSOR TIER CORRECT + VALIDATED:** smem double-buffer staging is
+>   the default coopmat form (root cause of the era's all-zeros: the
+>   fill's flat index double-strided, commit 51b791cd). R sweep: R=4
+>   optimal. Shape sweep: 2048³ 19.0 TFLOP/s, 8192³ smem +23% vs
+>   direct. Ledger rows 2026-09-04 / 2026-09-04b.
+> - **MEASUREMENT DISCIPLINE:** in-process A/B harness (two SPVs,
+>   alternating-order batched submissions, per-kernel dispatch counts)
+>   — self-A/B ratio 0.985-1.001. Pre-harness cross-run comparisons
+>   were DVFS-dominated; within-run ratios are the signal.
+> - **CAMPAIGN:** `docs/plans/2026-09-04-beyond-coopmat.md` — Stage 0
+>   ceiling microkernel (decisive: is the KHR lowering double-pumping?)
+>   → Stage 1 portable extraction (deeper pipeline, register-prefetch,
+>   f16x2 fills, occupancy) → Stage 2 Briev PTX tier (gated on Stage 0).
+>   Race target unchanged: ggml-cuda 42.0 TFLOP/s; ours 16.5 best
+>   window at the anchor shape.
+
 > **2026-09-02 STATUS UPDATE** (read this first; sections below are the
 > 2026-08-31 snapshot, kept for history):
 >
