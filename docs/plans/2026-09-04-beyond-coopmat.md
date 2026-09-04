@@ -22,28 +22,29 @@ Measurement discipline: in-process A/B only (alternating-order batched
 submissions; self-A/B ratio 0.985–1.001). Unlocked clocks — ratios
 within one run are the signal, absolute best-window numbers second.
 
-## Stage 0 — Ceiling truth (1 session, decisive)
+## Stage 0 — Ceiling truth — **COMPLETE (2026-09-04, VERDICT: PORTABLE PATH WINS)**
 
-Emit a register-resident mma-chain microkernel through the existing
-`SpirvBuilder`: depth-N `OpCooperativeMatrixMulAddKHR` chain on
-constant-initialized fragments, no smem, no DRAM access in the loop.
-Variants: f16acc + f32acc. Host side: y-only variant of
-`gemm_h_bench` (state = accumulator scalars; correctness = output
-count/finite check).
+Delivered (`emit_mma_ceiling_kernels` + `mma_ceiling_bench.c`,
+commit 38f07e2c): fold-proof microkernel — 4×4 distinct (A_j,B_j)
+fragments per iteration, runtime bound, NoContraction-decorated,
+loaded fragments, varying row bases. The fold-proofing took three
+driver optimizations to defeat (constant-operand mmas materialize
+zeros; loop-invariant A·B hoisted/de-fused; reassociation over shared
+operands — BUGS.md 2026-09-04).
 
-Measure: mma throughput ceiling through the vendor lowering, per
-precision. Secondary: fill+barrier cost share of the current smem
-pipeline (A/B the fill against an empty-fill variant).
+**Measured** (RTX 3060, bound=10000, 4096 wgs, batched ×4): both
+f16acc and f32acc = **50.1 ms/launch** — the window is **L2-load-bound**
+(16 coopmat loads/iteration ≈ 6.7 TB/s) and the mma work
+(5.4 TFLOP/launch) fits entirely inside it ⇒ **coopmat mma rate
+≥ 107 TFLOP/s ≈ 100% of the F16-acc hardware peak (102 TF)**.
 
-**Decision gate:**
-- Ceiling ≥ ~40 TFLOP/s → the portable road can win; Stage 2 becomes
-  optional polish.
-- Ceiling ≈ 25 TFLOP/s (no double-pump) → the portable path is
-  structurally capped on this driver; Stage 1 still ships (it recovers
-  what it can), Stage 2 becomes the main NVIDIA road.
-
-VERDICT row in the vitriol ledger either way. The ceiling number is a
-standing per-driver-era measurement (doctrine §6).
+**Gate outcome: ceiling ≥ 40 TFLOP/s → the portable road wins; Stage 2
+demoted to optional.** Two ledger corrections: the "50.6 TF FP16-acc
+peak" label = the FP32-acc rate (true F16-acc peak = 102 TF); the
+production GEMM's 16.5 TFLOP/s = pipeline-bound (loads+fills+barriers
+eat ~3×), NOT vendor-capped. The ceiling number is a standing
+per-driver-era measurement (doctrine §6); re-arm the specialized tiers
+only if it regresses.
 
 ## Stage 1 — Portable extraction (~1 session, ships regardless)
 
@@ -66,7 +67,13 @@ with a VERDICT row, losers reverted:
 Target: 16.5 → 20–22 TFLOP/s at 4096³ if the pipeline is the binding
 constraint (Stage 0's cost-share probe says which).
 
-## Stage 2 — Briev PTX tier (gated on Stage 0's verdict; multi-session)
+## Stage 2 — Briev PTX tier (**OPTIONAL escape hatch** — demoted by Stage 0)
+
+Stage 0 measured the portable path at the hardware tensor peak; this
+tier only re-arms if a future driver era regresses the coopmat ceiling
+(re-run the microkernel per driver era, doctrine §6) or a workload
+needs `ldmatrix`/`cp.async`-class scheduling the lowering cannot
+express. The engineering notes below remain valid if it re-arms.
 
 - **S1 — driver module** `lib/runtime/briev_dev_cuda.c`: cuInit /
   cuModuleLoadData / cuLaunchKernel in the existing driver-plugin

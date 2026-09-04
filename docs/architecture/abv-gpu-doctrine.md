@@ -53,34 +53,41 @@ Read together with: `gpu-model.md` (borrowing-not-barriers thesis),
 ## 2. Why this doctrine exists — the ceiling physics
 
 The f16-vs-f16 race target (ledger 2026-09-02): ggml-cuda at
-**42.0 TFLOP/s** on the anchor shape (4096³), = 83% of the RTX 3060's
-50.6 TFLOP/s FP16-accumulate tensor peak — via hand-written PTX
+**42.0 TFLOP/s** on the anchor shape (4096³), via hand-written PTX
 (`mma.sync` double-pumped, `ldmatrix`, `cp.async`).
 
-Our portable path (SPIR-V `VK_KHR_cooperative_matrix`) measured
-16.5 TFLOP/s = 33% of peak. The f16acc-vs-f32acc delta was only ~11%
-— if the vendor's SPIR-V lowering actually double-pumped mma, that
-switch would move the ceiling ~2×. The strong hypothesis: **vendor
-SPIR-V lowering is a structural variable** that caps the portable path
-below the CUDA-class ceiling, independent of how smart our SPIR-V is.
+**Stage-0 verdict (2026-09-04, ledger row 2026-09-04c — MEASURED, not
+hypothesized):** the coopmat ceiling microkernel
+(`emit_mma_ceiling_kernels` + `mma_ceiling_bench.c`) shows the
+portable SPIR-V `VK_KHR_cooperative_matrix` path reaches **the
+hardware tensor peak**: the mma work fits entirely inside an
+L2-load-bound window, bounding the coopmat mma rate at ≥107 TFLOP/s
+≈ 100% of the F16-accumulate dense peak (102 TF on GA106 = 28 SM ×
+4 TC × 512 FLOP/clk × 1.78 GHz). Two ledger corrections landed with
+it: the previously quoted "50.6 TF FP16-acc peak" is the **FP32-acc**
+rate (the F16-acc rate is 2×); and the production GEMM's 16.5 TFLOP/s
+is **pipeline-bound** (smem fills + barriers + load ratio eat ~3× vs
+the mma), NOT capped by the vendor's SPIR-V lowering.
 
-Consequence: "peak everywhere" cannot mean "SPIR-V only". It means
-**backend tiers**: the portable tier ships and keeps its full
-optimization commitment (doctrine: "the SPIR-V backend gets the same
-optimization commitment as LLVM"); vendor-specialized tiers — Briev's
-own PTX generator first — carry the race where the portable ceiling
-provably falls short. The standing measurement that governs this is
-the **coopmat ceiling microkernel** (register-resident mma chain, no
-memory): one number, per driver, that decides where each workload's
-peak can live. Stage 0 of the campaign measures it; the number goes in
-the ledger and stays current per driver era.
+Consequence (rev 2026-09-04): the portable tier is the race road.
+The original doctrine inferred vendor-lowering caps from an 11%
+f16acc-vs-f32acc delta; Stage 0's measurement refuted that — the
+gap is our pipeline, not the ISA path. **Stage 1 (pipeline
+extraction: deeper buffers, register-prefetch, f16x2 fills,
+occupancy) is the main road to the 42 TFLOP/s anchor; the
+vendor-specialized PTX tier is demoted to optional** — it exists as
+the escape hatch IF a future driver era regresses the coopmat path
+or a workload needs `ldmatrix`/`cp.async`-class scheduling the
+lowering cannot express. The standing measurement remains the
+**coopmat ceiling microkernel**: re-run per driver era; the number
+gates whether the specialized tiers re-arm.
 
 ## 3. The backend tier architecture
 
 | Tier | Backend | Scope | Status |
 |------|---------|-------|--------|
 | Portable | SPIR-V (Vulkan compute; OpenCL driver present) | All coopmat/row/flat tiers, all vendors | default, fully committed |
-| Specialized | **PTX** (Briev-emitted, driver-JIT via `cuModuleLoadData`) | NVIDIA tensor-class workloads | planned (campaign Stage 2) |
+| Specialized | **PTX** (Briev-emitted, driver-JIT via `cuModuleLoadData`) | NVIDIA tensor-class workloads | **optional escape hatch** (Stage 0 measured the portable path at HW peak — the tier only re-arms on a driver-era regression) |
 | Specialized | AMD / Intel native (ROCm-shaped / Level Zero+SPIRV-direct) | future — same pattern, one vendor at a time | future |
 
 Rules that hold across all tiers:
