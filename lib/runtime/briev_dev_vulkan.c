@@ -965,7 +965,7 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
                 dalloc.memoryTypeIndex = vk_device_local_type;
                 if (vkAllocateMemory(vk_device, &dalloc, NULL, &k->dev_memory) == VK_SUCCESS
                     && vkBindBufferMemory(vk_device, k->dev_buffer, k->dev_memory, 0) == VK_SUCCESS) {
-                    if (verbose) fprintf(stderr, "[briev_accel/vulkan] device-local working set ON\n");
+                    if (verbose) fprintf(stderr, "[briev_accel/vulkan] device-local working set ON (proj_bytes=%zu local_x=%zu)\n", proj_bytes, (size_t)k->local_x);
                 } else {
                     if (verbose) fprintf(stderr, "[briev_accel/vulkan] device-local alloc failed — all-host\n");
                     vkDestroyBuffer(vk_device, k->dev_buffer, NULL);

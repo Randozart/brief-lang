@@ -1043,6 +1043,723 @@ mod tests {
         );
         assert!(GemmPlan::match_stmts(&shape, &items).is_some());
     }
+
+    // ── Stage 0 instrument (plan 2026-09-04-beyond-coopmat) ──────────────
+    // The coopmat mma-CEILING microkernel: a register-resident
+    // OpCooperativeMatrixMulAddKHR chain — no smem, no DRAM in the loop.
+    // Its measured throughput IS the vendor SPIR-V lowering's tensor
+    // ceiling; the f16acc-vs-f32acc pair answers whether the lowering
+    // double-pumps (ceiling ≈ 2× f32 rate) or not (ceiling ≈ f32 rate).
+    // That number gates the beyond-coopmat campaign (doctrine
+    // abv-gpu-doctrine.md §2).
+    //
+    // Opt-in: BRIEV_EMIT_MMA_CEILING=1 cargo test emit_mma_ceiling -- --nocapture
+    // writes target/spirv/mma_ceiling_{f16acc,f32acc}.spv. Undo: delete
+    // this test.
+
+    /// Depth of the round-robin chain: CHAINS independent accumulator
+    /// fragments (ILP — a single dependency chain would measure mma
+    /// LATENCY), DEPTH total mma ops per loop iteration.
+    const CEILING_CHAINS: usize = 4;
+    const CEILING_B_FRAGS: usize = 4;
+    const CEILING_DEPTH: usize = 16;
+    /// Workgroups the host dispatches; each stores one 16×16 f32 tile.
+    const CEILING_WGS: usize = 4096;
+
+    #[test]
+    fn emit_mma_ceiling_kernels() {
+        if std::env::var("BRIEV_EMIT_MMA_CEILING").is_err() {
+            return;
+        }
+        for f16acc in [true, false] {
+            let binary = build_mma_ceiling(f16acc).expect("ceiling build");
+            let tag = if f16acc { "f16acc" } else { "f32acc" };
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target/spirv");
+            std::fs::create_dir_all(&dir).unwrap();
+            let spv = dir.join(format!("mma_ceiling_{}.spv", tag));
+            std::fs::write(&spv, &binary).unwrap();
+            // Same structural bar as every emitted kernel (mod.rs §2.5):
+            // spirv-val must accept the binary.
+            let val = std::process::Command::new("spirv-val")
+                .arg(&spv)
+                .output()
+                .expect("spirv-val on PATH");
+            assert!(
+                val.status.success(),
+                "spirv-val rejected mma_ceiling_{}:\n{}",
+                tag,
+                String::from_utf8_lossy(&val.stderr)
+            );
+            println!(
+                "mma_ceiling_{}: {} bytes, spirv-val OK → {}",
+                tag,
+                binary.len(),
+                spv.display()
+            );
+        }
+    }
+
+    fn build_mma_ceiling(f16acc: bool) -> Result<Vec<u8>, String> {
+        use crate::backend::spirv::SpirvBuilder;
+        use rspirv::spirv::{Capability, ExecutionModel, FunctionControl};
+
+        let mut builder = SpirvBuilder::new();
+        // Module preamble — mirrors emit_coopmat_smem exactly. new() sets
+        // GLSL450; the coopmat class requires the VulkanKHR memory model
+        // to pair with the VulkanMemoryModel capability.
+        builder.builder.capability(Capability::CooperativeMatrixKHR);
+        builder.builder.capability(Capability::VulkanMemoryModel);
+        builder.builder.capability(Capability::StorageBuffer16BitAccess);
+        builder.builder.capability(Capability::Float16);
+        builder.builder.extension("SPV_KHR_cooperative_matrix");
+        builder.builder.extension("SPV_KHR_vulkan_memory_model");
+        builder.builder.extension("SPV_KHR_16bit_storage");
+        builder.builder.module_mut().memory_model = Some(rspirv::dr::Instruction::new(
+            spirv::Op::MemoryModel, None, None,
+            vec![
+                Operand::LiteralBit32(spirv::AddressingModel::Logical as u32),
+                Operand::LiteralBit32(spirv::MemoryModel::Vulkan as u32),
+            ],
+        ));
+
+        // ── Hand-built state SSBO (v2, fold-proof) ──────────────────────
+        // The first draft used CONSTANT A/B fragments (splat ones) and the
+        // driver folded the whole chain: measured "202 TF/s" = 4× hardware
+        // peak, value exact — a per-iteration constant-increment recurrence
+        // is legally promotable. Block: A must be RUNTIME data. The A
+        // fragment is loaded ONCE per workgroup from a host-seeded f16
+        // array (0.1-pattern: binary-inexact → every accumulate rounds →
+        // hoisting C = A·B and strength-reducing the chain would change
+        // results, i.e. illegal without fast-math). B stays a constant
+        // ones-splat: per-element A·B = rowsum(A), uniform across the tile.
+        //
+        // Layout (mirrors the bench's field table exactly):
+        //   i @ 0   i64           (runtime loop bound in, final count out)
+        //   a @ 8   half[16M]     (A tile rows @0,4096,...; B rows @16,4112,...)
+        //   y @ 536 f32[256*WGS+1](one 16×16 tile per workgroup, +1 vec4 pad)
+        let u32_ty = builder.u32_type();
+        // SIGNED i64 — the loop uses OpSLessThan (signed-only); production
+        // kernels get this via lower_type(Type::int()).
+        let int_ty = builder.builder.type_int(64, 1);
+        let f16_ty = builder.builder.type_float(16);
+        let f32_ty = builder.builder.type_float(32);
+        let v3_u32 = builder.builder.type_vector(u32_ty, 3);
+        let half_arr_len = builder.u32_const(16 * 1048576);
+        let half_arr = builder.builder.type_array(f16_ty, half_arr_len);
+        // y as a FIXED HALF array — the production store shape (f16
+        // fragment → half member; the f32acc era FConverted before the
+        // store, "f32 compute, f16 storage"). Count stays a multiple of
+        // 4: the runtime's staging→device CopyBuffer requires a 4-byte
+        // multiple total size (a +1 half pad made proj_bytes ≡ 2 mod 4 —
+        // undefined copy → device wedge, fence timeout).
+        // The store SCATTERS 16 rows at stride-4096 intervals: the last
+        // workgroup's row 15 lands at (WGS-1+15)*4096 + 15. Every earlier
+        // "mystery wedge" was this span overflowing the member (device
+        // fault, fence timeout) — or a proj_bytes not ≡ 0 mod 4 (the
+        // runtime's staging→device CopyBuffer needs 4-byte multiples).
+        let y_len = builder.u32_const((CEILING_WGS as u32 + 15) * 4096 + 16);
+        let y_arr = builder.builder.type_array(f16_ty, y_len);
+        let ssbo_struct = builder.builder.type_struct(vec![half_arr, int_ty, y_arr]);
+        builder.emit_global(Instruction::new(
+            spirv::Op::Decorate, None, None,
+            vec![
+                Operand::IdRef(ssbo_struct),
+                Operand::Decoration(spirv::Decoration::Block),
+            ],
+        ));
+        for (member, offset) in [(0u32, 0u32), (1, 33_554_432), (2, 33_554_440)] {
+            builder.emit_global(Instruction::new(
+                spirv::Op::MemberDecorate, None, None,
+                vec![
+                    Operand::IdRef(ssbo_struct),
+                    Operand::LiteralBit32(member),
+                    Operand::Decoration(spirv::Decoration::Offset),
+                    Operand::LiteralBit32(offset),
+                ],
+            ));
+        }
+        builder.emit_global(Instruction::new(
+            spirv::Op::Decorate, None, None,
+            vec![
+                Operand::IdRef(half_arr),
+                Operand::Decoration(spirv::Decoration::ArrayStride),
+                Operand::LiteralBit32(2),
+            ],
+        ));
+        builder.emit_global(Instruction::new(
+            spirv::Op::Decorate, None, None,
+            vec![
+                Operand::IdRef(y_arr),
+                Operand::Decoration(spirv::Decoration::ArrayStride),
+                // half = 2 bytes. (This said 4 from the f32-y era: the
+                // validator accepts a mismatched stride, but the driver
+                // scatters the coopmat store rows at 4-byte spacing —
+                // silent wrong-address writes, y stayed zero.)
+                Operand::LiteralBit32(2),
+            ],
+        ));
+        let ssbo_ptr = builder.ptr_class(StorageClass::StorageBuffer, ssbo_struct);
+        let ssbo = builder.gen_id();
+        builder.emit_global(Instruction::new(
+            spirv::Op::Variable,
+            Some(ssbo_ptr),
+            Some(ssbo),
+            vec![Operand::StorageClass(StorageClass::StorageBuffer)],
+        ));
+        // The runtime binds the SSBO at set 0 / binding 0 — without these
+        // decorations the dispatch reads an unbound descriptor (device
+        // fault, fence timeout). Mirrors setup_state_buffer.
+        builder.emit_global(Instruction::new(
+            spirv::Op::Decorate, None, None,
+            vec![
+                Operand::IdRef(ssbo),
+                Operand::Decoration(spirv::Decoration::DescriptorSet),
+                Operand::LiteralBit32(0),
+            ],
+        ));
+        builder.emit_global(Instruction::new(
+            spirv::Op::Decorate, None, None,
+            vec![
+                Operand::IdRef(ssbo),
+                Operand::Decoration(spirv::Decoration::Binding),
+                Operand::LiteralBit32(0),
+            ],
+        ));
+
+        // gl_WorkGroupID input builtin (mirrors lower.rs builtin_input).
+        // gid/lid are declared too — the production module shape carries
+        // all three builtins; keep the module context identical.
+        let v3_input_ptr = builder.ptr_class(StorageClass::Input, v3_u32);
+        let mut builtin_var = |builtin: spirv::BuiltIn| -> Word {
+            let var = builder.gen_id();
+            builder.emit_global(Instruction::new(
+                spirv::Op::Variable,
+                Some(v3_input_ptr),
+                Some(var),
+                vec![Operand::StorageClass(StorageClass::Input)],
+            ));
+            builder.emit_global(Instruction::new(
+                spirv::Op::Decorate, None, None,
+                vec![
+                    Operand::IdRef(var),
+                    Operand::Decoration(spirv::Decoration::BuiltIn),
+                    Operand::BuiltIn(builtin),
+                ],
+            ));
+            var
+        };
+        let gid = builtin_var(spirv::BuiltIn::GlobalInvocationId);
+        let lid = builtin_var(spirv::BuiltIn::LocalInvocationId);
+        let wgid = builtin_var(spirv::BuiltIn::WorkgroupId);
+
+        // Fragment types. A/B operands are f16 in BOTH variants (the mma
+        // input class is fixed); only the accumulator width changes.
+        let scope_sub = u32_const(&mut builder, 3);
+        let dim16 = u32_const(&mut builder, 16);
+        let use_a = u32_const(&mut builder, 0);
+        let use_b = u32_const(&mut builder, 1);
+        let use_c = u32_const(&mut builder, 2);
+        let cm_a =
+            builder.builder.type_cooperative_matrix_khr(f16_ty, scope_sub, dim16, dim16, use_a);
+        let cm_b =
+            builder.builder.type_cooperative_matrix_khr(f16_ty, scope_sub, dim16, dim16, use_b);
+        let acc_elem = if f16acc { f16_ty } else { f32_ty };
+        let cm_acc = builder
+            .builder
+            .type_cooperative_matrix_khr(acc_elem, scope_sub, dim16, dim16, use_c);
+        // Accumulator init: a RUNTIME-loaded zero fragment. A CONSTANT
+        // coopmat composite as the phi init poisons the whole chain on
+        // this driver (constant fragments materialize as zeros AND the
+        // compiler constant-folds the phi → the mma chain is DCE'd —
+        // measured: y=0 at loop-overhead speed). The init region is
+        // a[32*4096 .. +255], host-seeded zeros.
+        let zero_acc = builder.float_const(if f16acc { 16 } else { 32 }, 0.0);
+        let _ = zero_acc;
+
+        let void_ty = builder.lower_type(&crate::ast::Type::void())?;
+        let func_ty = builder.gen_id();
+        builder.builder.type_function_id(Some(func_ty), void_ty, []);
+        let func_id = builder.gen_id();
+        let entry_id = builder.gen_id();
+        builder.begin_function(void_ty, func_id, FunctionControl::empty(), func_ty);
+        builder.begin_block(Some(entry_id));
+        if std::env::var("BRIEV_MMA_CEILING_EMPTY").is_ok() {
+            // Bisect knob: EMPTY body — scaffold only (entry, interface,
+            // execution mode). If this wedges, the problem is not the body.
+            builder.ret();
+            builder.end_function();
+            let interface: Vec<Word> = [gid, lid, wgid, ssbo].to_vec();
+            builder.set_entry_point(func_id, "main", ExecutionModel::GLCompute, &interface);
+            builder.add_execution_mode(func_id, spirv::ExecutionMode::LocalSize, 32, 1, 1);
+            return builder.build();
+        }
+
+        // wg = WorkGroupID.x
+        let wgid_v = builder.gen_id();
+        let wg = builder.gen_id();
+        if true {
+            builder.emit(Instruction::new(
+                spirv::Op::Load,
+                Some(v3_u32),
+                Some(wgid_v),
+                vec![Operand::IdRef(wgid)],
+            ));
+            builder.emit(Instruction::new(
+                spirv::Op::CompositeExtract,
+                Some(u32_ty),
+                Some(wg),
+                vec![Operand::IdRef(wgid_v), Operand::LiteralBit32(0)],
+            ));
+        }
+
+        // A fragment: ONE cooperative load from ssbo.a[0] (runtime values,
+        // host-seeded — the fold blocker). AccessChain member/index
+        // operands are IDS, never literals. NOLOAD bisect knob: constant
+        // ones fragment instead (v1 form — ran but folded).
+        let c0 = u32_const(&mut builder, 0);
+        let c1 = u32_const(&mut builder, 1);
+        let c2 = u32_const(&mut builder, 2);
+        let layout_row = u32_const(&mut builder, 0);
+        let stride16 = u32_const(&mut builder, 16);
+        // A fragment: loaded from ssbo.a[0] INSIDE the loop body (a
+        // fragment loaded BEFORE the loop and used across the back-edge
+        // wedges this driver — bisected: bound=1 completes, bound=100
+        // hangs; production loads fragments inside the loop too). NOLOAD
+        // knob: constant ones fragment (fold-prone, diagnostics only).
+        let a_loads_in_loop = std::env::var("BRIEV_MMA_CEILING_NOLOAD").is_err();
+
+        // bound = ssbo.i (member 0). The loop bound is RUNTIME: a const
+        // bound would let the driver fold the whole chain away
+        // (observability doctrine).
+        let i_ptr_ty = builder.ptr_class(StorageClass::StorageBuffer, int_ty);
+        let i_ptr = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain,
+            Some(i_ptr_ty),
+            Some(i_ptr),
+            vec![Operand::IdRef(ssbo), Operand::IdRef(c1)],
+        ));
+        let bound = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Load,
+            Some(int_ty),
+            Some(bound),
+            vec![Operand::IdRef(i_ptr)],
+        ));
+
+        // acc init = LOADED zero fragment (runtime value — see the comment
+        // above; constant coopmat composites are poison on this driver).
+        let init_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+        let init_ptr = builder.gen_id();
+        let c131072 = u32_const(&mut builder, 32 * 4096);
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain,
+            Some(init_elem_ptr),
+            Some(init_ptr),
+            vec![
+                Operand::IdRef(ssbo),
+                Operand::IdRef(c0),
+                Operand::IdRef(c131072),
+            ],
+        ));
+        let acc_init = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::CooperativeMatrixLoadKHR,
+            Some(cm_acc),
+            Some(acc_init),
+            vec![
+                Operand::IdRef(init_ptr),
+                Operand::IdRef(layout_row),
+                Operand::IdRef(stride16),
+            ],
+        ));
+
+        // ── The loop (skipped entirely under BRIEV_MMA_CEILING_NOLOOP —
+        // bisect: isolates loop machinery vs struct/load/store) ──────────
+        let no_loop = std::env::var("BRIEV_MMA_CEILING_NOLOOP").is_ok();
+        // The value stored to y (acc chain head or init) and to i (final
+        // counter or the bound itself).
+        let acc_final: Word;
+        let final_it: Word;
+        if no_loop {
+            // Discriminates load-broken vs store-broken: NOLOAD stores a
+            // CONSTANT ones fragment (store probe); otherwise stores the
+            // LOADED fragment (load probe). The load happens HERE (entry
+            // block) — this probe has no loop.
+            let a_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+            let a_ptr = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::AccessChain,
+                Some(a_elem_ptr),
+                Some(a_ptr),
+                vec![
+                    Operand::IdRef(ssbo),
+                    Operand::IdRef(c0),
+                    Operand::IdRef(c0),
+                ],
+            ));
+            let load_stride = u32_const(&mut builder, 4096);
+            let fa = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::CooperativeMatrixLoadKHR,
+                Some(cm_a),
+                Some(fa),
+                vec![
+                    Operand::IdRef(a_ptr),
+                    Operand::IdRef(layout_row),
+                    Operand::IdRef(load_stride),
+                ],
+            ));
+            let one_f16 = builder.float_const(16, 1.0);
+            let cm_c16 = cm_c16_probe(&mut builder, f16_ty, scope_sub, dim16, use_c);
+            acc_final = if std::env::var("BRIEV_MMA_CEILING_NOLOAD").is_ok() {
+                builder.builder.constant_composite(cm_c16, vec![one_f16])
+            } else {
+                // single mma probe: A·B + acc_init — no phi, no loop
+                let b_ptr = builder.gen_id();
+                let c16 = u32_const(&mut builder, 16);
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain,
+                    Some(a_elem_ptr),
+                    Some(b_ptr),
+                    vec![
+                        Operand::IdRef(ssbo),
+                        Operand::IdRef(c0),
+                        Operand::IdRef(c16),
+                    ],
+                ));
+                let fb = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::CooperativeMatrixLoadKHR,
+                    Some(cm_b),
+                    Some(fb),
+                    vec![
+                        Operand::IdRef(b_ptr),
+                        Operand::IdRef(layout_row),
+                        Operand::IdRef(load_stride),
+                    ],
+                ));
+                let m = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::CooperativeMatrixMulAddKHR,
+                    Some(cm_acc),
+                    Some(m),
+                    vec![
+                        Operand::IdRef(fa),
+                        Operand::IdRef(fb),
+                        Operand::IdRef(acc_init),
+                    ],
+                ));
+                m
+            };
+            final_it = bound;
+        } else if std::env::var("BRIEV_MMA_CEILING_SCALAR").is_ok() {
+            // Bisect knob: SCALAR only — no y store at all (the y Access-
+            // Chain + fragment store is the wedge suspect; scalar SSBO
+            // access is production-identical).
+            acc_final = acc_init;
+            final_it = bound;
+        } else {
+            // Hand-built structured loop with a RUNTIME bound (the shared
+            // begin_structured_loop takes a const `groups`; the ceiling
+            // needs the bound in state). Mirrors kernel.rs begin/end.
+            let zero64 = builder.builder.constant_bit64(int_ty, 0);
+            let one64 = builder.builder.constant_bit64(int_ty, 1);
+            let header_bb = builder.gen_id();
+            let body_bb = builder.gen_id();
+            let continue_bb = builder.gen_id();
+            let merge_bb = builder.gen_id();
+            let preheader_bb = builder.gen_id();
+            let cond0 = builder.gen_id();
+            let cond_next = builder.gen_id();
+            let loop_be = builder.gen_id();
+            // CHAINS×B_FRAGS independent accumulator back-edges.
+            let acc_be: Vec<Word> =
+                (0..CEILING_CHAINS * CEILING_B_FRAGS).map(|_| builder.gen_id()).collect();
+
+            builder.builder.branch(preheader_bb);
+            builder.begin_block(Some(preheader_bb));
+            let bool_ty = bool_ty_for(&mut builder);
+            builder.emit(Instruction::new(
+                spirv::Op::SLessThan,
+                Some(bool_ty),
+                Some(cond0),
+                vec![Operand::IdRef(zero64), Operand::IdRef(bound)],
+            ));
+            builder.builder.branch(header_bb);
+            builder.begin_block(Some(header_bb));
+            let it = builder
+                .builder
+                .phi(int_ty, None, [(zero64, preheader_bb), (loop_be, continue_bb)])
+                .map_err(|e| format!("it phi: {:?}", e))?;
+            let cond_hdr = builder
+                .builder
+                .phi(bool_ty, None, [(cond0, preheader_bb), (cond_next, continue_bb)])
+                .map_err(|e| format!("cond phi: {:?}", e))?;
+            let acc_phis: Vec<Word> = (0..CEILING_CHAINS * CEILING_B_FRAGS)
+                .map(|j| {
+                    // Back-edge ids are pre-reserved (forward reference,
+                    // the same pattern as kernel.rs's cond phi →
+                    // cond_next); the body defines them into acc_be[j].
+                    builder
+                        .builder
+                        .phi(cm_acc, None, [(acc_init, preheader_bb), (acc_be[j], continue_bb)])
+                        .expect("acc phi")
+                })
+                .collect();
+            builder.builder.loop_merge(
+                merge_bb,
+                continue_bb,
+                rspirv::spirv::LoopControl::NONE,
+                [] as [Operand; 0],
+            );
+            builder.builder.branch_conditional(
+                cond_hdr, body_bb, merge_bb, [] as [u32; 0],
+            );
+            builder.begin_block(Some(body_bb));
+
+            let (chain_a, chain_b) = if a_loads_in_loop {
+                let a_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+                // A row base = kt*16: the fragment VALUES change every
+                // iteration (runtime-dependent increments — the strongest
+                // fold blocker; loop-invariant A·B is legally hoistable).
+                let ktu = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::UConvert,
+                    Some(u32_ty),
+                    Some(ktu),
+                    vec![Operand::IdRef(it)],
+                ));
+                let c16k = u32_const(&mut builder, 16);
+                let a_row = u32_binop(&mut builder, spirv::Op::IMul, ktu, c16k);
+                // ONE A FRAGMENT PER CHAIN (rows kt*16 + j): the 8 chains
+                // then consume DISTINCT A·B products — the driver's
+                // de-fusion (fma chains sharing A·B → mul+adds) has no
+                // redundant work to eliminate.
+                let load_stride = u32_const(&mut builder, 4096);
+                let mut cas = Vec::new();
+                for j in 0..CEILING_CHAINS {
+                    let _ = j;
+                    let jc = u32_const(&mut builder, j as u32);
+                    let row_j = u32_binop(&mut builder, spirv::Op::IAdd, a_row, jc);
+                    let a_ptr = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::AccessChain,
+                        Some(a_elem_ptr),
+                        Some(a_ptr),
+                        vec![
+                            Operand::IdRef(ssbo),
+                            Operand::IdRef(c0),
+                            Operand::IdRef(row_j),
+                        ],
+                    ));
+                    let fa = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::CooperativeMatrixLoadKHR,
+                        Some(cm_a),
+                        Some(fa),
+                        vec![
+                            Operand::IdRef(a_ptr),
+                            Operand::IdRef(layout_row),
+                            Operand::IdRef(load_stride),
+                        ],
+                    ));
+                    cas.push(fa);
+                }
+                // B: ONE FRAGMENT PER CHAIN (rows kt*16+8+j) — no operand
+                // pair repeats within an iteration or across them, so the
+                // driver can neither de-fuse nor reassociate the chain.
+                let mut cbs = Vec::new();
+                for j in 0..CEILING_B_FRAGS {
+                    let jc = u32_const(&mut builder, (8 + j) as u32);
+                    let brow_j = u32_binop(&mut builder, spirv::Op::IAdd, a_row, jc);
+                    let b_ptr = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::AccessChain,
+                        Some(a_elem_ptr),
+                        Some(b_ptr),
+                        vec![
+                            Operand::IdRef(ssbo),
+                            Operand::IdRef(c0),
+                            Operand::IdRef(brow_j),
+                        ],
+                    ));
+                    let fb = builder.gen_id();
+                    builder.emit(Instruction::new(
+                        spirv::Op::CooperativeMatrixLoadKHR,
+                        Some(cm_b),
+                        Some(fb),
+                        vec![
+                            Operand::IdRef(b_ptr),
+                            Operand::IdRef(layout_row),
+                            Operand::IdRef(load_stride),
+                        ],
+                    ));
+                    cbs.push(fb);
+                }
+                (cas, cbs)
+            } else {
+                // NOLOAD diagnostics: constant splats (fold-prone).
+                let one_f16 = builder.float_const(16, 1.0);
+                let mut cas = Vec::new();
+                let mut cbs = Vec::new();
+                for _ in 0..CEILING_CHAINS {
+                    cas.push(builder.builder.constant_composite(cm_a, vec![one_f16]));
+                    cbs.push(builder.builder.constant_composite(cm_b, vec![one_f16]));
+                }
+                (cas, cbs)
+            };
+
+            // Round-robin mma chain (acc[j] = A·B + acc[j], j = d %
+            // CHAINS). SSA: each mma consumes the PREVIOUS mma result of
+            // its chain — only the LAST mma of chain j defines the
+            // pre-reserved acc_be[j] the header phi consumes. (First
+            // draft reused acc_be[j] as the result id for every mma in
+            // the chain: 8 duplicate definitions, exactly what spirv-val's
+            // "defined more than once" caught.) NOMMA knob swaps the mmas
+            // for CopyObjects (isolates the chain from the machinery).
+            let no_mma = std::env::var("BRIEV_MMA_CEILING_NOMMA").is_ok();
+            let mut cur: Vec<Word> = acc_phis.clone();
+            // The production GEMM's shape: CHAINS×B_FRAGS mma, every
+            // (A_r, B_j) pair distinct — no de-fuse/reassociation gain for
+            // the driver, and the load:mma ratio (0.5) matches the tensor
+            // pipeline.
+            for r in 0..CEILING_CHAINS {
+                for j in 0..CEILING_B_FRAGS {
+                    let idx = r * CEILING_B_FRAGS + j;
+                    let res = acc_be[idx];
+                    if no_mma {
+                        let src = if idx == 0 { chain_a[0] } else { cur[idx] };
+                        builder.emit(Instruction::new(
+                            spirv::Op::CopyObject,
+                            Some(cm_acc),
+                            Some(res),
+                            vec![Operand::IdRef(src)],
+                        ));
+                    } else {
+                        builder.emit(Instruction::new(
+                            spirv::Op::CooperativeMatrixMulAddKHR,
+                            Some(cm_acc),
+                            Some(res),
+                            vec![
+                                Operand::IdRef(chain_a[r]),
+                                Operand::IdRef(chain_b[j]),
+                                Operand::IdRef(cur[idx]),
+                            ],
+                        ));
+                        // NoContraction: forbid fusing this mul+add pair.
+                        builder.emit_global(Instruction::new(
+                            spirv::Op::Decorate, None, None,
+                            vec![
+                                Operand::IdRef(res),
+                                Operand::Decoration(spirv::Decoration::NoContraction),
+                            ],
+                        ));
+                    }
+                    cur[idx] = res;
+                }
+            }
+            builder.builder.branch(continue_bb);
+            builder.begin_block(Some(continue_bb));
+            builder.emit(Instruction::new(
+                spirv::Op::IAdd,
+                Some(int_ty),
+                Some(loop_be),
+                vec![Operand::IdRef(it), Operand::IdRef(one64)],
+            ));
+            builder.emit(Instruction::new(
+                spirv::Op::SLessThan,
+                Some(bool_ty),
+                Some(cond_next),
+                vec![Operand::IdRef(loop_be), Operand::IdRef(bound)],
+            ));
+            builder.builder.branch(header_bb);
+            builder.begin_block(Some(merge_bb));
+            acc_final = acc_phis[0];
+            final_it = it;
+        }
+
+        // Swan song: store acc[0] (FConvert to f32 when f16acc) to
+        // y[wg*256], stride 16 — structurally live (an FFI-consumed
+        // buffer), so the chain cannot be eliminated.
+        let layout_row = u32_const(&mut builder, 0);
+        let store_stride = u32_const(&mut builder, 4096);
+        let c4096 = u32_const(&mut builder, 4096);
+        let y_off = u32_binop(&mut builder, spirv::Op::IMul, wg, c4096);
+        let y_elem_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
+        let y_ptr = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain,
+            Some(y_elem_ptr),
+            Some(y_ptr),
+            vec![
+                Operand::IdRef(ssbo),
+                Operand::IdRef(c2),
+                Operand::IdRef(y_off),
+            ],
+        ));
+        // ALWAYS store an f16 fragment (the production shape): f16acc
+        // stores the accumulator directly; f32acc FConverts first.
+        let cm_c16 = builder
+            .builder
+            .type_cooperative_matrix_khr(f16_ty, scope_sub, dim16, dim16, use_c);
+        let frag_out = if f16acc {
+            acc_final
+        } else {
+            let fo = builder.gen_id();
+            builder.emit(Instruction::new(
+                spirv::Op::FConvert,
+                Some(cm_c16),
+                Some(fo),
+                vec![Operand::IdRef(acc_final)],
+            ));
+            fo
+        };
+        if std::env::var("BRIEV_MMA_CEILING_SCALAR").is_err()
+            && std::env::var("BRIEV_MMA_CEILING_NOYSTORE").is_err()
+        {
+            builder.emit(Instruction::new(
+                spirv::Op::CooperativeMatrixStoreKHR,
+                None,
+                None,
+                vec![
+                    Operand::IdRef(y_ptr),
+                    Operand::IdRef(frag_out),
+                    Operand::IdRef(layout_row),
+                    Operand::IdRef(store_stride),
+                ],
+            ));
+        }
+        // Host-visible completion: ssbo.i = it (the runner-style scalar
+        // observable).
+        let i_store_ptr = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain,
+            Some(i_ptr_ty),
+            Some(i_store_ptr),
+            vec![Operand::IdRef(ssbo), Operand::IdRef(c1)],
+        ));
+        builder.emit(Instruction::new(
+            spirv::Op::Store,
+            None,
+            None,
+            vec![Operand::IdRef(i_store_ptr), Operand::IdRef(final_it)],
+        ));
+
+        builder.ret();
+        builder.end_function();
+
+        let interface: Vec<Word> = [gid, lid, wgid, ssbo].to_vec();
+        builder.set_entry_point(func_id, "main", ExecutionModel::GLCompute, &interface);
+        builder.add_execution_mode(func_id, spirv::ExecutionMode::LocalSize, 32, 1, 1);
+        builder.build()
+    }
+}
+
+/// The loop condition compares i64s — Bits(1) through the type lowering.
+fn bool_ty_for(builder: &mut super::SpirvBuilder) -> Word {
+    builder.lower_type(&crate::ast::Type::Bits(1)).expect("bool type")
 }
 
 /// Tensor-operand detection: all three GEMM fields are 16-bit float arrays
@@ -1914,4 +2631,15 @@ pub(crate) fn emit_coopmat(
 
     builder.builder.branch(exit_bb);
     Ok(())
+}
+
+/// Probe helper: the accumulator-class coopmat type (use=C) over half.
+fn cm_c16_probe(
+    builder: &mut super::SpirvBuilder,
+    f16_ty: Word,
+    scope_sub: Word,
+    dim16: Word,
+    use_c: Word,
+) -> Word {
+    builder.builder.type_cooperative_matrix_khr(f16_ty, scope_sub, dim16, dim16, use_c)
 }
