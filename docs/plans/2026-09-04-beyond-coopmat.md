@@ -51,15 +51,18 @@ only if it regresses.
 Universal SPIR-V levers, each landing behind the in-process A/B, each
 with a VERDICT row, losers reverted:
 
-- **D1 — 2 panels per stage.** Double-buffer depth 4 panels total;
-  halves barrier count per panel. Touch: `emit_coopmat_smem` staging
-  geometry + fill scheduling. smem budget: 4 panels ≈ 32 KB — fits.
+- **D1 — 2 panels per stage.** *(MEASURED 2026-09-04d: REJECTED — 2×
+  slower, occupancy-bound; knob defaults to 1, infrastructure kept.)*
 - **D2 — register-prefetch software pipeline.** Issue panel k+2 global
   loads into registers during mma(k); store to smem after the mma
   batch; one barrier pair per iteration retained. The portable
   emulation of `cp.async` (SPIR-V has no async global→workgroup copy).
-- **D3 — f16x2 fill loads.** The scalar fill loads one half per
+- **D3 — f16x2 fill loads.** *(MEASURED 2026-09-04d: LANDED — +24%,
+  16.7→20.7 TFLOP/s; default on.)* The scalar fill loads one half per
   `OpLoad`; uint/ushort2 loads halve fill instruction count.
+  - *D3b f16×4 quads (2026-09-04f): REJECTED — both forms (2×-unroll
+    1.183×, true v4f16 view 1.133×) lose to the pairs mode; after D3
+    the fill is transaction-bound, not instruction-bound.*
 - **D4 — occupancy shaping.** LocalSize search (O5 rung) under the
   hardened harness — the R sweep showed the accumulator-register trade;
   LocalSize × workgroup count is the remaining axis.
