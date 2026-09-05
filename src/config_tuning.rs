@@ -132,6 +132,12 @@ pub struct IrLoweringSettings {
     /// happen after the first barrier. Requires fill_pairs. 0 = fused
     /// post-barrier refill.
     pub spirv_coopmat_fill_prefetch: bool,
+    /// 2026-09-05 (beyond-coopmat Stage 1, D5): rotate each workgroup's
+    /// K-panel start (wgid % 8 buckets) so co-resident workgroups'
+    /// fill/mma barrier phases desynchronize — the anti-phase-locking
+    /// lever. Output values are order-independent (each tile sums all
+    /// K panels; only the f16 rounding walk changes).
+    pub spirv_coopmat_stagger: bool,
     /// 2026-09-04 (beyond-coopmat Stage 1, D1): panels per double-buffer
     /// stage — 2 halves the barrier count per panel and doubles the mma
     /// per barrier pair. Falls back to 1 when (K/16) is odd (the tail
@@ -225,6 +231,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_coopmat_fill_pairs: false,
     spirv_coopmat_fill_quad: false,
     spirv_coopmat_fill_prefetch: false,
+    spirv_coopmat_stagger: false,
     spirv_coopmat_panels_per_stage: 2,
 
     firmem_min_depth: 64,
@@ -406,6 +413,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_fill_prefetch", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_fill_prefetch),
+        spirv_coopmat_stagger: db
+            .field_int("spirv_coopmat_stagger", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_stagger),
         spirv_coopmat_panels_per_stage: db
             .field_int("spirv_coopmat_panels_per_stage", 0)
             .map(|v| v.max(1).min(4) as u32)

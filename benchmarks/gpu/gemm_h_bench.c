@@ -110,6 +110,37 @@ static void seed_state(unsigned char* state, uint64_t off_a, uint64_t off_b,
 // plus slack for the ~K-term f32 accumulation.
 static double max_rel_err(const unsigned char* state, uint64_t off_a,
                           uint64_t off_b, uint64_t off_y,
+                          uint64_t M, uint64_t N, uint64_t K);
+
+// The f16acc gate: the plan's per-tier contract (5e-3 f32-acc, 1e-2
+// f16acc). The old hardcoded 5e-3 silently over-tightened the f16acc
+// tier (the f16 accumulation walk is order-sensitive and reaches
+// ~6.4e-3 under the D5 panel rotation).
+static double rel_gate(void) {
+    return getenv("BRIEV_GEMM_F16ACC") != NULL ? 1e-2 : 5e-3;
+}
+
+static void report_correctness(const char* tag, const unsigned char* st,
+                               uint64_t off_a, uint64_t off_b, uint64_t off_y,
+                               uint64_t M, uint64_t N, uint64_t K) {
+    double max_rel = max_rel_err(st, off_a, off_b, off_y, M, N, K);
+    // sample dump: the first got vs ref at row 0
+    const uint16_t* a = (const uint16_t*)(st + off_a);
+    const uint16_t* b = (const uint16_t*)(st + off_b);
+    const uint16_t* y = (const uint16_t*)(st + off_y);
+    double ref0 = 0.0;
+    for (uint64_t k = 0; k < K; k++) ref0 += f16_to_f64(a[k]) * f16_to_f64(b[k * N + 0]);
+    printf("# sample[%s]: y[0]=%.4f ref=%.4f (f16 grid %.4f)\n", tag,
+           f16_to_f64(y[0]), ref0, (double)f32_to_f16((float)ref0));
+    printf("# correctness[%s]: max_rel_err = %.3e (%s)\n", tag, max_rel,
+           max_rel <= rel_gate() ? "OK" : "FAIL");
+}
+
+// Sampled correctness against a double reference. f16 storage rounds
+// once per output — bound the relative error at ~2^-10 (f16 epsilon)
+// plus slack for the ~K-term f32 accumulation.
+static double max_rel_err(const unsigned char* state, uint64_t off_a,
+                          uint64_t off_b, uint64_t off_y,
                           uint64_t M, uint64_t N, uint64_t K) {
     const uint16_t* a = (const uint16_t*)(state + off_a);
     const uint16_t* b = (const uint16_t*)(state + off_b);
@@ -134,21 +165,6 @@ static double max_rel_err(const unsigned char* state, uint64_t off_a,
     return max_rel;
 }
 
-static void report_correctness(const char* tag, const unsigned char* st,
-                               uint64_t off_a, uint64_t off_b, uint64_t off_y,
-                               uint64_t M, uint64_t N, uint64_t K) {
-    double max_rel = max_rel_err(st, off_a, off_b, off_y, M, N, K);
-    // sample dump: the first got vs ref at row 0
-    const uint16_t* a = (const uint16_t*)(st + off_a);
-    const uint16_t* b = (const uint16_t*)(st + off_b);
-    const uint16_t* y = (const uint16_t*)(st + off_y);
-    double ref0 = 0.0;
-    for (uint64_t k = 0; k < K; k++) ref0 += f16_to_f64(a[k]) * f16_to_f64(b[k * N + 0]);
-    printf("# sample[%s]: y[0]=%.4f ref=%.4f (f16 grid %.4f)\n", tag,
-           f16_to_f64(y[0]), ref0, (double)f32_to_f16((float)ref0));
-    printf("# correctness[%s]: max_rel_err = %.3e (%s)\n", tag, max_rel,
-           max_rel <= 5e-3 ? "OK" : "FAIL");
-}
 
 static uint8_t* read_spv(const char* path, long* len_out) {
     FILE* f = fopen(path, "rb");

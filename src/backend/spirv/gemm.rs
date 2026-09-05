@@ -233,6 +233,14 @@ impl GemmPlan {
         crate::config_tuning::ir_lowering().spirv_coopmat_fill_prefetch
     }
 
+    /// D5 (beyond-coopmat Stage 1): rotate each workgroup's K-panel
+    /// start (wgid % 8 buckets × groups/8) so co-resident workgroups'
+    /// fill/mma barrier phases desynchronize — the anti-phase-locking
+    /// lever. Needs groups % 8 == 0 so the buckets divide evenly.
+    pub(crate) fn coopmat_stagger() -> bool {
+        crate::config_tuning::ir_lowering().spirv_coopmat_stagger
+    }
+
     /// D1 (beyond-coopmat Stage 1): panels per double-buffer stage — 2
     /// halves the barrier count per panel. Falls back to 1 when (K/16)
     /// is odd: the tail pair would double-count a clamped duplicate panel.
@@ -2782,6 +2790,21 @@ fn emit_coopmat_smem(
     let groups = (plan.k / 16 / pps as i64) as u32;
     let groups_c = u32_const(builder, groups);
     let last_panel_c = u32_const(builder, groups - 1);
+    // D5 stagger: this workgroup's K-panel rotation start — wgid % 8
+    // buckets × groups/8 panels apart, so the ~8 co-resident workgroups
+    // on an SM walk the K range at distinct offsets (their fill-DRAM
+    // bursts and mma phases no longer align). Panels complete via the
+    // UMod wrap in the refill; the prologue start+1 never exceeds the
+    // last panel for groups ≥ 16 (the tensor-tier minimum).
+    let stagger = GemmPlan::coopmat_stagger() && groups % 8 == 0 && groups >= 16;
+    let start_panel: Word = if stagger {
+        let c8 = u32_const(builder, 8);
+        let per = u32_const(builder, groups / 8);
+        let bucket = u32_binop(builder, spirv::Op::UMod, wgid_x, c8);
+        u32_binop(builder, spirv::Op::IMul, bucket, per)
+    } else {
+        u32_const(builder, 0)
+    };
     for stage in 0..2u32 {
         for pi in 0..pps {
             let a_off = u32_const(
@@ -2790,7 +2813,12 @@ fn emit_coopmat_smem(
             );
             let b_off = u32_const(builder, (stage * pps * 4 * 256 + pi * 4 * 256) as u32);
             let kt_panel = {
-                let raw = u32_const(builder, stage * pps + pi);
+                let raw = if stagger {
+                    let off = u32_const(builder, stage * pps + pi);
+                    u32_binop(builder, spirv::Op::IAdd, start_panel, off)
+                } else {
+                    u32_const(builder, stage * pps + pi)
+                };
                 let over = {
                     let id = builder.gen_id();
                     builder.emit(Instruction::new(
@@ -2941,7 +2969,12 @@ fn emit_coopmat_smem(
                 let pi_c = u32_const(builder, pi as u32);
                 let pair2 = u32_binop(builder, spirv::Op::IAdd, kt_u, two);
                 let base = u32_binop(builder, spirv::Op::IMul, pair2, pps_c);
-                u32_binop(builder, spirv::Op::IAdd, base, pi_c)
+                let raw = u32_binop(builder, spirv::Op::IAdd, base, pi_c);
+                if stagger {
+                    u32_binop(builder, spirv::Op::IAdd, raw, start_panel)
+                } else {
+                    raw
+                }
             };
             let kt_fill = u32_binop(builder, spirv::Op::UMod, raw, groups_c);
             let a_off_c = u32_const(builder, (pi as usize * a_panel_stride) as u32);

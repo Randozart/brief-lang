@@ -64,11 +64,12 @@ spirv_coopmat_tile_rows: 4;
 spirv_coopmat_subgroups: 1;
 // 2026-09-02 (plan 2026-09-02-cuda-race B3): FP16-accumulate tensor tier —
 // separate numerics contract (gate rel <= 1e-2 vs the f32-acc tier).
-spirv_coopmat_f16acc: 1;
+spirv_coopmat_f16acc: 0;
 spirv_coopmat_smem: 1;
 spirv_coopmat_fill_pairs: 1;
 spirv_coopmat_fill_quad: 0;
 spirv_coopmat_fill_prefetch: 0;
+spirv_coopmat_stagger: 0;
 spirv_coopmat_panels_per_stage: 1;
 // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image storage
 // strategy — texel-formatted write buffers realize as device storage images
