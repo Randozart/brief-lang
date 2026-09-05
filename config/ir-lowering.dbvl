@@ -67,6 +67,7 @@ spirv_coopmat_subgroups: 1;
 spirv_coopmat_f16acc: 1;
 spirv_coopmat_smem: 1;
 spirv_coopmat_fill_pairs: 1;
+spirv_coopmat_fill_quad: 0;
 spirv_coopmat_panels_per_stage: 1;
 // 2026-09-02 (plan 2026-09-02-image-and-dehashtag, revised): image storage
 // strategy — texel-formatted write buffers realize as device storage images

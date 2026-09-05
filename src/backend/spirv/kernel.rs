@@ -68,7 +68,7 @@ pub fn emit_kernel(
     // the smem GEMM's fields ONLY — the fallback lanes keep their scalar
     // half views. (2026-09-04, plan 2026-09-04-beyond-coopmat Stage 1.)
     let gemm_plan_early = gemm::GemmPlan::match_stmts(shape, items);
-    let pair_view_fields: Vec<String> = {
+    let pair_view_fields: Vec<(String, u32)> = {
         let tensor = gemm_plan_early.as_ref().map_or(false, |plan| {
             crate::config_tuning::ir_lowering().spirv_coopmat
                 && plan.tensor_tier_eligible()
@@ -89,7 +89,16 @@ pub fn emit_kernel(
         });
         if tensor {
             let plan = gemm_plan_early.as_ref().unwrap();
-            vec![plan.a_field.clone(), plan.b_field.clone(), plan.y_field.clone()]
+            // D3b: the fill's a/b carry the f16×4 quad view when the
+            // quad knob + the ÷4 shape guards hold; y stays at the pair
+            // width (the fragment-store path is unchanged).
+            let quad = gemm::GemmPlan::coopmat_fill_quad_active(plan);
+            let ab_width = if quad { 4 } else { 2 };
+            vec![
+                (plan.a_field.clone(), ab_width),
+                (plan.b_field.clone(), ab_width),
+                (plan.y_field.clone(), 2),
+            ]
         } else {
             Vec::new()
         }
@@ -196,11 +205,20 @@ pub fn emit_kernel(
         let plan = gemm_plan.as_ref().unwrap();
         let r = gemm::GemmPlan::coopmat_tile_rows(plan.m);
         let f16_ty = builder.builder.type_float(16);
-        // Pairs mode (D3): the smem arrays carry the v2f16 view
-        // (byte-identical; the fill stores pairs, the coopmat loads walk
-        // [pair_idx, 0] to a half pointer).
-        let v2_ty = if gemm::GemmPlan::coopmat_fill_pairs() {
-            Some(builder.builder.type_vector(f16_ty, 2))
+        // Pairs mode (D3): the smem arrays carry the vNf16 view
+        // (byte-identical; the fill stores wide units, the coopmat loads
+        // walk [unit_idx, 0] to a half pointer). D3b quad mode widens to
+        // v4f16 when the quad knob + the ÷4 shape guards hold.
+        let quad = gemm::GemmPlan::coopmat_fill_quad_active(plan);
+        let view_width: u32 = if quad {
+            4
+        } else if gemm::GemmPlan::coopmat_fill_pairs() {
+            2
+        } else {
+            0
+        };
+        let view_ty = if view_width > 0 {
+            Some(builder.builder.type_vector(f16_ty, view_width))
         } else {
             None
         };
@@ -208,15 +226,18 @@ pub fn emit_kernel(
         let pps = gemm::GemmPlan::coopmat_panels_per_stage(plan.k);
         let a_elems = (2 * pps * r * 16 * 16) as u32;  // 2 stages × pps panels × R strips × 256
         let b_elems = (2 * pps * 4 * 16 * 16) as u32;   // 2 stages × pps panels × 4 B-tiles × 256
-        let (a_len, b_len) = if v2_ty.is_some() {
-            (builder.u32_const(a_elems / 2), builder.u32_const(b_elems / 2))
+        let (a_len, b_len) = if view_width > 0 {
+            (
+                builder.u32_const(a_elems / view_width),
+                builder.u32_const(b_elems / view_width),
+            )
         } else {
             (builder.u32_const(a_elems), builder.u32_const(b_elems))
         };
-        let (a_arr_ty, b_arr_ty) = if let Some(v2) = v2_ty {
+        let (a_arr_ty, b_arr_ty) = if let Some(vt) = view_ty {
             (
-                builder.builder.type_array(v2, a_len),
-                builder.builder.type_array(v2, b_len),
+                builder.builder.type_array(vt, a_len),
+                builder.builder.type_array(vt, b_len),
             )
         } else {
             (

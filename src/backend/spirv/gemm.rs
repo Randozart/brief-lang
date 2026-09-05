@@ -202,6 +202,28 @@ impl GemmPlan {
         crate::config_tuning::ir_lowering().spirv_coopmat_fill_pairs
     }
 
+    /// D3b (beyond-coopmat Stage 1): the paired fill iterates f16×4
+    /// quads — one v4f16 load/store per 4 halves (half the pairs-mode
+    /// instruction count again). Requires the pairs-view machinery
+    /// (vNf16 member retyping); dead unless fill_pairs is on.
+    pub(crate) fn coopmat_fill_quad() -> bool {
+        crate::config_tuning::ir_lowering().spirv_coopmat_fill_quad
+    }
+
+    /// D3b quad view actually active: knob on, pairs mode on (same
+    /// vNf16 member-view machinery), and the address math divides
+    /// exactly — A row stride K, B row stride N, and the M ladder all
+    /// ÷4. Single definition: kernel.rs (member widths) and gemm.rs
+    /// (fill + fragment loads) must agree.
+    pub(crate) fn coopmat_fill_quad_active(plan: &GemmPlan) -> bool {
+        Self::coopmat_smem()
+            && Self::coopmat_fill_pairs()
+            && Self::coopmat_fill_quad()
+            && plan.m % 4 == 0
+            && plan.k % 4 == 0
+            && plan.n % 4 == 0
+    }
+
     /// D1 (beyond-coopmat Stage 1): panels per double-buffer stage — 2
     /// halves the barrier count per panel. Falls back to 1 when (K/16)
     /// is odd: the tail pair would double-count a clamped duplicate panel.
@@ -1871,7 +1893,16 @@ struct SmemFillParams {
     v2_ssbo_ptr: Word,
     v2_wg_ptr: Word,
     v2_f16_ty: Word,
+    /// D3b quad view: v4f16 pointers + the ÷4 address constants.
+    v4_ssbo_ptr: Word,
+    v4_wg_ptr: Word,
+    v4_f16_ty: Word,
+    k4: Word,
+    n4: Word,
     pairs: bool,
+    /// D3b quad mode: elems_per_lane counts f16×4 quads; the fill loads
+    /// one v4f16 per unit (half the pairs-mode instruction count).
+    quad: bool,
 }
 
 /// Emit DRAM→smem fill for one panel: (R+4)×256 f16 halves.
@@ -2058,11 +2089,17 @@ fn emit_smem_fill(
 
 /// D3 paired fill: one v2f16 load + one v2f16 store per even/odd half
 /// pair. The SSBO members (and the smem arrays) are retyped
-/// array-of-v2f16 (byte-identical; lower.rs pair_eligible), so the pair
+/// array-of-vNf16 (byte-identical; lower.rs view_width), so the wide
 /// index IS the element index — no bitcasts, no /2 byte math. Pair
 /// pflat covers halves 2p, 2p+1: same tile/row, cols (2c, 2c+1) — the
 /// DRAM pair index = a_src/2 (a_src even: K, kt*16, tn64, j*16 all even
 /// and col_pair = (col&14)/2).
+///
+/// D3b quad mode (p.quad): p.elems_per_lane counts QUAD units (f16×4);
+/// each iteration loads ONE v4f16. A quad covers halves 4q..4q+3 — same
+/// tile/row (flat4%16 ∈ {0,4,8,12} never crosses a 16-half row), never
+/// straddles the A/B region boundary (a_pairs = pps·R·128 is even), and
+/// the DRAM quad index divides exactly (K, N, tn64+j16, col4 all ÷4).
 fn emit_smem_fill_pairs(
     builder: &mut super::SpirvBuilder,
     p: &SmemFillParams,
@@ -2071,175 +2108,365 @@ fn emit_smem_fill_pairs(
     panel_kt: Word,
 ) {
     let c32 = u32_const(builder, 32);
+    for u in 0..p.elems_per_lane as usize {
+        // unit flat = lane + u*32 (PAIR or QUAD units; halves = w× that).
+        let uflat = {
+            let u_c = u32_const(builder, u as u32);
+            let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
+            u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
+        };
+        if p.quad {
+            emit_smem_fill_quad_unit(builder, p, uflat, a_off, b_off, panel_kt);
+        } else {
+            emit_smem_fill_pair_unit(builder, p, uflat, a_off, b_off, panel_kt);
+        }
+    }
+}
+
+/// One quad unit of the D3b fill: given the QUAD index `qflat`, load
+/// the v4f16 from DRAM and store it to the staged smem slot.
+fn emit_smem_fill_quad_unit(
+    builder: &mut super::SpirvBuilder,
+    p: &SmemFillParams,
+    qflat: Word,
+    a_off: Word,
+    b_off: Word,
+    panel_kt: Word,
+) {
+    let c256 = u32_const(builder, 256);
+    let c255 = u32_const(builder, 255);
+    let c15 = u32_const(builder, 15);
+    let c16 = u32_const(builder, 16);
+    let c4 = u32_const(builder, 4);
+    // quad flat → half flat = 4× the quad index.
+    let flat4 = {
+        let m1 = u32_binop(builder, spirv::Op::IAdd, qflat, qflat);
+        u32_binop(builder, spirv::Op::IAdd, m1, m1)
+    };
+    let in_a = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::ULessThan, Some(p.bool_ty), Some(id),
+            vec![Operand::IdRef(flat4), Operand::IdRef(p.a_stage_elems_c)],
+        ));
+        id
+    };
+    let tile_idx = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(flat4), Operand::IdRef(c256)],
+        ));
+        id
+    };
+    let elem256 = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(flat4), Operand::IdRef(c255)],
+        ));
+        id
+    };
+    let row_in = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(elem256), Operand::IdRef(c16)],
+        ));
+        id
+    };
+    // Quad col = elem256 & 15 ∈ {0,4,8,12}; the v4 column = /4.
+    let col4 = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(elem256), Operand::IdRef(c15)],
+        ));
+        id
+    };
+    let colq = u32_binop(builder, spirv::Op::UDiv, col4, c4);
+    let b_flat4 = u32_binop(builder, spirv::Op::ISub, flat4, p.a_stage_elems_c);
+    let b_tile_idx = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(b_flat4), Operand::IdRef(c256)],
+        ));
+        id
+    };
+    // A quad source: row2*(K/4) + kt*4 + col4/4 (K ÷4; all exact).
+    let a_src = {
+        let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
+        let row = u32_binop(builder, spirv::Op::IAdd, p.band_m16, t16);
+        let row2 = u32_binop(builder, spirv::Op::IAdd, row, row_in);
+        let rk_q = u32_binop(builder, spirv::Op::IMul, row2, p.k4);
+        let kt4 = u32_binop(builder, spirv::Op::IMul, panel_kt, c4);
+        let kcol = u32_binop(builder, spirv::Op::IAdd, kt4, colq);
+        u32_binop(builder, spirv::Op::IAdd, rk_q, kcol)
+    };
+    // B quad source: (kt*16+row)*(N/4) + (tn64 + j*16)/4 + col4/4.
+    let b_src = {
+        let kt16 = u32_binop(builder, spirv::Op::IMul, panel_kt, c16);
+        let brow = u32_binop(builder, spirv::Op::IAdd, kt16, row_in);
+        let rn_q = u32_binop(builder, spirv::Op::IMul, brow, p.n4);
+        let j16 = u32_binop(builder, spirv::Op::IMul, b_tile_idx, c16);
+        let bcol = u32_binop(builder, spirv::Op::IAdd, p.tn64, j16);
+        let bcol_q = u32_binop(builder, spirv::Op::UDiv, bcol, c4);
+        let col = u32_binop(builder, spirv::Op::IAdd, bcol_q, colq);
+        u32_binop(builder, spirv::Op::IAdd, rn_q, col)
+    };
+    let a_dram = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v4_ssbo_ptr), Some(id),
+            vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.a_member_c), Operand::IdRef(a_src)],
+        ));
+        id
+    };
+    let b_dram = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v4_ssbo_ptr), Some(id),
+            vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.b_member_c), Operand::IdRef(b_src)],
+        ));
+        id
+    };
+    let dram_ptr = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.v4_ssbo_ptr), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(a_dram), Operand::IdRef(b_dram)],
+        ));
+        id
+    };
+    let val = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Load, Some(p.v4_f16_ty), Some(id),
+            vec![Operand::IdRef(dram_ptr)],
+        ));
+        id
+    };
+    // Smem v4f16 destination: (base + flat4)/4 — exact (all offsets ÷4).
+    let idx = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(flat4), Operand::IdRef(b_flat4)],
+        ));
+        id
+    };
+    let base = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(a_off), Operand::IdRef(b_off)],
+        ));
+        id
+    };
+    let smem_idx = u32_binop(builder, spirv::Op::IAdd, base, idx);
+    let smem_quad_idx = u32_binop(builder, spirv::Op::UDiv, smem_idx, c4);
+    let a_ptr = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v4_wg_ptr), Some(id),
+            vec![Operand::IdRef(p.smem_a), Operand::IdRef(smem_quad_idx)],
+        ));
+        id
+    };
+    let b_ptr = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v4_wg_ptr), Some(id),
+            vec![Operand::IdRef(p.smem_b), Operand::IdRef(smem_quad_idx)],
+        ));
+        id
+    };
+    let dest = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.v4_wg_ptr), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(a_ptr), Operand::IdRef(b_ptr)],
+        ));
+        id
+    };
+    builder.emit(Instruction::new(
+        spirv::Op::Store, None, None,
+        vec![Operand::IdRef(dest), Operand::IdRef(val)],
+    ));
+}
+
+/// One pair unit of the D3 fill: given the PAIR index `pflat`, load the
+/// v2f16 from DRAM and store it to the staged smem slot.
+fn emit_smem_fill_pair_unit(
+    builder: &mut super::SpirvBuilder,
+    p: &SmemFillParams,
+    pflat: Word,
+    a_off: Word,
+    b_off: Word,
+    panel_kt: Word,
+) {
     let c256 = u32_const(builder, 256);
     let c255 = u32_const(builder, 255);
     let c14 = u32_const(builder, 14);
     let c16 = u32_const(builder, 16);
     let c2 = u32_const(builder, 2);
     let c8 = u32_const(builder, 8);
-    for u in 0..p.elems_per_lane as usize {
-        // pair flat = lane + u*32 (PAIR units; halves = 2× that).
-        let pflat = {
-            let u_c = u32_const(builder, u as u32);
-            let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
-            u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
-        };
-        let flat2 = u32_binop(builder, spirv::Op::IAdd, pflat, pflat);
-        let in_a = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::ULessThan, Some(p.bool_ty), Some(id),
-                vec![Operand::IdRef(flat2), Operand::IdRef(p.a_stage_elems_c)],
-            ));
-            id
-        };
-        let tile_idx = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(flat2), Operand::IdRef(c256)],
-            ));
-            id
-        };
-        let elem256 = {
+    let flat2 = u32_binop(builder, spirv::Op::IAdd, pflat, pflat);
+    let in_a = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::ULessThan, Some(p.bool_ty), Some(id),
+            vec![Operand::IdRef(flat2), Operand::IdRef(p.a_stage_elems_c)],
+        ));
+        id
+    };
+    let tile_idx = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(flat2), Operand::IdRef(c256)],
+        ));
+        id
+    };
+    let elem256 = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(flat2), Operand::IdRef(c255)],
+        ));
+        id
+    };
+    let row_in = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(elem256), Operand::IdRef(c16)],
+        ));
+        id
+    };
+    // Pair col = (elem256 & 14)/2 — the v2f16 element column.
+    let col_pair = {
+        let c14v = {
             let id = builder.gen_id();
             builder.emit(Instruction::new(
                 spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(flat2), Operand::IdRef(c255)],
+                vec![Operand::IdRef(elem256), Operand::IdRef(c14)],
             ));
             id
         };
-        let row_in = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(elem256), Operand::IdRef(c16)],
-            ));
-            id
-        };
-        // Pair col = (elem256 & 14)/2 — the v2f16 element column.
-        let col_pair = {
-            let c14v = {
-                let id = builder.gen_id();
-                builder.emit(Instruction::new(
-                    spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
-                    vec![Operand::IdRef(elem256), Operand::IdRef(c14)],
-                ));
-                id
-            };
-            u32_binop(builder, spirv::Op::UDiv, c14v, c2)
-        };
-        let b_flat = u32_binop(builder, spirv::Op::ISub, flat2, p.a_stage_elems_c);
-        let b_tile_idx = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(b_flat), Operand::IdRef(c256)],
-            ));
-            id
-        };
-        // A pair source: row2*(K/2) + kt*8 + col_pair (all even/2 exact).
-        let a_src = {
-            let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
-            let row = u32_binop(builder, spirv::Op::IAdd, p.band_m16, t16);
-            let row2 = u32_binop(builder, spirv::Op::IAdd, row, row_in);
-            let rk_half = u32_binop(builder, spirv::Op::IMul, row2, p.nk_half);
-            let kt8 = u32_binop(builder, spirv::Op::IMul, panel_kt, c8);
-            let kcol = u32_binop(builder, spirv::Op::IAdd, kt8, col_pair);
-            u32_binop(builder, spirv::Op::IAdd, rk_half, kcol)
-        };
-        // B pair source: (kt*16+row)*(N/2) + (tn64 + j*16)/2 + col_pair
-        let b_src = {
-            let kt16 = u32_binop(builder, spirv::Op::IMul, panel_kt, c16);
-            let brow = u32_binop(builder, spirv::Op::IAdd, kt16, row_in);
-            let rn_half = u32_binop(builder, spirv::Op::IMul, brow, p.n_half);
-            let j16 = u32_binop(builder, spirv::Op::IMul, b_tile_idx, c16);
-            let bcol = u32_binop(builder, spirv::Op::IAdd, p.tn64, j16);
-            let bcol_half = u32_binop(builder, spirv::Op::UDiv, bcol, c2);
-            let col = u32_binop(builder, spirv::Op::IAdd, bcol_half, col_pair);
-            u32_binop(builder, spirv::Op::IAdd, rn_half, col)
-        };
-        let a_dram = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(p.v2_ssbo_ptr), Some(id),
-                vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.a_member_c), Operand::IdRef(a_src)],
-            ));
-            id
-        };
-        let b_dram = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(p.v2_ssbo_ptr), Some(id),
-                vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.b_member_c), Operand::IdRef(b_src)],
-            ));
-            id
-        };
-        let dram_ptr = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::Select, Some(p.v2_ssbo_ptr), Some(id),
-                vec![Operand::IdRef(in_a), Operand::IdRef(a_dram), Operand::IdRef(b_dram)],
-            ));
-            id
-        };
-        let val = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::Load, Some(p.v2_f16_ty), Some(id),
-                vec![Operand::IdRef(dram_ptr)],
-            ));
-            id
-        };
-        // Smem v2f16 destination: (base + flat2)/2 — exact (all offsets
-        // even). The pair index IS the v2f16 element index.
-        let idx = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::Select, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(in_a), Operand::IdRef(flat2), Operand::IdRef(b_flat)],
-            ));
-            id
-        };
-        let base = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::Select, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(in_a), Operand::IdRef(a_off), Operand::IdRef(b_off)],
-            ));
-            id
-        };
-        let smem_idx_pair = u32_binop(builder, spirv::Op::IAdd, base, idx);
-        let smem_pair_idx = u32_binop(builder, spirv::Op::UDiv, smem_idx_pair, c2);
-        let a_ptr = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(p.v2_wg_ptr), Some(id),
-                vec![Operand::IdRef(p.smem_a), Operand::IdRef(smem_pair_idx)],
-            ));
-            id
-        };
-        let b_ptr = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::AccessChain, Some(p.v2_wg_ptr), Some(id),
-                vec![Operand::IdRef(p.smem_b), Operand::IdRef(smem_pair_idx)],
-            ));
-            id
-        };
-        let dest = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::Select, Some(p.v2_wg_ptr), Some(id),
-                vec![Operand::IdRef(in_a), Operand::IdRef(a_ptr), Operand::IdRef(b_ptr)],
-            ));
-            id
-        };
+        u32_binop(builder, spirv::Op::UDiv, c14v, c2)
+    };
+    let b_flat = u32_binop(builder, spirv::Op::ISub, flat2, p.a_stage_elems_c);
+    let b_tile_idx = {
+        let id = builder.gen_id();
         builder.emit(Instruction::new(
-            spirv::Op::Store, None, None,
-            vec![Operand::IdRef(dest), Operand::IdRef(val)],
+            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(b_flat), Operand::IdRef(c256)],
         ));
-    }
+        id
+    };
+    // A pair source: row2*(K/2) + kt*8 + col_pair (all even/2 exact).
+    let a_src = {
+        let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
+        let row = u32_binop(builder, spirv::Op::IAdd, p.band_m16, t16);
+        let row2 = u32_binop(builder, spirv::Op::IAdd, row, row_in);
+        let rk_half = u32_binop(builder, spirv::Op::IMul, row2, p.nk_half);
+        let kt8 = u32_binop(builder, spirv::Op::IMul, panel_kt, c8);
+        let kcol = u32_binop(builder, spirv::Op::IAdd, kt8, col_pair);
+        u32_binop(builder, spirv::Op::IAdd, rk_half, kcol)
+    };
+    // B pair source: (kt*16+row)*(N/2) + (tn64 + j*16)/2 + col_pair
+    let b_src = {
+        let kt16 = u32_binop(builder, spirv::Op::IMul, panel_kt, c16);
+        let brow = u32_binop(builder, spirv::Op::IAdd, kt16, row_in);
+        let rn_half = u32_binop(builder, spirv::Op::IMul, brow, p.n_half);
+        let j16 = u32_binop(builder, spirv::Op::IMul, b_tile_idx, c16);
+        let bcol = u32_binop(builder, spirv::Op::IAdd, p.tn64, j16);
+        let bcol_half = u32_binop(builder, spirv::Op::UDiv, bcol, c2);
+        let col = u32_binop(builder, spirv::Op::IAdd, bcol_half, col_pair);
+        u32_binop(builder, spirv::Op::IAdd, rn_half, col)
+    };
+    let a_dram = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v2_ssbo_ptr), Some(id),
+            vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.a_member_c), Operand::IdRef(a_src)],
+        ));
+        id
+    };
+    let b_dram = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v2_ssbo_ptr), Some(id),
+            vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.b_member_c), Operand::IdRef(b_src)],
+        ));
+        id
+    };
+    let dram_ptr = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.v2_ssbo_ptr), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(a_dram), Operand::IdRef(b_dram)],
+        ));
+        id
+    };
+    let val = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Load, Some(p.v2_f16_ty), Some(id),
+            vec![Operand::IdRef(dram_ptr)],
+        ));
+        id
+    };
+    // Smem v2f16 destination: (base + flat2)/2 — exact (all offsets
+    // even). The pair index IS the v2f16 element index.
+    let idx = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(flat2), Operand::IdRef(b_flat)],
+        ));
+        id
+    };
+    let base = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.u32_ty), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(a_off), Operand::IdRef(b_off)],
+        ));
+        id
+    };
+    let smem_idx_pair = u32_binop(builder, spirv::Op::IAdd, base, idx);
+    let smem_pair_idx = u32_binop(builder, spirv::Op::UDiv, smem_idx_pair, c2);
+    let a_ptr = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v2_wg_ptr), Some(id),
+            vec![Operand::IdRef(p.smem_a), Operand::IdRef(smem_pair_idx)],
+        ));
+        id
+    };
+    let b_ptr = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::AccessChain, Some(p.v2_wg_ptr), Some(id),
+            vec![Operand::IdRef(p.smem_b), Operand::IdRef(smem_pair_idx)],
+        ));
+        id
+    };
+    let dest = {
+        let id = builder.gen_id();
+        builder.emit(Instruction::new(
+            spirv::Op::Select, Some(p.v2_wg_ptr), Some(id),
+            vec![Operand::IdRef(in_a), Operand::IdRef(a_ptr), Operand::IdRef(b_ptr)],
+        ));
+        id
+    };
+    builder.emit(Instruction::new(
+        spirv::Op::Store, None, None,
+        vec![Operand::IdRef(dest), Operand::IdRef(val)],
+    ));
 }
 
 /// Emit a Workgroup barrier (SequentiallyConsistent | UniformMemory | WorkgroupMemory = 0x508).
@@ -2354,9 +2581,19 @@ fn emit_coopmat_smem(
     let total_elems = pps * (tile_rows + 4) * 256;
     let pairs = GemmPlan::coopmat_fill_pairs();
     // Pairs mode: the SSBO members AND the smem arrays are retyped
-    // array-of-v2f16 (byte-identical; lower.rs pair_eligible) — the fill
-    // iterates PAIR units (half the instruction count).
-    let elems_per_lane = if pairs { total_elems / 2 / 32 } else { total_elems / 32 };
+    // array-of-vNf16 (byte-identical; lower.rs view_width) — the fill
+    // iterates wide units (half the instruction count per widening).
+    // D3b quad fill: pps·(R+4)·256 halves = pps·(R+4)·64 quad units —
+    // always lane-aligned (÷32 exact), and a_stage_elems = pps·R·256 is
+    // ÷4 exact so no quad straddles the A/B region boundary.
+    let quad = GemmPlan::coopmat_fill_quad_active(plan);
+    let elems_per_lane = if quad {
+        total_elems / 4 / 32
+    } else if pairs {
+        total_elems / 2 / 32
+    } else {
+        total_elems / 32
+    };
     let a_member_c = u32_const(builder, a_member);
     let b_member_c = u32_const(builder, b_member);
     let n_stride = u32_const(builder, plan.n as u32);
@@ -2374,13 +2611,28 @@ fn emit_coopmat_smem(
         let z = u32_const(builder, 0);
         (z, z, f16_ty, z, z)
     };
+    let (v4_ssbo_ptr, v4_wg_ptr, v4_f16_ty, k4, n4) = if quad {
+        let v4 = builder.builder.type_vector(f16_ty, 4);
+        (
+            builder.ptr_class(StorageClass::StorageBuffer, v4),
+            builder.ptr_class(StorageClass::Workgroup, v4),
+            v4,
+            u32_const(builder, (plan.k / 4) as u32),
+            u32_const(builder, (plan.n / 4) as u32),
+        )
+    } else {
+        let z = u32_const(builder, 0);
+        (z, z, f16_ty, z, z)
+    };
 
     let fill_params = SmemFillParams {
         smem_a, smem_b, f16_wg_ptr, f16_ssbo_ptr,
         a_stage_elems_c, a_member_c, b_member_c,
         nk, n_stride, nk_half, n_half, band_m16, tn64, s16c,
         f16_ty, bool_ty, u32_ty, lane, ssbo, elems_per_lane,
-        v2_ssbo_ptr, v2_wg_ptr, v2_f16_ty, pairs,
+        v2_ssbo_ptr, v2_wg_ptr, v2_f16_ty,
+        v4_ssbo_ptr, v4_wg_ptr, v4_f16_ty, k4, n4,
+        pairs, quad,
     };
 
     let zero_u32 = u32_const(builder, 0);
@@ -2483,13 +2735,16 @@ fn emit_coopmat_smem(
             let base = u32_binop(builder, spirv::Op::IAdd, panel_off, r_c);
             let ptr = builder.gen_id();
             if pairs {
-                let c2 = u32_const(builder, 2);
+                // vNf16 smem view: walk [unit_idx, 0] to a half pointer
+                // (unit = pair or quad; the D3b quad smem is v4f16).
                 let c0 = u32_const(builder, 0);
-                let pair_base = u32_binop(builder, spirv::Op::UDiv, base, c2);
-                let v2_half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
+                let vw = if quad { 4 } else { 2 };
+                let vw_c = u32_const(builder, vw);
+                let unit_base = u32_binop(builder, spirv::Op::UDiv, base, vw_c);
+                let half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
                 builder.emit(Instruction::new(
-                    spirv::Op::AccessChain, Some(v2_half_ptr), Some(ptr),
-                    vec![Operand::IdRef(smem_a), Operand::IdRef(pair_base), Operand::IdRef(c0)],
+                    spirv::Op::AccessChain, Some(half_ptr), Some(ptr),
+                    vec![Operand::IdRef(smem_a), Operand::IdRef(unit_base), Operand::IdRef(c0)],
                 ));
             } else {
                 builder.emit(Instruction::new(
@@ -2519,13 +2774,16 @@ fn emit_coopmat_smem(
             let base = u32_binop(builder, spirv::Op::IAdd, panel_off, j_c);
             let ptr = builder.gen_id();
             if pairs {
-                let c2 = u32_const(builder, 2);
+                // vNf16 smem view: walk [unit_idx, 0] to a half pointer
+                // (unit = pair or quad; the D3b quad smem is v4f16).
                 let c0 = u32_const(builder, 0);
-                let pair_base = u32_binop(builder, spirv::Op::UDiv, base, c2);
-                let v2_half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
+                let vw = if quad { 4 } else { 2 };
+                let vw_c = u32_const(builder, vw);
+                let unit_base = u32_binop(builder, spirv::Op::UDiv, base, vw_c);
+                let half_ptr = builder.ptr_class(StorageClass::Workgroup, f16_ty);
                 builder.emit(Instruction::new(
-                    spirv::Op::AccessChain, Some(v2_half_ptr), Some(ptr),
-                    vec![Operand::IdRef(smem_b), Operand::IdRef(pair_base), Operand::IdRef(c0)],
+                    spirv::Op::AccessChain, Some(half_ptr), Some(ptr),
+                    vec![Operand::IdRef(smem_b), Operand::IdRef(unit_base), Operand::IdRef(c0)],
                 ));
             } else {
                 builder.emit(Instruction::new(

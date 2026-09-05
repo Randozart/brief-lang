@@ -47,9 +47,11 @@ pub struct FnLowerer<'a> {
     pub vars: HashMap<String, (Word, Type)>,
     /// State fields exposed through the SSBO: sorted name → (type, member idx).
     pub state_fields: Vec<StateField>,
-    /// D3: the fields carrying the v2f16 pair view (the smem GEMM's
+    /// D3: the fields carrying the f16 vector view (the smem GEMM's
     /// a/b/y, set by kernel.rs when the tensor tier + the knobs agree).
-    pair_view_fields: Vec<String>,
+    /// Width 2 = the D3 pair view (v2f16, ArrayStride 4); width 4 = the
+    /// D3b quad view (v4f16, ArrayStride 8) — byte-identical retyping.
+    pair_view_fields: Vec<(String, u32)>,
     /// SSBO variable id (StorageBuffer storage class); set by setup_state_buffer.
     pub ssbo_var: Option<Word>,
     /// BuiltIn GlobalInvocationId input variable (pre-threaded or lazy).
@@ -129,9 +131,9 @@ impl<'a> FnLowerer<'a> {
     /// Register image storage plans and REMOVE the planned arrays from the
     /// SSBO field list (they are not buffer members). Call before any
     /// setup/buffer work.
-    /// D3: the fields carrying the v2f16 pair view (the smem GEMM's
-    /// a/b/y, set by kernel.rs when the tensor tier + the knobs agree).
-    pub fn set_pair_view_fields(&mut self, fields: Vec<String>) {
+    /// D3: the fields carrying the f16 vector view (name, width), set by
+    /// kernel.rs when the tensor tier + the knobs agree.
+    pub fn set_pair_view_fields(&mut self, fields: Vec<(String, u32)>) {
         self.pair_view_fields = fields;
     }
 
@@ -1554,17 +1556,18 @@ fn cast_opcode(
     }
 
     /// D3 (beyond-coopmat Stage 1): f16 arrays with even counts retype
-    /// their SSBO member to array-of-v2f16 (byte-identical: same offsets,
-    /// ArrayStride 4) so the smem fill loads/stores pairs with one op.
-    /// Gated on the fill_pairs knob via `pair_mode`; vec4 eligibility
-    /// never fires for f16 (32-bit float-shaped gate) so the two views
-    /// cannot collide.
-    fn pair_eligible(&mut self, name: &str, ty: &Type) -> Result<bool, String> {
-        if !self.pair_view_fields.iter().any(|n| n == name) {
-            return Ok(false);
-        }
+    /// their SSBO member to array-of-vNf16 (byte-identical: same offsets,
+    /// ArrayStride 2·N) so the smem fill loads/stores wide chunks with
+    /// one op. Gated on the fill knobs via `pair_view_fields` (width 2 =
+    /// pairs, 4 = quads); vec4 eligibility never fires for f16 (32-bit
+    /// float-shaped gate) so the two views cannot collide.
+    fn view_width(&mut self, name: &str, ty: &Type) -> Result<Option<u32>, String> {
+        let Some(width) = self.pair_view_fields.iter().find(|(n, _)| n == name).map(|(_, w)| *w)
+        else {
+            return Ok(None);
+        };
         let Type::Vector(inner, dims) = ty else {
-            return Ok(false);
+            return Ok(None);
         };
         let elems: u32 = dims
             .iter()
@@ -1574,18 +1577,27 @@ fn cast_opcode(
             })
             .product::<u32>()
             .max(1);
-        if elems % 2 != 0 {
-            return Ok(false);
+        if elems % width != 0 {
+            return Err(format!(
+                "f16 view field '{}' has {} elements, not divisible by the width {}",
+                name, elems, width
+            ));
         }
         Ok(matches!(
             self.builder.shape_of(inner),
             Ok(crate::casting::graph::SpirvShape::Float { bits: 16 })
-        ))
+        )
+        .then_some(width))
     }
 
-    /// OpTypeArray(v2f16, N/2) with ArrayStride 4 — byte-identical to the
-    /// half array it replaces (the count is even; see pair_eligible).
-    fn pair_member_type(builder: &mut SpirvBuilder, ty: &Type) -> Result<Word, String> {
+    /// OpTypeArray(vNf16, N/width) with ArrayStride 2·width —
+    /// byte-identical to the half array it replaces (the count is
+    /// divisible by the width; see view_width).
+    fn pair_member_type(
+        builder: &mut SpirvBuilder,
+        ty: &Type,
+        width: u32,
+    ) -> Result<Word, String> {
         let Type::Vector(inner, dims) = ty else {
             return Err("pair_member_type on a non-array".into());
         };
@@ -1598,8 +1610,8 @@ fn cast_opcode(
             .product::<u32>()
             .max(1);
         let scalar = builder.lower_type(inner)?;
-        let v2 = builder.builder.type_vector(scalar, 2);
-        let half_count = builder.u32_const(elems / 2);
+        let view = builder.builder.type_vector(scalar, width);
+        let view_count = builder.u32_const(elems / width);
         // rspirv dedups identical OpTypeArrays — a second ArrayStride on
         // the deduped id would be invalid (the vec4 machinery notes the
         // same trap). Decorate only on first creation.
@@ -1610,20 +1622,20 @@ fn cast_opcode(
             .find(|i| {
                 i.class.opcode == spirv::Op::TypeArray
                     && i.result_type.is_none()
-                    && i.operands.first() == Some(&Operand::IdRef(v2))
-                    && i.operands.get(1) == Some(&Operand::IdRef(half_count))
+                    && i.operands.first() == Some(&Operand::IdRef(view))
+                    && i.operands.get(1) == Some(&Operand::IdRef(view_count))
             })
             .and_then(|i| i.result_id);
         if let Some(arr) = existing {
             return Ok(arr);
         }
-        let arr = builder.builder.type_array(v2, half_count);
+        let arr = builder.builder.type_array(view, view_count);
         builder.emit_global(Instruction::new(
             spirv::Op::Decorate, None, None,
             vec![
                 Operand::IdRef(arr),
                 Operand::Decoration(spirv::Decoration::ArrayStride),
-                Operand::LiteralBit32(4),
+                Operand::LiteralBit32(2 * width),
             ],
         ));
         Ok(arr)
@@ -1657,8 +1669,8 @@ fn cast_opcode(
                 .position(|f| &f.name == fname)
                 .unwrap_or(0)];
             let f = (fname, fty);
-            if self.pair_eligible(f.0, f.1)? {
-                let arr_id = Self::pair_member_type(self.builder, f.1)?;
+            if let Some(width) = self.view_width(f.0, f.1)? {
+                let arr_id = Self::pair_member_type(self.builder, f.1, width)?;
                 pair_ids.push((f.0.clone(), arr_id, f.1.clone()));
             } else if Self::vec4_eligible(self.builder, f.1, off)? {
                 let arr_id = Self::vec4_member_type(self.builder, f.1)?;

@@ -122,6 +122,11 @@ pub struct IrLoweringSettings {
     /// instruction count — the fill is ~8× the mma instruction volume.
     /// 0 = scalar half fill (the historical form).
     pub spirv_coopmat_fill_pairs: bool,
+    /// 2026-09-04 (beyond-coopmat Stage 1, D3b): the paired fill iterates
+    /// f16×4 quads — two v2f16 loads/stores per loop iteration (half the
+    /// pairs-mode instruction count again). Requires fill_pairs (same
+    /// v2f16 member view). 0 = pairs-mode loop shape.
+    pub spirv_coopmat_fill_quad: bool,
     /// 2026-09-04 (beyond-coopmat Stage 1, D1): panels per double-buffer
     /// stage — 2 halves the barrier count per panel and doubles the mma
     /// per barrier pair. Falls back to 1 when (K/16) is odd (the tail
@@ -213,6 +218,7 @@ const DEFAULT_IR_LOWERING: IrLoweringSettings = IrLoweringSettings {
     spirv_coopmat_subgroups: 1,
     spirv_coopmat_smem: true,
     spirv_coopmat_fill_pairs: false,
+    spirv_coopmat_fill_quad: false,
     spirv_coopmat_panels_per_stage: 2,
 
     firmem_min_depth: 64,
@@ -386,6 +392,10 @@ fn load_ir_lowering() -> IrLoweringSettings {
             .field_int("spirv_coopmat_fill_pairs", 0)
             .map(|v| v != 0)
             .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_fill_pairs),
+        spirv_coopmat_fill_quad: db
+            .field_int("spirv_coopmat_fill_quad", 0)
+            .map(|v| v != 0)
+            .unwrap_or(DEFAULT_IR_LOWERING.spirv_coopmat_fill_quad),
         spirv_coopmat_panels_per_stage: db
             .field_int("spirv_coopmat_panels_per_stage", 0)
             .map(|v| v.max(1).min(4) as u32)
