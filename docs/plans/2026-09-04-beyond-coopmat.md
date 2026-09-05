@@ -68,7 +68,10 @@ with a VERDICT row, losers reverted:
     the fill is transaction-bound, not instruction-bound.*
 - **D4 — occupancy shaping.** LocalSize search (O5 rung) under the
   hardened harness — the R sweep showed the accumulator-register trade;
-  LocalSize × workgroup count is the remaining axis.
+  LocalSize × workgroup count is the remaining axis. *(D5 K-panel
+  stagger pre-measured 2026-09-05: REJECTED 1.148× — the phase-lock is
+  L2-broadcast efficiency; D4 must INCREASE panel sharing
+  (per-subgroup smem B slices), never desynchronize the panel clock.)*
 
 Target: 16.5 → 20–22 TFLOP/s at 4096³ if the pipeline is the binding
 constraint (Stage 0's cost-share probe says which).
