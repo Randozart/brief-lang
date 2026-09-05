@@ -53,10 +53,13 @@ with a VERDICT row, losers reverted:
 
 - **D1 — 2 panels per stage.** *(MEASURED 2026-09-04d: REJECTED — 2×
   slower, occupancy-bound; knob defaults to 1, infrastructure kept.)*
-- **D2 — register-prefetch software pipeline.** Issue panel k+2 global
-  loads into registers during mma(k); store to smem after the mma
-  batch; one barrier pair per iteration retained. The portable
-  emulation of `cp.async` (SPIR-V has no async global→workgroup copy).
+- **D2 — register-prefetch software pipeline.** *(MEASURED 2026-09-04g:
+  REJECTED — the fused refill wins by 2–6% on clean rounds; the 32-reg
+  carry across the mma + issue-slot contention beat the latency
+  hiding. Knob defaults to 0; the fill split machinery kept.)* Issue
+  panel k+2 global loads into registers during mma(k); store to smem
+  after the mma batch; one barrier pair per iteration retained. The
+  portable emulation of `cp.async` (SPIR-V has no async global→workgroup copy).
 - **D3 — f16x2 fill loads.** *(MEASURED 2026-09-04d: LANDED — +24%,
   16.7→20.7 TFLOP/s; default on.)* The scalar fill loads one half per
   `OpLoad`; uint/ushort2 loads halve fill instruction count.
