@@ -39,6 +39,8 @@ typedef uint64_t VkCommandPool_T;
 typedef uint64_t VkCommandBuffer_T;
 typedef uint64_t VkFence_T;
 typedef uint64_t VkQueue_T;
+typedef uint64_t VkQueryPool_T;
+typedef VkQueryPool_T* VkQueryPool;
 
 typedef VkInstance_T* VkInstance;
 typedef VkPhysicalDevice_T VkPhysicalDevice;
@@ -79,6 +81,7 @@ typedef enum {
     VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO = 39,
     VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO = 40,
     VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO = 42,
+    VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO = 12,
 } VkStructureType;
 
 // sType values are verified against vulkan_core.h (see the enum above);
@@ -117,6 +120,9 @@ typedef enum {
 #define VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT 0x1u
 #define VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT 0x00000800u
 #define VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT 0x00000001u
+#define VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT 0x00000002u
+#define VK_PIPELINE_STAGE_ALL_COMMANDS_BIT 0x00010000u
+#define VK_QUERY_RESULT_64_BIT 0x00000001u
 #define VK_PIPELINE_STAGE_TRANSFER_BIT 0x00001000u
 #define VK_ACCESS_SHADER_READ_BIT 0x00000020u
 #define VK_ACCESS_SHADER_WRITE_BIT 0x00000040u
@@ -126,6 +132,7 @@ typedef enum {
 #define VK_WHOLE_SIZE_MACRO 0xFFFFFFFFFFFFFFFFull
 #define VK_COMMAND_BUFFER_LEVEL_PRIMARY 0u
 #define VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 0x1u
+#define VK_QUERY_TYPE_TIMESTAMP 2u
 #define VK_MAX_MEMORY_TYPES 32u
 // Must match the kernel's OpExecutionMode LocalSize (spirv/kernel.rs LOCAL_SIZE_X).
 #define VK_LOCAL_SIZE_X 256u
@@ -219,10 +226,12 @@ typedef struct { uint32_t sType; const void* pNext; uint32_t flags;
                  const void* pInheritanceInfo; } VkCommandBufferBeginInfo;
 typedef struct { uint32_t sType; const void* pNext; uint32_t flags; } VkFenceCreateInfo;
 typedef struct { uint32_t sType; const void* pNext;
-                 uint32_t waitSemaphoreCount; const uint64_t* pWaitSemaphores;
+                 uint64_t waitSemaphoreCount; const uint64_t* pWaitSemaphores;
                  const uint32_t* pWaitDstStageMask; uint32_t commandBufferCount;
                  const VkCommandBuffer* pCommandBuffers;
                  uint32_t signalSemaphoreCount; const uint64_t* pSignalSemaphores; } VkSubmitInfo;
+typedef struct { uint32_t sType; const void* pNext; uint32_t flags;
+                 uint32_t queryType; uint32_t queryCount; } VkQueryPoolCreateInfo;
 
 static void* vk_lib = NULL;
 static int vk_ready = 0;
@@ -236,6 +245,7 @@ static VkCommandBuffer vk_cmd_buf;
 static uint32_t vk_queue_family_index = 0;
 static uint64_t vk_queue = 0;
 static uint32_t vk_host_visible_type = 0;
+static uint32_t vk_timestamp_valid_bits = 0;
 
 static int (*vkCreateInstance)(const void*, const void*, VkInstance*) = NULL;
 static void (*vkDestroyInstance)(VkInstance, const void*) = NULL;
@@ -301,6 +311,12 @@ static int (*vkCreateFence)(VkDevice, const void*, const void*, VkFence*) = NULL
 static void (*vkDestroyFence)(VkDevice, VkFence, const void*) = NULL;
 static void (*vkDestroyCommandPool)(VkDevice, VkCommandPool, const void*) = NULL;
 static void (*vkDeviceWaitIdle)(VkDevice) = NULL;
+// Timestamp queries (plan 2026-09-05-gpu-profiling).
+static int (*vkCreateQueryPool)(VkDevice, const void*, const void*, VkQueryPool*) = NULL;
+static void (*vkDestroyQueryPool)(VkDevice, VkQueryPool, const void*) = NULL;
+static int (*vkGetQueryPoolResults)(VkDevice, VkQueryPool, uint32_t, uint32_t, size_t, void*, uint64_t, uint32_t) = NULL;
+static void (*vkCmdResetQueryPool)(VkCommandBuffer, VkQueryPool, uint32_t, uint32_t) = NULL;
+static void (*vkCmdWriteTimestamp)(VkCommandBuffer, uint32_t, VkQueryPool, uint32_t) = NULL;
 
 static int load_vulkan_symbols(void) {
 #define LOAD(name) do { *(void**)(&name) = dlsym(vk_lib, #name); if (!name) return 0; } while (0)
@@ -367,6 +383,11 @@ static int load_vulkan_symbols(void) {
     LOAD(vkDestroyFence);
     LOAD(vkDestroyCommandPool);
     LOAD(vkDeviceWaitIdle);
+    LOAD(vkCreateQueryPool);
+    LOAD(vkDestroyQueryPool);
+    LOAD(vkGetQueryPoolResults);
+    LOAD(vkCmdResetQueryPool);
+    LOAD(vkCmdWriteTimestamp);
     return 1;
 #undef LOAD
 }
@@ -510,6 +531,10 @@ static int briev_dev_vulkan_init(void) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] no compute queue family\n");
         goto fail;
     }
+    // 2026-09-05 (plan 2026-09-05-gpu-profiling): capture timestamp
+    // resolution from the queue family we just selected.
+    vk_timestamp_valid_bits = qprops.families[vk_queue_family_index].timestampValidBits;
+    if (verbose) fprintf(stderr, "[briev_accel/vulkan] timestampValidBits=%u\n", vk_timestamp_valid_bits);
     vk_host_visible_type = pick_host_visible_type(vk_physical_device);
     vk_device_local_type = pick_device_local_type(vk_physical_device);
     if (vk_host_visible_type == 0xFFFFFFFFu) {
@@ -736,6 +761,8 @@ typedef struct {
     VkDescriptorSet desc_set;
     size_t bytes;
     VkFence fence;
+    // 2026-09-05 (plan 2026-09-05-gpu-profiling): timestamp query pool.
+    VkQueryPool query_pool;
     // 2026-09-01: the shader's own OpExecutionMode LocalSize X. Dispatch
     // geometry (both full-copy and 2D) must divide work items by THIS, not a
     // global constant — cooperative row kernels declare LocalSize 32 while
@@ -793,6 +820,19 @@ static int briev_dev_vulkan_create_kernel(const uint8_t* spirv, size_t size, voi
     }
     k->module = module;
     k->pipeline = pipeline;
+    // 2026-09-05: create a 2-query timestamp pool for GPU-time measurement.
+    {
+        VkQueryPoolCreateInfo qpci = {0};
+        qpci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        qpci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qpci.queryCount = 2;
+        if (vkCreateQueryPool(vk_device, &qpci, NULL, &k->query_pool) != VK_SUCCESS) {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] query pool creation FAILED\n");
+            k->query_pool = VK_NULL_HANDLE;
+        } else {
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] query pool created OK pool=%lu\n", (unsigned long)k->query_pool);
+        }
+    }
     // Parse the module's OpExecutionMode LocalSize (SPIR-V: opcode 16, mode
     // literal 17, followed by W/H/D). The dispatch geometry must match the
     // shader's declared local size — flat kernels use 256, cooperative row
@@ -1030,6 +1070,10 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] begin failed\n");
         return 0;
     }
+    // 2026-09-05: reset timestamp query pool before recording.
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkCmdResetQueryPool(vk_cmd_buf, k->query_pool, 0, 2);
+    }
     vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
                             0, 1, &k->desc_set, 0, NULL);
@@ -1039,11 +1083,19 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
         record_barrier(k, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
+    // 2026-09-05: write timestamp BEFORE dispatch (slot 0).
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkCmdWriteTimestamp(vk_cmd_buf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, k->query_pool, 0);
+    }
     // Dispatch ceil(n/local_x) workgroups, local_x parsed from the
     // module's OpExecutionMode (256 flat, 32 cooperative row kernels).
     size_t groups = (global_n + local_n - 1) / local_n;
     if (groups == 0) { groups = 1; }
     vkCmdDispatch(vk_cmd_buf, (uint32_t)groups, 1, 1);
+    // 2026-09-05: write timestamp AFTER dispatch (slot 1).
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkCmdWriteTimestamp(vk_cmd_buf, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, k->query_pool, 1);
+    }
     if (k->dev_buffer != VK_NULL_HANDLE) {
         record_barrier(k, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
@@ -1075,6 +1127,20 @@ static int briev_dev_vulkan_launch(void* handle, const void* proj, size_t proj_b
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] fence wait timed out\n");
         ok = 0;
     } else {
+        // 2026-09-05: read timestamp results after fence wait.
+        if (k->query_pool != VK_NULL_HANDLE && vk_timestamp_valid_bits > 0) {
+            uint64_t ts[2] = {0, 0};
+            int qr = vkGetQueryPoolResults(vk_device, k->query_pool, 0, 2,
+                                           sizeof(ts), ts, sizeof(uint64_t),
+                                           1 /* VK_QUERY_RESULT_64_BIT */);
+            if (verbose) fprintf(stderr, "[briev_accel/vulkan] queryResults res=%d ts[0]=%lu ts[1]=%lu\n", qr, (unsigned long)ts[0], (unsigned long)ts[1]);
+            if (qr == VK_SUCCESS && ts[1] > ts[0]) {
+                double gpu_ns = (double)(ts[1] - ts[0]);
+                fprintf(stderr, "# gpu_time: %.3f ms\n", gpu_ns / 1e6);
+            } else {
+                fprintf(stderr, "# gpu_time: N/A (res=%d)\n", qr);
+            }
+        }
         memcpy(proj_out, k->mapped, proj_bytes);
     }
     return ok;
@@ -1351,6 +1417,10 @@ static int briev_dev_vulkan_launch_core(void* handle, size_t nx, size_t ny,
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] begin failed\n");
         return 0;
     }
+    // 2026-09-05: reset timestamp query pool before recording.
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkCmdResetQueryPool(vk_cmd_buf, k->query_pool, 0, 2);
+    }
     vkCmdBindPipeline(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, k->pipeline);
     vkCmdBindDescriptorSets(vk_cmd_buf, VK_PIPELINE_BIND_POINT_COMPUTE, vk_pipeline_layout,
                             0, 1, &k->desc_set, 0, NULL);
@@ -1365,22 +1435,22 @@ static int briev_dev_vulkan_launch_core(void* handle, size_t nx, size_t ny,
     if (groups_x == 0) { groups_x = 1; }
     if (ny == 0) { ny = 1; }
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] dispatch gx=%u gy=%u (nx=%zu ny=%zu local=%zu)\n", (uint32_t)groups_x, (uint32_t)ny, nx, ny, local_n);
+    // 2026-09-05: write timestamp BEFORE dispatch using ALL_COMMANDS_BIT.
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkCmdWriteTimestamp(vk_cmd_buf, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, k->query_pool, 0);
+    }
     // 2026-09-01 (DIAGNOSED): the Y dimension of vkCmdDispatch never took
     // effect on this driver — dispatch (1, 64) ran only WIy=0 (verified with
     // a gid.y probe kernel). Flatten the grid into X until root-caused.
     {
         size_t total_groups = groups_x * ny;
-        // 2026-09-02: dispatches of 2-7 workgroups on this driver
-        // nondeterministically lose workgroups' stores (sentinel-probed:
-        // rows hold the host sentinel; which band survives varies with
-        // launch count). A pad-to-8 WORKAROUND was tested and made it
-        // WORSE (even the real workgroups' stores vanished) — reverted.
-        // The compute→transfer download barrier is kept (spec-clean
-        // defense). Follow-up: route small dispatches to the CPU lane at
-        // tier selection — BUGS.md entry with the full evidence chain.
         for (uint32_t t = 0; t < times; t++) {
             vkCmdDispatch(vk_cmd_buf, (uint32_t)total_groups, 1, 1);
         }
+    }
+    // 2026-09-05: write timestamp AFTER dispatch using ALL_COMMANDS_BIT.
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkCmdWriteTimestamp(vk_cmd_buf, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, k->query_pool, 1);
     }
     if (vkEndCommandBuffer(vk_cmd_buf) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] end failed\n");
@@ -1411,13 +1481,26 @@ static int briev_dev_vulkan_launch_core(void* handle, size_t nx, size_t ny,
     if (getenv("BRIEV_ACCEL_BLOCKING_WAIT") == NULL) {
         for (int spin = 0; spin < 4000; spin++) {
             if (vkGetFenceStatus(vk_device, k->fence) == VK_SUCCESS) {
-                return 1;
+                goto ts_read;
             }
         }
     }
     if (vkWaitForFences(vk_device, 1, &k->fence, 1, 30ULL * 1000 * 1000 * 1000) != VK_SUCCESS) {
         if (verbose) fprintf(stderr, "[briev_accel/vulkan] fence wait timed out\n");
         return 0;
+    }
+ts_read:
+    // 2026-09-05: read timestamp results after fence signaled.
+    if (k->query_pool != VK_NULL_HANDLE && vk_timestamp_valid_bits > 0) {
+        uint64_t ts[2] = {0, 0};
+        int qr = vkGetQueryPoolResults(vk_device, k->query_pool, 0, 2,
+                                       sizeof(ts), ts, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+        if (verbose) fprintf(stderr, "[briev_accel/vulkan] queryResults res=%d ts[0]=%lu ts[1]=%lu\n", qr, (unsigned long)ts[0], (unsigned long)ts[1]);
+        if (qr == VK_SUCCESS && ts[1] > ts[0]) {
+            fprintf(stderr, "# gpu_time: %.3f ms\n", (double)(ts[1] - ts[0]) / 1e6);
+        } else {
+            fprintf(stderr, "# gpu_time: N/A (res=%d)\n", qr);
+        }
     }
     return 1;
 }
@@ -1448,6 +1531,9 @@ static void briev_dev_vulkan_destroy_kernel(void* handle) {
     }
     if (k->fence != VK_NULL_HANDLE) {
         vkDestroyFence(vk_device, k->fence, NULL);
+    }
+    if (k->query_pool != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(vk_device, k->query_pool, NULL);
     }
     vkDestroyPipeline(vk_device, k->pipeline, NULL);
     vkDestroyShaderModule(vk_device, k->module, NULL);
