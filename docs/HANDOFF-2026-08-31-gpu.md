@@ -2,6 +2,34 @@
 
 > **2026-09-04 STATUS UPDATE** (read first; everything below is history):
 >
+> - **STAGE 0 CLOSED — PORTABLE PATH WINS:** the fold-proof mma ceiling
+>   microkernel measured the KHR coopmat lowering at ≥107 TFLOP/s ≈
+>   100% of the F16-acc hardware peak (102 TF) — the production GEMM's
+>   gap is pipeline overhead, NOT vendor capping. Stage 2 (PTX tier)
+>   demoted to an optional escape hatch, re-arms only on a driver-era
+>   ceiling regression (doctrine §6). Ledger row 2026-09-04c/d.
+> - **STAGE 1 RUNGS (all behind in-process A/B):** **D3 paired smem
+>   fill (v2f16 member view) LANDED — 16.7→20.7 TFLOP/s (+24%), default
+>   on** (2026-09-04d). **D1 2-panels/stage REJECTED** — 2× slower,
+>   occupancy-bound (16 live fragments + 16 accs); knob 1 (2026-09-04d).
+>   **D3b f16×4 fill REJECTED** — both forms (2×-unroll 1.183×, true
+>   v4f16 view 1.133×); after D3 the fill is transaction-bound, not
+>   instruction-bound (2026-09-04f). **D2 register-prefetch refill
+>   REJECTED** — the fused post-barrier refill wins by 2–6% on clean
+>   rounds; the 32-reg carry across the mma + issue-slot contention
+>   beat the latency hiding (2026-09-04g). Machinery kept behind knobs
+>   (all default off/1); the pair view is width-parameterized.
+> - **REMAINING STAGE 1:** D4 occupancy shaping (LocalSize × subgroups
+>   — note: subgroups>1 with the smem path needs a per-subgroup smem
+>   design check before any sweep). Race target unchanged: ggml-cuda
+>   42.0 TFLOP/s; ours 20.7 best window at the anchor shape.
+> - **DEBUG TRAPS (this era):** `field_int(key, N)`'s N = the FIELD
+>   INDEX, not a default (index 1 → None → the config default —
+>   'reverted' binaries kept emitting pps=2). The D1 refill's panel
+>   index must be RUNTIME ((kt_pair+2)·pps+pi — stage s re-reads at
+>   pair-iteration kt+2). NaN rel-err compares false → a NaN-output
+>   kernel prints '0.000e+00 OK'; gemm_h_bench now dumps y[0] vs ref vs
+>   the f16 grid at the correctness gate.
 > - **DOCTRINE UPGRADE (user-locked):** `.abv` = one program, peak on
 >   every probed device, Briev-owned codegen only — no nvcc, no cuBLAS
 >   in the compiler path. Backend tier architecture: portable SPIR-V
