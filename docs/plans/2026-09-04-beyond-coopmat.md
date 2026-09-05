@@ -76,6 +76,34 @@ with a VERDICT row, losers reverted:
 Target: 16.5 → 20–22 TFLOP/s at 4096³ if the pipeline is the binding
 constraint (Stage 0's cost-share probe says which).
 
+## Stage 1.5 — Profiling & Fill Optimization (**ACTIVE**)
+
+**2026-09-05.** Vulkan timestamp queries landed (commit a9313540).
+Baseline measured: **5.3 ms GPU kernel time** (23.3 TFLOP/s) at 4096³.
+
+**Root cause identified:** 891 integer div/mod per workgroup for fill
+index decomposition. The 16 MMA ops (actual compute) are 0.3% of total
+instructions; the fill address arithmetic is 32%.
+
+| Instruction | Count | % |
+|-------------|-------|---|
+| IDiv/IMod | 891 | 19.5% |
+| Bitwise (shift/and) | 193 | 4.2% |
+| Select (A/B branch) | 386 | 8.4% |
+| AccessChain | 409 | 8.9% |
+| **MMA** | **16** | **0.3%** |
+
+**O1 — Strength-reduce power-of-two div/mod:** Replace all `OpUDiv` by
+power-of-two constants with `OpShiftRightLogical` and `OpUMod` with
+`OpBitwiseAnd`. Eliminates ~800 instructions. See
+`docs/plans/2026-09-05-kernel-profiling-analysis.md` for full plan.
+
+**O2 — Linear fill addressing:** Restructure fill loop to compute base
+address once per thread, then increment by constant stride. Eliminates
+per-element tile/row/col decomposition. Next rung after O1.
+
+Conservative estimate: O1+O2 → 3.4–4.0 ms → 29–35 TFLOP/s.
+
 ## Stage 2 — Briev PTX tier (**OPTIONAL escape hatch** — demoted by Stage 0)
 
 Stage 0 measured the portable path at the hardware tensor peak; this

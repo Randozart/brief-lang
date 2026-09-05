@@ -12,6 +12,10 @@ All Stage 1 rungs (D1-D5) are exhausted. The production GEMM runs at
 coopmat mma reaches ≥107 TFLOP/s (100% of F16-acc hardware peak).
 This is a ~4.6× overhead in the pipeline around the mma.
 
+**Root cause identified:** 891 integer div/mod instructions per workgroup
+for shared memory fill index decomposition, drowning the 16 useful MMA
+operations. See `docs/plans/2026-09-05-kernel-profiling-analysis.md`.
+
 We've been doing config-knob A/B testing, but we've never profiled
 WHERE the overhead lives. Without a measured breakdown, any further
 optimization is a guess.
