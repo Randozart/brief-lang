@@ -1331,17 +1331,40 @@ fn emit_sysconf(
 
 // ─── Atomic operations ───────────────────────────────────────────────
 // 2026-07-15: Each maps to a single LLVM atomic instruction.
+// 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): ordering is a
+// trailing parameter — `AtomicLoad#(p, relaxed)`, `AtomicStore#(p, v,
+// release)`, `AtomicCas#(p, old, new, bartered, relaxed)`,
+// `AtomicFence#(acquire)`. Vocabulary: relaxed/acquire/release/bartered
+// (= acq_rel)/seq. Default (no trailing arg) is seq_cst — backward
+// compatible. The interpreter ignores ordering (single-threaded check
+// mode); the vocabulary words are consumed as markers, never emitted.
 // All use seq_cst ordering. The interpreter does non-atomic loads/stores
 // (correct for single-threaded check mode).
+
+/// 2026-09-06: extract an ordering keyword from `args[i]` when it is an
+/// identifier naming an ordering. Returns None for any other shape —
+/// callers keep seq_cst.
+fn ordering_arg(args: &[Expr], i: usize) -> Option<&'static str> {
+    let Expr::Identifier(name) = args.get(i)? else { return None; };
+    match name.as_str() {
+        "relaxed" => Some("unordered"),
+        "acquire" => Some("acquire"),
+        "release" => Some("release"),
+        "bartered" => Some("acq_rel"),
+        "seq" => Some("seq_cst"),
+        _ => None,
+    }
+}
 
 fn emit_atomic_load(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    let ord = ordering_arg(args, 1).unwrap_or("seq_cst");
     let addr = emit_arg(backend, out, &args[0], indent);
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
-    writeln!(out, "{}{} = load atomic i64, ptr {} seq_cst, align 8", indent, v, ptr).ok();
+    writeln!(out, "{}{} = load atomic i64, ptr {} {}, align 8", indent, v, ptr, ord).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
@@ -1349,12 +1372,13 @@ fn emit_atomic_store(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    let ord = ordering_arg(args, 2).unwrap_or("seq_cst");
     let addr = emit_arg(backend, out, &args[0], indent);
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
     // 2026-07-15: LLVM 18 syntax: no comma before ordering, align required
-    writeln!(out, "{}store atomic i64 {}, ptr {} seq_cst, align 8", indent, val, ptr).ok();
+    writeln!(out, "{}store atomic i64 {}, ptr {} {}, align 8", indent, val, ptr, ord).ok();
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
@@ -1363,13 +1387,15 @@ fn emit_atomic_cas(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    let succ_ord = ordering_arg(args, 3).unwrap_or("seq_cst");
+    let fail_ord = ordering_arg(args, 4).unwrap_or(succ_ord);
     let addr = emit_arg(backend, out, &args[0], indent);
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let exp = emit_arg(backend, out, &args[1], indent);
     let des = emit_arg(backend, out, &args[2], indent);
     let cx = backend.fun.gen_reg();
-    writeln!(out, "{}{} = cmpxchg ptr {}, i64 {}, i64 {} seq_cst seq_cst", indent, cx, ptr, exp, des).ok();
+    writeln!(out, "{}{} = cmpxchg ptr {}, i64 {}, i64 {} {} {}", indent, cx, ptr, exp, des, succ_ord, fail_ord).ok();
     // 2026-07-15: cmpxchg returns {i64, i1} — extract the value
     writeln!(out, "{}{} = extractvalue {{ i64, i1 }} {}, 0", indent, v, cx).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
@@ -1379,11 +1405,12 @@ fn emit_atomic_xchg(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    let ord = ordering_arg(args, 2).unwrap_or("seq_cst");
     let addr = emit_arg(backend, out, &args[0], indent);
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
-    writeln!(out, "{}{} = atomicrmw xchg ptr {}, i64 {} seq_cst", indent, v, ptr, val).ok();
+    writeln!(out, "{}{} = atomicrmw xchg ptr {}, i64 {} {}", indent, v, ptr, val, ord).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
@@ -1391,11 +1418,12 @@ fn emit_atomic_add(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    let ord = ordering_arg(args, 2).unwrap_or("seq_cst");
     let addr = emit_arg(backend, out, &args[0], indent);
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
-    writeln!(out, "{}{} = atomicrmw add ptr {}, i64 {} seq_cst", indent, v, ptr, val).ok();
+    writeln!(out, "{}{} = atomicrmw add ptr {}, i64 {} {}", indent, v, ptr, val, ord).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
@@ -1403,7 +1431,8 @@ fn emit_fence(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    writeln!(out, "{}fence seq_cst", indent).ok();
+    let ord = ordering_arg(args, 0).unwrap_or("seq_cst");
+    writeln!(out, "{}fence {}", indent, ord).ok();
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }

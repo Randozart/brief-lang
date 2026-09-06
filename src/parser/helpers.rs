@@ -432,6 +432,15 @@ impl<'a> Parser<'a> {
             Token::Ms => "ms".into(),
             Token::Input => "input".into(), Token::Output => "output".into(),
             Token::BoolTrue => "true".into(), Token::BoolFalse => "false".into(),
+            // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): atomic
+            // ordering constants in expression position — the trailing
+            // argument of an atomic intrinsic (`AtomicLoad#(p, relaxed)`).
+            // Consumed as ordering markers by the emitter/interpreter;
+            // anywhere else they surface as an unknown-identifier error.
+            Token::Relaxed => "relaxed".into(),
+            Token::Acquire => "acquire".into(),
+            Token::Release => "release".into(),
+            Token::Bartered => "bartered".into(),
             _ => return None,
         })
     }
