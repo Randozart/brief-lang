@@ -340,6 +340,30 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             observable: true,
             variadic: false,
         }),
+
+        // ── Portable SIMD (plan 2026-09-06-cpp-expressiveness.md) ─────
+        // 2026-09-06: memory-to-memory element-wise intrinsics —
+        // SimdAdd#(dst, a, b, count) etc. Chunked <4 x T> vector ops with a
+        // scalar tail; dst may alias a/b (overlap-safe chunking). Forced
+        // vectorization for the cases the auto-vectorizer's profitability
+        // heuristics decline (unknown aliasing). Void return (results flow
+        // through memory).
+        "SimdAdd#" => Some(Signature {
+            name: "SimdAdd#", parameters: vec![],
+            return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false,
+        }),
+        "SimdSub#" => Some(Signature {
+            name: "SimdSub#", parameters: vec![],
+            return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false,
+        }),
+        "SimdMul#" => Some(Signature {
+            name: "SimdMul#", parameters: vec![],
+            return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false,
+        }),
+        "SimdFma#" => Some(Signature {
+            name: "SimdFma#", parameters: vec![],
+            return_kind: ReturnKind::Exact(Type::void()), observable: true, variadic: false,
+        }),
         "Fence#" => Some(Signature {
             name: "Fence#",
             parameters: vec![],

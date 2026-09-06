@@ -201,6 +201,18 @@ impl Ptr<T> {
 
 ### 4.2 Portable SIMD
 
+> **Implementation note (2026-09-06, Phase 6):** the plan's original
+> signatures took `Vector<T,N>` SSA values. Briev's `Type::Vector` lowers to
+> LLVM `[N x T]` ARRAYS (aggregates — no arithmetic), so SSA vector registers
+> cannot escape into the existing type model. The honest ABI is
+> **memory-to-memory**: `SimdAdd#(dst: Ptr<T>, a: Ptr<T>, b: Ptr<T>, count)`.
+> Element-wise chunked processing is overlap-safe (per chunk, all loads
+> precede the store), so dst may alias a/b — precisely the case where the
+> auto-vectorizer must refuse or version with runtime alias checks. The
+> intrinsic FORCES vectorization where the default path heuristically
+> declines. SimdShuffle#/SimdGather#/SimdScatter# remain planned (they need
+> masked-load encoding and index-vector plumbing — separate slice).
+
 **Strategy keywords:**
 
 | Keyword | Context | Effect |
@@ -211,17 +223,20 @@ impl Ptr<T> {
 
 **Portable intrinsics (target-agnostic, backend lowers to best HW):**
 
-| Intrinsic | Purpose | Best HW Fallback | Scalar Fallback |
-|-----------|---------|------------------|-----------------|
-| `SimdLoad#(Ptr<T>, Int) -> Vector<T,N>` | Aligned vector load | AVX/SSE/NEON load | Element-by-element load |
-| `SimdStore#(Ptr<T>, Vector<T,N>, Int)` | Aligned vector store | AVX/SSE/NEON store | Element-by-element store |
-| `SimdAdd#(Vector<T,N>, Vector<T,N>) -> Vector<T,N>` | Vector add | AVX/SSE/NEON add | Scalar loop |
-| `SimdSub#(Vector<T,N>, Vector<T,N>) -> Vector<T,N>` | Vector sub | AVX/SSE/NEON sub | Scalar loop |
-| `SimdMul#(Vector<T,N>, Vector<T,N>) -> Vector<T,N>` | Vector mul | AVX/SSE/NEON mul | Scalar loop |
-| `SimdFma#(Vector<T,N>, Vector<T,N>, Vector<T,N>) -> Vector<T,N>` | Fused multiply-add | AVX FMA → SSE dispatch → NEON fmla | `a*b+c` scalar loop |
-| `SimdShuffle#(Vector<T,N>, Vector<T,N>, Const<Int>) -> Vector<T,N>` | Lane permutation | `shufflevector` | Manual extract/insert |
-| `SimdGather#(Ptr<T>, Vector<Int,N>) -> Vector<T,N>` | Indexed load | AVX2 gather | Scalar loop |
-| `SimdScatter#(Ptr<T>, Vector<Int,N>, Vector<T,N>)` | Indexed store | AVX2 scatter | Scalar loop |
+> 2026-09-06: signatures revised to the memory-to-memory ABI (see the
+> implementation note above). `SimdLoad#`/`SimdStore#` dropped from the
+> first slice — chunked loads/stores are emitted inside the arithmetic
+> intrinsics, so standalone load/store adds no expressive power.
+
+| Intrinsic | Purpose | Best HW | Scalar Fallback |
+|-----------|---------|---------|-----------------|
+| `SimdAdd#(dst, a, b, count)` | Element-wise add | `<4 x float>`/`<4 x i64>` chunks | Scalar tail loop |
+| `SimdSub#(dst, a, b, count)` | Element-wise sub | Chunked | Scalar tail |
+| `SimdMul#(dst, a, b, count)` | Element-wise mul | Chunked | Scalar tail |
+| `SimdFma#(dst, a, b, c, count)` | a*b+c per element | mul+add pairs — ISel contracts to vfmadd on FMA targets | Scalar tail |
+| `SimdShuffle#` | Lane permutation | `shufflevector` | Deferred |
+| `SimdGather#` | Indexed load | `llvm.masked.gather` | Deferred |
+| `SimdScatter#` | Indexed store | `llvm.masked.scatter` | Deferred |
 
 **Fallback contract:**
 - If target supports the feature: emit optimal instruction

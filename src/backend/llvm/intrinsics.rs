@@ -174,6 +174,11 @@ pub fn emit_intrinsic_call(
         "AtomicXor#" => return emit_atomic_rmw(backend, out, v, args, indent, "xor"),
         "AtomicLoadN#" => return emit_atomic_load_n(backend, out, v, args, indent),
         "AtomicStoreN#" => return emit_atomic_store_n(backend, out, v, args, indent),
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): portable SIMD
+        "SimdAdd#" => return emit_simd_binary(backend, out, v, args, indent, SimdKind::Add),
+        "SimdSub#" => return emit_simd_binary(backend, out, v, args, indent, SimdKind::Sub),
+        "SimdMul#" => return emit_simd_binary(backend, out, v, args, indent, SimdKind::Mul),
+        "SimdFma#" => return emit_simd_binary(backend, out, v, args, indent, SimdKind::Fma),
         "Fence#" => return emit_fence(backend, out, v, args, indent),
         // 2026-07-15: Dynamic linker intrinsics
         "DlOpen#" => return emit_dl_open(backend, out, v, args, indent),
@@ -1625,49 +1630,54 @@ fn emit_ptr_add(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    // 2026-09-06: the Briev pointer ABI is uniformly BOXED i64 handles
+    // (`&` ptrtoints, Malloc# boxes) — the atomics' inttoptr convention.
+    // PtrAdd# re-materializes the base, GEPs inbounds (out-of-bounds = UB
+    // caught by LLVM), and re-boxes. The pointee drives the GEP step.
     let ptr_reg = backend.emit_expr(out, &args[0], indent);
     let offset = backend.emit_expr(out, &args[1], indent);
     let inner_ty = match &ptr_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
     let llvm_ty = backend.llvm_type(&inner_ty);
+    let base = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, ptr_reg.name).ok();
     let gep = backend.fun.gen_reg();
-    writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i64 {}", indent, gep, llvm_ty, ptr_reg.name, offset.name).ok();
-    BTypedRegister { name: gep, ty: ptr_reg.ty.clone() }
+    writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i64 {}", indent, gep, llvm_ty, base, offset.name).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, gep).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
 fn emit_ptr_sub(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    // Negative PtrAdd# — one GEP with the negated offset.
     let ptr_reg = backend.emit_expr(out, &args[0], indent);
     let offset = backend.emit_expr(out, &args[1], indent);
     let inner_ty = match &ptr_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
     let llvm_ty = backend.llvm_type(&inner_ty);
+    let base = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, base, ptr_reg.name).ok();
     let neg_offset = backend.fun.gen_reg();
     writeln!(out, "{}{} = sub i64 0, {}", indent, neg_offset, offset.name).ok();
     let gep = backend.fun.gen_reg();
-    writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i64 {}", indent, gep, llvm_ty, ptr_reg.name, neg_offset).ok();
-    BTypedRegister { name: gep, ty: ptr_reg.ty.clone() }
+    writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i64 {}", indent, gep, llvm_ty, base, neg_offset).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, gep).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
 fn emit_ptr_diff(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    // Byte distance between two handles, divided by the element size —
+    // both pointers must derive from the same allocation (proof
+    // obligation; a cross-allocation diff is meaningless, not unsafe).
     let ptr1 = backend.emit_expr(out, &args[0], indent);
     let ptr2 = backend.emit_expr(out, &args[1], indent);
     let inner_ty = match &ptr1.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
-    let llvm_ty = backend.llvm_type(&inner_ty);
-    // ptrtoint both to i64, subtract, then divide by element size
-    let addr1 = backend.fun.gen_reg();
-    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr1, ptr1.name).ok();
-    let addr2 = backend.fun.gen_reg();
-    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr2, ptr2.name).ok();
     let byte_diff = backend.fun.gen_reg();
-    writeln!(out, "{}{} = sub i64 {}, {}", indent, byte_diff, addr1, addr2).ok();
-    // Divide by element size to get element count
-    let elem_size = backend.fun.gen_reg();
-    let size_val = crate::backend::llvm::types::type_size(&inner_ty, backend.ctx.type_universe.as_ref()).max(1);
-    writeln!(out, "{}{} = add i64 0, {}", indent, elem_size, size_val).ok();
+    writeln!(out, "{}{} = sub i64 {}, {}", indent, byte_diff, ptr1.name, ptr2.name).ok();
+    let elem_size = crate::backend::llvm::types::type_size(&inner_ty, backend.ctx.type_universe.as_ref()).max(1);
     writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, byte_diff, elem_size).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
@@ -1676,9 +1686,10 @@ fn emit_ptr_eq(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    // Handles are i64 — compare directly (no inttoptr round-trip).
     let ptr1 = backend.emit_expr(out, &args[0], indent);
     let ptr2 = backend.emit_expr(out, &args[1], indent);
-    writeln!(out, "{}{} = icmp eq ptr {}, {}", indent, v, ptr1.name, ptr2.name).ok();
+    writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, v, ptr1.name, ptr2.name).ok();
     BTypedRegister { name: v.to_string(), ty: Type::bool_() }
 }
 
@@ -1688,8 +1699,277 @@ fn emit_ptr_lt(
 ) -> BTypedRegister {
     let ptr1 = backend.emit_expr(out, &args[0], indent);
     let ptr2 = backend.emit_expr(out, &args[1], indent);
-    writeln!(out, "{}{} = icmp ult ptr {}, {}", indent, v, ptr1.name, ptr2.name).ok();
+    writeln!(out, "{}{} = icmp ult i64 {}, {}", indent, v, ptr1.name, ptr2.name).ok();
     BTypedRegister { name: v.to_string(), ty: Type::bool_() }
+}
+
+// ─── Portable SIMD intrinsics ───────────────────────────────────────
+// 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): memory-to-memory
+// element-wise intrinsics — SimdAdd#(dst, a, b, count) and siblings.
+//
+// WHY memory-to-memory: Briev's Type::Vector lowers to LLVM `[N x T]`
+// arrays (aggregates — no arithmetic), so SSA vector registers cannot
+// escape into the type model. The chunked form works entirely in the
+// memory model. Element-wise chunking is OVERLAP-SAFE (per chunk, all
+// loads precede the store) — dst may alias a/b, the exact case where
+// the auto-vectorizer's profitability heuristics decline. The intrinsic
+// FORCES the vector shape: constant count → straight-line <4 x T>
+// chunks + inline scalar tail; runtime count → counted chunk loop +
+// scalar tail loop (alloca induction variables — SROA promotes them to
+// registers at -O3, so the loop shape costs nothing).
+//
+// PORTABILITY: `<4 x float>`/`<4 x i64>`/`<2 x double>` are legal LLVM
+// IR on every target — ISel lowers to AVX/SSE/NEON, or scalarizes on
+// targets with no vector unit. Fma emits mul+add fast pairs; with
+// fast-math, ISel contracts them to vfmadd/fmadd on FMA targets and
+// keeps unfused mul+add elsewhere — the portable optimal choice.
+
+/// The SIMD op family — one shape, four arithmetic kinds.
+#[derive(Clone, Copy)]
+enum SimdKind { Add, Sub, Mul, Fma }
+
+impl SimdKind {
+    /// (int op, float op) for <W x T> vector arithmetic. Float uses the
+    /// `fast` flag — contraction to FMA requires it.
+    fn op(self, is_float: bool) -> &'static str {
+        match (self, is_float) {
+            (SimdKind::Add, true) => "fadd fast",
+            (SimdKind::Sub, true) => "fsub fast",
+            (SimdKind::Mul, true) => "fmul fast",
+            (SimdKind::Fma, true) => "fmul fast",
+            (SimdKind::Add, false) => "add",
+            (SimdKind::Sub, false) => "sub",
+            (SimdKind::Mul, false) => "mul",
+            (SimdKind::Fma, false) => "mul",
+        }
+    }
+    /// The follow-up op for Fma (mul then add); None for pure ops.
+    /// Float gets the `fast` pair; int gets plain add.
+    fn followup(self, is_float: bool) -> Option<&'static str> {
+        match (self, is_float) {
+            (SimdKind::Fma, true) => Some("fadd fast"),
+            (SimdKind::Fma, false) => Some("add"),
+            _ => None,
+        }
+    }
+}
+
+/// Alignment for a SIMD element spelling (safe-element alignment —
+/// vector loads use the ELEMENT alignment, never an over-alignment the
+/// base pointer may not satisfy).
+fn simd_elem_align(elem: &str) -> u64 {
+    match elem {
+        "float" => 4,
+        "double" => 8,
+        _ => 8,
+    }
+}
+
+/// SIMD element shape from a pointee type — (llvm elem type, vector
+/// width, is_float). Storage size drives the int shapes: the intrinsic
+/// adds the values AS STORED (a 12-bit field in 2 bytes adds as i16 —
+/// modular on the container, correct for the buffer-add use case).
+/// The typechecker gates non-scalar pointees out before codegen.
+fn simd_elem_shape(ty: &Type, backend: &LlvmBackend) -> (&'static str, usize, bool) {
+    let fbits = backend.float_category_bits(ty);
+    match fbits {
+        Some(32) => return ("float", 4, true),
+        Some(64) => return ("double", 2, true),
+        _ => {}
+    }
+    match crate::backend::llvm::types::type_size(ty, backend.ctx.type_universe.as_ref()) {
+        1 => ("i8", 16, false),
+        2 => ("i16", 8, false),
+        4 => ("i32", 8, false),
+        _ => ("i64", 4, false),
+    }
+}
+
+/// Materialize a Ptr from an argument — the Briev pointer ABI is
+/// uniformly boxed i64 handles (`&` ptrtoints, Malloc# boxes, and
+/// `as Ptr<T>` retypes without changing the SSA value), so the base is
+/// ALWAYS re-materialized via inttoptr. The atomics' convention.
+fn simd_ptr_arg(
+    backend: &mut LlvmBackend, out: &mut String, arg: &Expr, indent: &str,
+) -> (String, Type) {
+    let reg = backend.emit_expr(out, arg, indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, reg.name).ok();
+    (ptr, reg.ty.clone())
+}
+
+/// One vector chunk at element offset `idx_reg`: loads → compute →
+/// store (that order is what makes overlapping dst/a/b safe).
+#[allow(clippy::too_many_arguments)]
+fn simd_vec_chunk(
+    backend: &mut LlvmBackend, out: &mut String, indent: &str,
+    kind: SimdKind, elem: &str, is_float: bool,
+    dst: &str, srcs: &[String], idx_reg: &str,
+) {
+    let width = if elem == "double" { 2 } else { 4 };
+    let vec_ty = format!("<{} x {}>", width, elem);
+    let align = simd_elem_align(elem);
+    let dst_gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, dst_gep, elem, dst, idx_reg).ok();
+    let mut vecs: Vec<String> = Vec::with_capacity(srcs.len());
+    for src in srcs {
+        let g = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, g, elem, src, idx_reg).ok();
+        let l = backend.fun.gen_reg();
+        writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, l, vec_ty, g, align).ok();
+        vecs.push(l);
+    }
+    let acc = match kind.followup(is_float) {
+        Some(follow) => {
+            let m = backend.fun.gen_reg();
+            writeln!(out, "{}{} = {} {} {}, {}", indent, m, kind.op(is_float), vec_ty, vecs[0], vecs[1]).ok();
+            let a = backend.fun.gen_reg();
+            writeln!(out, "{}{} = {} {} {}, {}", indent, a, follow, vec_ty, m, vecs[2]).ok();
+            a
+        }
+        None => {
+            let r = backend.fun.gen_reg();
+            writeln!(out, "{}{} = {} {} {}, {}", indent, r, kind.op(is_float), vec_ty, vecs[0], vecs[1]).ok();
+            r
+        }
+    };
+    writeln!(out, "{}store {} {}, ptr {}, align {}", indent, vec_ty, acc, dst_gep, align).ok();
+}
+
+/// One scalar element at element offset `idx_reg` (the tail path).
+fn simd_scalar_element(
+    backend: &mut LlvmBackend, out: &mut String, indent: &str,
+    kind: SimdKind, elem: &str, is_float: bool,
+    dst: &str, srcs: &[String], idx_reg: &str,
+) {
+    let align = simd_elem_align(elem);
+    let dst_gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, dst_gep, elem, dst, idx_reg).ok();
+    let mut loads: Vec<String> = Vec::with_capacity(srcs.len());
+    for src in srcs {
+        let g = backend.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr {}, ptr {}, i64 {}", indent, g, elem, src, idx_reg).ok();
+        let l = backend.fun.gen_reg();
+        writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, l, elem, g, align).ok();
+        loads.push(l);
+    }
+    let acc = match kind.followup(is_float) {
+        Some(follow) => {
+            let m = backend.fun.gen_reg();
+            writeln!(out, "{}{} = {} {} {}, {}", indent, m, kind.op(is_float), elem, loads[0], loads[1]).ok();
+            let a = backend.fun.gen_reg();
+            writeln!(out, "{}{} = {} {} {}, {}", indent, a, follow, elem, m, loads[2]).ok();
+            a
+        }
+        None => {
+            let r = backend.fun.gen_reg();
+            writeln!(out, "{}{} = {} {} {}, {}", indent, r, kind.op(is_float), elem, loads[0], loads[1]).ok();
+            r
+        }
+    };
+    writeln!(out, "{}store {} {}, ptr {}, align {}", indent, elem, acc, dst_gep, align).ok();
+}
+
+/// 2026-09-06: the portable SIMD binary/FMA family. Shape:
+/// `SimdAdd#(dst, a, b, count)` / `SimdFma#(dst, a, b, c, count)` —
+/// `dst[i] = a[i] op b[i] (+ c[i])` for i in 0..count. Constant counts
+/// emit straight-line vector chunks + inline scalar tail; runtime
+/// counts emit counted chunk + tail loops with alloca induction
+/// variables. All pointers may alias.
+fn emit_simd_binary(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str, kind: SimdKind,
+) -> BTypedRegister {
+    let (dst_reg, dst_ty) = simd_ptr_arg(backend, out, &args[0], indent);
+    let (a_reg, _) = simd_ptr_arg(backend, out, &args[1], indent);
+    let (b_reg, _) = simd_ptr_arg(backend, out, &args[2], indent);
+    let is_fma = matches!(kind, SimdKind::Fma);
+    let (c_reg, srcs): (String, Vec<String>) = if is_fma {
+        let (c, _) = simd_ptr_arg(backend, out, &args[3], indent);
+        (c.clone(), vec![a_reg, b_reg, c])
+    } else {
+        (String::new(), vec![a_reg, b_reg])
+    };
+    let count_idx = if is_fma { 4 } else { 3 };
+    let count_const = args.get(count_idx).and_then(|a| {
+        if let Expr::Decimal(n) = a { Some(*n as usize) } else { None }
+    });
+
+    // Element shape from the DESTINATION pointee (results flow into dst).
+    let pointee = match &dst_ty { Type::Ptr(i) => (**i).clone(), _ => Type::int() };
+    let (elem, width, is_float) = simd_elem_shape(&pointee, backend);
+
+    match count_const {
+        Some(n) => {
+            // Constant count: straight-line chunks + inline scalar tail.
+            let chunks = n / width;
+            let rem = n % width;
+            for c in 0..chunks {
+                let idx = backend.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, idx, c * width).ok();
+                simd_vec_chunk(backend, out, indent, kind, elem, is_float, &dst_reg, &srcs, &idx);
+            }
+            for e in (chunks * width)..n {
+                let idx = backend.fun.gen_reg();
+                writeln!(out, "{}{} = add i64 0, {}", indent, idx, e).ok();
+                simd_scalar_element(backend, out, indent, kind, elem, is_float, &dst_reg, &srcs, &idx);
+            }
+        }
+        None => {
+            // Runtime count: counted chunk loop + scalar tail loop, with
+            // alloca induction variables (SROA promotes them at -O3).
+            let count_reg = emit_arg(backend, out, &args[count_idx], indent);
+            let i_slot = backend.fun.gen_reg();
+            writeln!(out, "{}{} = alloca i64, align 8", indent, i_slot).ok();
+            writeln!(out, "{}store i64 0, ptr {}", indent, i_slot).ok();
+            // Label names: one counter slice per intrinsic call site
+            // (the emit_alloc_tri uniqueness pattern — no gen_label API).
+            let uid = backend.fun.txn_counter;
+            backend.fun.txn_counter += 1;
+            let hdr = format!("simd_vec_{}", uid);
+            let body = format!("simd_body_{}", uid);
+            let tail = format!("simd_tail_{}", uid);
+            writeln!(out, "{}br label %{}", indent, hdr).ok();
+            writeln!(out, "{}:", hdr).ok();
+            let i = backend.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, i, i_slot).ok();
+            let limit = backend.fun.gen_reg();
+            writeln!(out, "{}{} = sub i64 {}, {}", indent, limit, count_reg, width).ok();
+            let cond = backend.fun.gen_reg();
+            writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cond, i, limit).ok();
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond, body, tail).ok();
+            writeln!(out, "{}:", body).ok();
+            simd_vec_chunk(backend, out, indent, kind, elem, is_float, &dst_reg, &srcs, &i);
+            let i_next = backend.fun.gen_reg();
+            writeln!(out, "{}{} = add i64 {}, {}", indent, i_next, i, width).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, i_next, i_slot).ok();
+            writeln!(out, "{}br label %{}", indent, hdr).ok();
+            // Scalar tail: from the first index without a full chunk.
+            writeln!(out, "{}:", tail).ok();
+            let j_slot = backend.fun.gen_reg();
+            writeln!(out, "{}{} = alloca i64, align 8", indent, j_slot).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, i, j_slot).ok();
+            let thdr = format!("simd_scal_{}", uid);
+            let tbody = format!("simd_scal_body_{}", uid);
+            let end = format!("simd_end_{}", uid);
+            writeln!(out, "{}br label %{}", indent, thdr).ok();
+            writeln!(out, "{}:", thdr).ok();
+            let j = backend.fun.gen_reg();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, j, j_slot).ok();
+            let cond2 = backend.fun.gen_reg();
+            writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cond2, j, count_reg).ok();
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond2, tbody, end).ok();
+            writeln!(out, "{}:", tbody).ok();
+            simd_scalar_element(backend, out, indent, kind, elem, is_float, &dst_reg, &srcs, &j);
+            let j_next = backend.fun.gen_reg();
+            writeln!(out, "{}{} = add i64 {}, 1", indent, j_next, j).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, j_next, j_slot).ok();
+            writeln!(out, "{}br label %{}", indent, thdr).ok();
+            writeln!(out, "{}:", end).ok();
+        }
+    }
+    let _ = c_reg;
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
 
 

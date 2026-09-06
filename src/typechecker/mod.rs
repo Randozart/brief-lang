@@ -1970,6 +1970,36 @@ fn infer_intrinsic_call(
             });
         }
     }
+    // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): the portable SIMD
+    // family operates element-wise over pointers — every pointer argument
+    // must be Ptr<scalar> (a type whose universe entry has no fields —
+    // int/float/bit shapes); a struct pointee has no element-wise
+    // arithmetic. Enforced here so emitters never face a shape they can't
+    // lower honestly.
+    if matches!(sig.name, "SimdAdd#" | "SimdSub#" | "SimdMul#" | "SimdFma#") {
+        let ptr_count = if sig.name == "SimdFma#" { 4 } else { 3 };
+        for (i, arg) in args.iter().take(ptr_count).enumerate() {
+            let ty = infer_type_only(arg, ctx)?;
+            let is_scalar_ptr = match &ty {
+                crate::ast::Type::Ptr(inner) => match &**inner {
+                    crate::ast::Type::Bits(_) => true,
+                    crate::ast::Type::Custom(name) => ctx.universe
+                        .get(name)
+                        .map(|rt| rt.fields.is_empty())
+                        .unwrap_or(false),
+                    _ => false,
+                },
+                _ => false,
+            };
+            if !is_scalar_ptr {
+                return Err(TypeError::TypeMismatch {
+                    expected: "Ptr<scalar> — Int/UInt/Bit<N>/Float pointee (element-wise arithmetic)".into(),
+                    found: format!("{}", ty),
+                    context: format!("pointer argument {} of '{}'", i, sig.name),
+                });
+            }
+        }
+    }
     // 2026-07-15: ReturnKind replaces return_type: Option<Type>
     Ok(match &sig.return_kind {
         ReturnKind::Native("Int") => Type::int(),

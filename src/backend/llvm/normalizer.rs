@@ -140,6 +140,9 @@ fn build_supported_ops() -> HashSet<String> {
                    "AtomicSub#", "AtomicOr#", "AtomicAnd#", "AtomicXor#",
                    "AtomicLoadN#", "AtomicStoreN#",
                    "PtrAdd#", "PtrSub#", "PtrDiff#", "PtrEq#", "PtrLt#",
+                   // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md):
+                   // portable SIMD — memory-to-memory element-wise family.
+                   "SimdAdd#", "SimdSub#", "SimdMul#", "SimdFma#",
                    "DlOpen#", "DlSym#", "DlClose#",
                     "Backtrace#", "WorkgroupSize#",
                     // 2026-08-12 (Iterable protocol): `CharCount#` is the

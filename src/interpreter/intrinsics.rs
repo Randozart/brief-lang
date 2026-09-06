@@ -518,6 +518,37 @@ pub fn execute_intrinsic(
         "Fence#" => {
             Ok(Value::Void)
         }
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): portable SIMD
+        // family — check-mode semantics are word-wise (i64) element loops
+        // over the heap, the same single-threaded convention as the other
+        // memory intrinsics. Element-type nuance (f32 chunks, FMA) is a
+        // backend concern; parity tests compare word values.
+        "SimdAdd#" | "SimdSub#" | "SimdMul#" | "SimdFma#" => {
+            let is_fma = name == "SimdFma#";
+            let dst = arg_as_i64(args, 0)? as u64;
+            let a = arg_as_i64(args, 1)? as u64;
+            let b = arg_as_i64(args, 2)? as u64;
+            let c = if is_fma { arg_as_i64(args, 3)? as u64 } else { 0 };
+            let count_idx = if is_fma { 4 } else { 3 };
+            let count = arg_as_i64(args, count_idx)? as usize;
+            let word = 8usize;
+            for k in 0..count {
+                let off = k * word;
+                let av = heap.read(a + off as u64, 8).map(|b| i64::from_le_bytes(b.try_into().unwrap())).unwrap_or(0);
+                let bv = heap.read(b + off as u64, 8).map(|b| i64::from_le_bytes(b.try_into().unwrap())).unwrap_or(0);
+                let cv = if is_fma {
+                    heap.read(c + off as u64, 8).map(|b| i64::from_le_bytes(b.try_into().unwrap())).unwrap_or(0)
+                } else { 0 };
+                let r = match name {
+                    "SimdAdd#" => av.wrapping_add(bv),
+                    "SimdSub#" => av.wrapping_sub(bv),
+                    "SimdFma#" => av.wrapping_mul(bv).wrapping_add(cv),
+                    _ => av.wrapping_mul(bv),
+                };
+                heap.write(dst + off as u64, &r.to_le_bytes()).ok();
+            }
+            Ok(Value::Void)
+        }
 
         // ── Dynamic linker intrinsics (observable) ────────────────────
         // 2026-07-15: In check mode, call host libc functions.
