@@ -134,6 +134,12 @@ fn build_supported_ops() -> HashSet<String> {
                    "VolatileLoad#", "VolatileStore#",
                    "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#",
                    "AtomicAdd#", "Fence#",
+                   // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md):
+                   // RMW family completion + width-parameterized access
+                   // + pointer arithmetic.
+                   "AtomicSub#", "AtomicOr#", "AtomicAnd#", "AtomicXor#",
+                   "AtomicLoadN#", "AtomicStoreN#",
+                   "PtrAdd#", "PtrSub#", "PtrDiff#", "PtrEq#", "PtrLt#",
                    "DlOpen#", "DlSym#", "DlClose#",
                     "Backtrace#", "WorkgroupSize#",
                     // 2026-08-12 (Iterable protocol): `CharCount#` is the

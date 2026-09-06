@@ -292,6 +292,54 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             observable: true,
             variadic: false,
         }),
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): the RMW family
+        // completion + width-parameterized load. All accept a trailing
+        // ordering argument (relaxed/acquire/release/bartered/seq).
+        "AtomicSub#" => Some(Signature {
+            name: "AtomicSub#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: true,
+            variadic: false,
+        }),
+        "AtomicOr#" => Some(Signature {
+            name: "AtomicOr#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: true,
+            variadic: false,
+        }),
+        "AtomicAnd#" => Some(Signature {
+            name: "AtomicAnd#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: true,
+            variadic: false,
+        }),
+        "AtomicXor#" => Some(Signature {
+            name: "AtomicXor#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: true,
+            variadic: false,
+        }),
+        // AtomicLoadN#(ptr, bytes, order?) — 1/2/4/8-byte atomic load.
+        // LLVM atomics require power-of-two sizes up to word width.
+        "AtomicLoadN#" => Some(Signature {
+            name: "AtomicLoadN#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: false,
+            variadic: false,
+        }),
+        // AtomicStoreN#(ptr, val, bytes, order?) — 1/2/4/8-byte atomic store.
+        "AtomicStoreN#" => Some(Signature {
+            name: "AtomicStoreN#",
+            parameters: vec![],
+            return_kind: ReturnKind::Native("Int"),
+            observable: true,
+            variadic: false,
+        }),
         "Fence#" => Some(Signature {
             name: "Fence#",
             parameters: vec![],

@@ -167,6 +167,13 @@ pub fn emit_intrinsic_call(
         "AtomicCas#" => return emit_atomic_cas(backend, out, v, args, indent),
         "AtomicXchg#" => return emit_atomic_xchg(backend, out, v, args, indent),
         "AtomicAdd#" => return emit_atomic_add(backend, out, v, args, indent),
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): RMW family
+        "AtomicSub#" => return emit_atomic_rmw(backend, out, v, args, indent, "sub"),
+        "AtomicOr#" => return emit_atomic_rmw(backend, out, v, args, indent, "or"),
+        "AtomicAnd#" => return emit_atomic_rmw(backend, out, v, args, indent, "and"),
+        "AtomicXor#" => return emit_atomic_rmw(backend, out, v, args, indent, "xor"),
+        "AtomicLoadN#" => return emit_atomic_load_n(backend, out, v, args, indent),
+        "AtomicStoreN#" => return emit_atomic_store_n(backend, out, v, args, indent),
         "Fence#" => return emit_fence(backend, out, v, args, indent),
         // 2026-07-15: Dynamic linker intrinsics
         "DlOpen#" => return emit_dl_open(backend, out, v, args, indent),
@@ -1418,13 +1425,71 @@ fn emit_atomic_add(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
+    emit_atomic_rmw(backend, out, v, args, indent, "add")
+}
+
+/// 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): the atomicrmw family
+/// unified — add/sub/or/and/xor share one shape: `(ptr, val, order?) -> old`.
+fn emit_atomic_rmw(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str, rmw_op: &str,
+) -> BTypedRegister {
     let ord = ordering_arg(args, 2).unwrap_or("seq_cst");
     let addr = emit_arg(backend, out, &args[0], indent);
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
-    writeln!(out, "{}{} = atomicrmw add ptr {}, i64 {} {}", indent, v, ptr, val, ord).ok();
+    writeln!(out, "{}{} = atomicrmw {} ptr {}, i64 {} {}", indent, v, rmw_op, ptr, val, ord).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+/// 2026-09-06: width-parameterized atomic load — AtomicLoadN#(ptr, bytes,
+/// order?). LLVM atomics require power-of-two sizes; 8 is the word width.
+fn emit_atomic_load_n(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ord = ordering_arg(args, 2).unwrap_or("seq_cst");
+    let addr = emit_arg(backend, out, &args[0], indent);
+    // Byte count is a literal (the Load#/Store# convention — Expr::Decimal).
+    let bytes = args.get(1).and_then(|a| if let Expr::Decimal(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+    let (ll_ty, align) = match bytes {
+        1 => ("i8", 1),
+        2 => ("i16", 2),
+        4 => ("i32", 4),
+        _ => ("i64", 8),
+    };
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
+    let raw = backend.fun.gen_reg();
+    writeln!(out, "{}{} = load atomic {}, ptr {} {}, align {}", indent, raw, ll_ty, ptr, ord, align).ok();
+    writeln!(out, "{}{} = zext {} {} to i64", indent, v, ll_ty, raw).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+/// 2026-09-06: width-parameterized atomic store — AtomicStoreN#(ptr, val,
+/// bytes, order?).
+fn emit_atomic_store_n(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ord = ordering_arg(args, 3).unwrap_or("seq_cst");
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let bytes = args.get(2).and_then(|a| if let Expr::Decimal(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+    let (ll_ty, align) = match bytes {
+        1 => ("i8", 1),
+        2 => ("i16", 2),
+        4 => ("i32", 4),
+        _ => ("i64", 8),
+    };
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
+    let val_wide = emit_arg(backend, out, &args[1], indent);
+    let val = backend.fun.gen_reg();
+    writeln!(out, "{}{} = trunc i64 {} to {}", indent, val, val_wide, ll_ty).ok();
+    writeln!(out, "{}store atomic {} {}, ptr {} {}, align {}", indent, ll_ty, val, ptr, ord, align).ok();
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
 
 fn emit_fence(

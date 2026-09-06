@@ -462,6 +462,59 @@ pub fn execute_intrinsic(
             heap.write(ptr, &new.to_le_bytes()).ok();
             Ok(i64_to_bits(old))
         }
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): RMW family
+        // completion + width-parameterized access. Single-threaded check
+        // mode: plain heap ops; ordering args positionally ignored.
+        "AtomicSub#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let old = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            let new = old.wrapping_sub(val);
+            heap.write(ptr, &new.to_le_bytes()).ok();
+            Ok(i64_to_bits(old))
+        }
+        "AtomicOr#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let old = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            let new = old | val;
+            heap.write(ptr, &new.to_le_bytes()).ok();
+            Ok(i64_to_bits(old))
+        }
+        "AtomicAnd#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let old = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            let new = old & val;
+            heap.write(ptr, &new.to_le_bytes()).ok();
+            Ok(i64_to_bits(old))
+        }
+        "AtomicXor#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let old = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            let new = old ^ val;
+            heap.write(ptr, &new.to_le_bytes()).ok();
+            Ok(i64_to_bits(old))
+        }
+        "AtomicLoadN#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let n = arg_as_i64(args, 1)? as usize;
+            let data = heap.read(ptr, n).map(|b| {
+                let mut arr = [0u8; 8];
+                arr[..n.min(8)].copy_from_slice(&b[..n.min(8)]);
+                i64::from_le_bytes(arr)
+            }).unwrap_or(0);
+            Ok(i64_to_bits(data))
+        }
+        "AtomicStoreN#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let n = arg_as_i64(args, 2)? as usize;
+            let bytes = val.to_le_bytes();
+            heap.write(ptr, &bytes[..n.min(8)]).ok();
+            Ok(Value::Void)
+        }
         "Fence#" => {
             Ok(Value::Void)
         }
