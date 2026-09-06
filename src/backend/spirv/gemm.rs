@@ -561,6 +561,20 @@ pub(crate) fn u32_const(builder: &mut super::SpirvBuilder, v: u32) -> Word {
     builder.u32_const(v)
 }
 
+/// Emit ShiftRightLogical for power-of-two division: val / 2^shift → val >> shift.
+pub(crate) fn u32_shr(builder: &mut super::SpirvBuilder, val: Word, shift: u32) -> Word {
+    let c = u32_const(builder, shift);
+    let ty = builder.u32_type();
+    let id = builder.gen_id();
+    builder.emit(Instruction::new(
+        spirv::Op::ShiftRightLogical,
+        Some(ty),
+        Some(id),
+        vec![Operand::IdRef(val), Operand::IdRef(c)],
+    ));
+    id
+}
+
 fn widen_u2i(builder: &mut super::SpirvBuilder, v: Word, int_ty: Word) -> Word {
     let ulong = builder.builder.type_int(64, 0);
     let wide = builder.gen_id();
@@ -1920,6 +1934,18 @@ struct SmemFillParams {
     /// D3b quad mode: elems_per_lane counts f16×4 quads; the fill loads
     /// one v4f16 per unit (half the pairs-mode instruction count).
     quad: bool,
+    /// D4 (beyond-coopmat Stage 1, occupancy): S subgroups per workgroup.
+    /// sub_id = this subgroup's index (0..S-1), derived from LocalInvocationId.
+    /// tiles_x_c = the grid decode constant (N / (64*S)) for per-subgroup
+    /// tn64 computation. b_stage_elems_c = one stage's B elements per
+    /// subgroup (= pps × 4 × 256). subgroups = S (compile-time, for flat stride).
+    sub_id: Word,
+    tiles_x_c: Word,
+    b_stage_elems_c: Word,
+    subgroups: u32,
+    /// Compile-time tile element counts for the split A/B fill (S>1).
+    a_stage_elems: u32,
+    b_stage_elems: u32,
 }
 
 /// Emit DRAM→smem fill for one panel: (R+4)×256 f16 halves.
@@ -1939,15 +1965,163 @@ fn emit_smem_fill(
         return;
     }
     // Pre-compute all constants outside the loop to avoid double-borrow.
-    let c32 = u32_const(builder, 32);
     let c256 = u32_const(builder, 256);
     let c255 = u32_const(builder, 255);
     let c16 = u32_const(builder, 16);
     let c15 = u32_const(builder, 15);
+    // D4: flat stride = 32 × subgroups (all S×32 threads cooperate on the fill)
+    let c_wg = u32_const(builder, 32 * p.subgroups);
+
+    if p.subgroups > 1 {
+        // D4 multi-subgroup fill: A is cooperative (all S×32 threads
+        // fill the shared A panel), B is per-subgroup (each subgroup
+        // fills its own B slice with its own tn64 — the cooperative
+        // fill would use the wrong tn64 for other subgroups' B data).
+        // Two sequential loops, no extra barriers.
+
+        // Phase 1: fill A (cooperative, all threads)
+        let a_elems_per_lane = p.a_stage_elems / (32 * p.subgroups);
+        for u in 0..a_elems_per_lane as usize {
+            let flat = {
+                let u_c = u32_const(builder, u as u32);
+                let mul = u32_binop(builder, spirv::Op::IMul, u_c, c_wg);
+                u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
+            };
+            let tile_idx = u32_shr(builder, flat, 8);
+            let elem256 = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+                    vec![Operand::IdRef(flat), Operand::IdRef(c255)],
+                ));
+                id
+            };
+            let row_in = u32_shr(builder, elem256, 4);
+            let col_in = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+                    vec![Operand::IdRef(elem256), Operand::IdRef(c15)],
+                ));
+                id
+            };
+            let a_src = {
+                let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
+                let row = u32_binop(builder, spirv::Op::IAdd, p.band_m16, t16);
+                let row2 = u32_binop(builder, spirv::Op::IAdd, row, row_in);
+                let kt16 = u32_binop(builder, spirv::Op::IMul, panel_kt, p.s16c);
+                let kcol = u32_binop(builder, spirv::Op::IAdd, kt16, col_in);
+                let rk = u32_binop(builder, spirv::Op::IMul, row2, p.nk);
+                u32_binop(builder, spirv::Op::IAdd, rk, kcol)
+            };
+            let a_dram = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(p.f16_ssbo_ptr), Some(id),
+                    vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.a_member_c), Operand::IdRef(a_src)],
+                ));
+                id
+            };
+            let val = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::Load, Some(p.f16_ty), Some(id),
+                    vec![Operand::IdRef(a_dram)],
+                ));
+                id
+            };
+            let smem_idx = u32_binop(builder, spirv::Op::IAdd, a_off, flat);
+            let a_ptr = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(p.f16_wg_ptr), Some(id),
+                    vec![Operand::IdRef(p.smem_a), Operand::IdRef(smem_idx)],
+                ));
+                id
+            };
+            builder.emit(Instruction::new(
+                spirv::Op::Store, None, None,
+                vec![Operand::IdRef(a_ptr), Operand::IdRef(val)],
+            ));
+        }
+
+        // Phase 2: fill B (per-subgroup, each fills its own B slice)
+        // flat_b = local_lane + u * 32, total = b_stage_elems / 32
+        let b_elems_per_lane = p.b_stage_elems / 32;  // per subgroup
+        let c32 = u32_const(builder, 32);
+        for u in 0..b_elems_per_lane as usize {
+            let flat_b = {
+                let u_c = u32_const(builder, u as u32);
+                let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
+                u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
+            };
+            let tile_idx = u32_shr(builder, flat_b, 8);
+            let elem256 = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+                    vec![Operand::IdRef(flat_b), Operand::IdRef(c255)],
+                ));
+                id
+            };
+            let row_in = u32_shr(builder, elem256, 4);
+            let col_in = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::BitwiseAnd, Some(p.u32_ty), Some(id),
+                    vec![Operand::IdRef(elem256), Operand::IdRef(c15)],
+                ));
+                id
+            };
+            // B DRAM source: uses THIS subgroup's tn64 (correct)
+            let b_src = {
+                let kt16 = u32_binop(builder, spirv::Op::IMul, panel_kt, c16);
+                let brow = u32_binop(builder, spirv::Op::IAdd, kt16, row_in);
+                let j16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
+                let bcol = u32_binop(builder, spirv::Op::IAdd, p.tn64, j16);
+                let bcol2 = u32_binop(builder, spirv::Op::IAdd, bcol, col_in);
+                let rn = u32_binop(builder, spirv::Op::IMul, brow, p.n_stride);
+                u32_binop(builder, spirv::Op::IAdd, rn, bcol2)
+            };
+            let b_dram = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(p.f16_ssbo_ptr), Some(id),
+                    vec![Operand::IdRef(p.ssbo), Operand::IdRef(p.b_member_c), Operand::IdRef(b_src)],
+                ));
+                id
+            };
+            let val = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::Load, Some(p.f16_ty), Some(id),
+                    vec![Operand::IdRef(b_dram)],
+                ));
+                id
+            };
+            // B smem dest: b_off + flat_b (b_off already includes sub_b_offset)
+            let smem_idx = u32_binop(builder, spirv::Op::IAdd, b_off, flat_b);
+            let b_ptr = {
+                let id = builder.gen_id();
+                builder.emit(Instruction::new(
+                    spirv::Op::AccessChain, Some(p.f16_wg_ptr), Some(id),
+                    vec![Operand::IdRef(p.smem_b), Operand::IdRef(smem_idx)],
+                ));
+                id
+            };
+            builder.emit(Instruction::new(
+                spirv::Op::Store, None, None,
+                vec![Operand::IdRef(b_ptr), Operand::IdRef(val)],
+            ));
+        }
+        return;
+    }
+
+    // S=1: original single-loop fill (A and B in one flat loop)
     for u in 0..p.elems_per_lane as usize {
         let flat = {
             let u_c = u32_const(builder, u as u32);
-            let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
+            let mul = u32_binop(builder, spirv::Op::IMul, u_c, c_wg);
             u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
         };
         let in_a = {
@@ -1958,14 +2132,7 @@ fn emit_smem_fill(
             ));
             id
         };
-        let tile_idx = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(flat), Operand::IdRef(c256)],
-            ));
-            id
-        };
+        let tile_idx = u32_shr(builder, flat, 8);
         let elem256 = {
             let id = builder.gen_id();
             builder.emit(Instruction::new(
@@ -1974,14 +2141,7 @@ fn emit_smem_fill(
             ));
             id
         };
-        let row_in = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(elem256), Operand::IdRef(c16)],
-            ));
-            id
-        };
+        let row_in = u32_shr(builder, elem256, 4);
         let col_in = {
             let id = builder.gen_id();
             builder.emit(Instruction::new(
@@ -1990,17 +2150,14 @@ fn emit_smem_fill(
             ));
             id
         };
-        // b_flat = flat - a_stage_elems (offset within B region).
+        // b_flat = flat - a_stage_elems (offset within the ENTIRE B region).
         let b_flat = u32_binop(builder, spirv::Op::ISub, flat, p.a_stage_elems_c);
-        // B tile index: b_flat / 256 gives j in 0..3.
-        let b_tile_idx = {
-            let id = builder.gen_id();
-            builder.emit(Instruction::new(
-                spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(b_flat), Operand::IdRef(c256)],
-            ));
-            id
-        };
+        // D4: b_flat_within = b_flat % b_stage_elems (index within THIS
+        // subgroup's B slice — the DRAM source uses this for the tile
+        // column; the smem dest uses the full b_flat for the contiguous layout).
+        let b_flat_within = u32_binop(builder, spirv::Op::UMod, b_flat, p.b_stage_elems_c);
+        // B tile index: b_flat_within / 256 gives j in 0..3.
+        let b_tile_idx = u32_shr(builder, b_flat_within, 8);
         // A source: (band_m16 + r*16 + row) * K + panel_kt*16 + col
         let a_src = {
             let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
@@ -2055,12 +2212,11 @@ fn emit_smem_fill(
             ));
             id
         };
-        let b_flat = u32_binop(builder, spirv::Op::ISub, flat, p.a_stage_elems_c);
         let idx = {
             let id = builder.gen_id();
             builder.emit(Instruction::new(
                 spirv::Op::Select, Some(p.u32_ty), Some(id),
-                vec![Operand::IdRef(in_a), Operand::IdRef(flat), Operand::IdRef(b_flat)],
+                vec![Operand::IdRef(in_a), Operand::IdRef(flat), Operand::IdRef(b_flat_within)],
             ));
             id
         };
@@ -2124,6 +2280,54 @@ fn emit_smem_fill_pairs(
     b_off: Word,
     panel_kt: Word,
 ) {
+    if p.subgroups > 1 {
+        // D4 multi-subgroup pair/quad fill: A cooperative, B per-subgroup.
+        let c_wg = u32_const(builder, 32 * p.subgroups);
+        let c32 = u32_const(builder, 32);
+        let view_w = if p.quad { 4u32 } else { 2 };
+
+        // Phase 1: fill A (cooperative, all S×32 threads)
+        // a_pairs = A_elems / view_w (pair or quad units)
+        let a_pairs = p.a_stage_elems / view_w;
+        let a_pairs_per_lane = a_pairs / (32 * p.subgroups);
+        for u in 0..a_pairs_per_lane as usize {
+            let uflat = {
+                let u_c = u32_const(builder, u as u32);
+                let mul = u32_binop(builder, spirv::Op::IMul, u_c, c_wg);
+                u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
+            };
+            if p.quad {
+                emit_smem_fill_quad_unit(builder, p, uflat, a_off, b_off, panel_kt);
+            } else {
+                emit_smem_fill_pair_unit(builder, p, uflat, a_off, b_off, panel_kt);
+            }
+        }
+
+        // Phase 2: fill B (per-subgroup, each fills its own B slice)
+        // b_pairs_per_sub = B_elems / view_w (pair or quad units per subgroup)
+        let b_pairs_per_sub = p.b_stage_elems / view_w;
+        let b_pairs_per_lane = b_pairs_per_sub / 32;
+        // D4: offset pflat past a_elems so in_a = false in pair/quad unit.
+        // a_pairs = A_elems / view_w = the A phase total pair/quad units.
+        let a_pairs = p.a_stage_elems / view_w;
+        let a_pairs_c = u32_const(builder, a_pairs);
+        for u in 0..b_pairs_per_lane as usize {
+            let raw = {
+                let u_c = u32_const(builder, u as u32);
+                let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
+                u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
+            };
+            let uflat = u32_binop(builder, spirv::Op::IAdd, raw, a_pairs_c);
+            if p.quad {
+                emit_smem_fill_quad_unit(builder, p, uflat, a_off, b_off, panel_kt);
+            } else {
+                emit_smem_fill_pair_unit(builder, p, uflat, a_off, b_off, panel_kt);
+            }
+        }
+        return;
+    }
+
+    // S=1: original single-loop fill
     let c32 = u32_const(builder, 32);
     for u in 0..p.elems_per_lane as usize {
         // unit flat = lane + u*32 (PAIR or QUAD units; halves = w× that).
@@ -2165,14 +2369,7 @@ fn emit_fill_pair_dram(
         ));
         id
     };
-    let tile_idx = {
-        let id = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(flat2), Operand::IdRef(c256)],
-        ));
-        id
-    };
+    let tile_idx = u32_shr(builder, flat2, 8);
     let elem256 = {
         let id = builder.gen_id();
         builder.emit(Instruction::new(
@@ -2181,14 +2378,7 @@ fn emit_fill_pair_dram(
         ));
         id
     };
-    let row_in = {
-        let id = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(elem256), Operand::IdRef(c16)],
-        ));
-        id
-    };
+    let row_in = u32_shr(builder, elem256, 4);
     // Pair col = (elem256 & 14)/2 — the v2f16 element column.
     let col_pair = {
         let c14v = {
@@ -2199,17 +2389,14 @@ fn emit_fill_pair_dram(
             ));
             id
         };
-        u32_binop(builder, spirv::Op::UDiv, c14v, c2)
+        u32_shr(builder, c14v, 1)
     };
     let b_flat = u32_binop(builder, spirv::Op::ISub, flat2, p.a_stage_elems_c);
-    let b_tile_idx = {
-        let id = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(b_flat), Operand::IdRef(c256)],
-        ));
-        id
-    };
+    // D4: b_flat_within = b_flat % b_stage_elems (pair units) — index
+    // within THIS subgroup's B slice for the DRAM source tile column.
+    let b_stage_pairs = u32_shr(builder, p.b_stage_elems_c, 1);
+    let b_flat_within = u32_binop(builder, spirv::Op::UMod, b_flat, b_stage_pairs);
+    let b_tile_idx = u32_shr(builder, b_flat_within, 8);
     // A pair source: row2*(K/2) + kt*8 + col_pair (all even/2 exact).
     let a_src = {
         let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
@@ -2227,7 +2414,7 @@ fn emit_fill_pair_dram(
         let rn_half = u32_binop(builder, spirv::Op::IMul, brow, p.n_half);
         let j16 = u32_binop(builder, spirv::Op::IMul, b_tile_idx, c16);
         let bcol = u32_binop(builder, spirv::Op::IAdd, p.tn64, j16);
-        let bcol_half = u32_binop(builder, spirv::Op::UDiv, bcol, c2);
+        let bcol_half = u32_shr(builder, bcol, 1);
         let col = u32_binop(builder, spirv::Op::IAdd, bcol_half, col_pair);
         u32_binop(builder, spirv::Op::IAdd, rn_half, col)
     };
@@ -2289,13 +2476,16 @@ fn emit_fill_pair_smem(
         id
     };
     let b_flat = u32_binop(builder, spirv::Op::ISub, flat2, p.a_stage_elems_c);
+    // D4: b_flat_within = b_flat % b_stage_elems — index within THIS
+    // subgroup's B slice for the smem dest.
+    let b_flat_within = u32_binop(builder, spirv::Op::UMod, b_flat, p.b_stage_elems_c);
     // Smem v2f16 destination: (base + flat2)/2 — exact (all offsets
     // even). The pair index IS the v2f16 element index.
     let idx = {
         let id = builder.gen_id();
         builder.emit(Instruction::new(
             spirv::Op::Select, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(in_a), Operand::IdRef(flat2), Operand::IdRef(b_flat)],
+            vec![Operand::IdRef(in_a), Operand::IdRef(flat2), Operand::IdRef(b_flat_within)],
         ));
         id
     };
@@ -2308,7 +2498,7 @@ fn emit_fill_pair_smem(
         id
     };
     let smem_idx_pair = u32_binop(builder, spirv::Op::IAdd, base, idx);
-    let smem_pair_idx = u32_binop(builder, spirv::Op::UDiv, smem_idx_pair, c2);
+    let smem_pair_idx = u32_shr(builder, smem_idx_pair, 1);
     let a_ptr = {
         let id = builder.gen_id();
         builder.emit(Instruction::new(
@@ -2379,14 +2569,7 @@ fn emit_fill_quad_dram(
         ));
         id
     };
-    let tile_idx = {
-        let id = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(flat4), Operand::IdRef(c256)],
-        ));
-        id
-    };
+    let tile_idx = u32_shr(builder, flat4, 8);
     let elem256 = {
         let id = builder.gen_id();
         builder.emit(Instruction::new(
@@ -2395,14 +2578,7 @@ fn emit_fill_quad_dram(
         ));
         id
     };
-    let row_in = {
-        let id = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(elem256), Operand::IdRef(c16)],
-        ));
-        id
-    };
+    let row_in = u32_shr(builder, elem256, 4);
     // Quad col = elem256 & 15 ∈ {0,4,8,12}; the v4 column = /4.
     let col4 = {
         let id = builder.gen_id();
@@ -2412,16 +2588,12 @@ fn emit_fill_quad_dram(
         ));
         id
     };
-    let colq = u32_binop(builder, spirv::Op::UDiv, col4, c4);
+    let colq = u32_shr(builder, col4, 2);
     let b_flat4 = u32_binop(builder, spirv::Op::ISub, flat4, p.a_stage_elems_c);
-    let b_tile_idx = {
-        let id = builder.gen_id();
-        builder.emit(Instruction::new(
-            spirv::Op::UDiv, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(b_flat4), Operand::IdRef(c256)],
-        ));
-        id
-    };
+    // D4: b_flat4_within = b_flat4 % b_stage_elems — index within THIS
+    // subgroup's B slice for the DRAM source tile column.
+    let b_flat4_within = u32_binop(builder, spirv::Op::UMod, b_flat4, p.b_stage_elems_c);
+    let b_tile_idx = u32_shr(builder, b_flat4_within, 8);
     // A quad source: row2*(K/4) + kt*4 + col4/4 (K ÷4; all exact).
     let a_src = {
         let t16 = u32_binop(builder, spirv::Op::IMul, tile_idx, c16);
@@ -2439,7 +2611,7 @@ fn emit_fill_quad_dram(
         let rn_q = u32_binop(builder, spirv::Op::IMul, brow, p.n4);
         let j16 = u32_binop(builder, spirv::Op::IMul, b_tile_idx, c16);
         let bcol = u32_binop(builder, spirv::Op::IAdd, p.tn64, j16);
-        let bcol_q = u32_binop(builder, spirv::Op::UDiv, bcol, c4);
+        let bcol_q = u32_shr(builder, bcol, 2);
         let col = u32_binop(builder, spirv::Op::IAdd, bcol_q, colq);
         u32_binop(builder, spirv::Op::IAdd, rn_q, col)
     };
@@ -2502,12 +2674,15 @@ fn emit_fill_quad_smem(
         id
     };
     let b_flat4 = u32_binop(builder, spirv::Op::ISub, flat4, p.a_stage_elems_c);
+    // D4: b_flat4_within = b_flat4 % b_stage_elems — index within THIS
+    // subgroup's B slice for the smem dest.
+    let b_flat4_within = u32_binop(builder, spirv::Op::UMod, b_flat4, p.b_stage_elems_c);
     // Smem v4f16 destination: (base + flat4)/4 — exact (all offsets ÷4).
     let idx = {
         let id = builder.gen_id();
         builder.emit(Instruction::new(
             spirv::Op::Select, Some(p.u32_ty), Some(id),
-            vec![Operand::IdRef(in_a), Operand::IdRef(flat4), Operand::IdRef(b_flat4)],
+            vec![Operand::IdRef(in_a), Operand::IdRef(flat4), Operand::IdRef(b_flat4_within)],
         ));
         id
     };
@@ -2520,7 +2695,7 @@ fn emit_fill_quad_smem(
         id
     };
     let smem_idx = u32_binop(builder, spirv::Op::IAdd, base, idx);
-    let smem_quad_idx = u32_binop(builder, spirv::Op::UDiv, smem_idx, c4);
+    let smem_quad_idx = u32_shr(builder, smem_idx, 2);
     let a_ptr = {
         let id = builder.gen_id();
         builder.emit(Instruction::new(
@@ -2572,12 +2747,13 @@ fn emit_fill_load_phase(
     p: &SmemFillParams,
     panel_kt: Word,
 ) -> Vec<Word> {
-    let c32 = u32_const(builder, 32);
+    // D4: flat stride = 32 × subgroups
+    let c_wg = u32_const(builder, 32 * p.subgroups);
     (0..p.elems_per_lane as usize)
         .map(|u| {
             let uflat = {
                 let u_c = u32_const(builder, u as u32);
-                let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
+                let mul = u32_binop(builder, spirv::Op::IMul, u_c, c_wg);
                 u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
             };
             if p.quad {
@@ -2598,11 +2774,12 @@ fn emit_fill_store_phase(
     a_off: Word,
     b_off: Word,
 ) {
-    let c32 = u32_const(builder, 32);
+    // D4: flat stride = 32 × subgroups
+    let c_wg = u32_const(builder, 32 * p.subgroups);
     for (u, val) in vals.iter().enumerate() {
         let uflat = {
             let u_c = u32_const(builder, u as u32);
-            let mul = u32_binop(builder, spirv::Op::IMul, u_c, c32);
+            let mul = u32_binop(builder, spirv::Op::IMul, u_c, c_wg);
             u32_binop(builder, spirv::Op::IAdd, p.lane, mul)
         };
         if p.quad {
@@ -2722,21 +2899,26 @@ fn emit_coopmat_smem(
     let pps = GemmPlan::coopmat_panels_per_stage(plan.k);
     let a_stage_elems = pps * tile_rows * 256; // pps: u32, tile_rows: u32
     let a_stage_elems_c = u32_const(builder, a_stage_elems);
-    let total_elems = pps * (tile_rows + 4) * 256;
+    let subgroups = GemmPlan::coopmat_subgroups();
+    let b_stage_elems = pps * 4 * 256; // one subgroup's B per stage
+    // D4: total fill elements = A + S × B (each subgroup fills its own B slice)
+    let total_elems = a_stage_elems + subgroups * b_stage_elems;
     let pairs = GemmPlan::coopmat_fill_pairs();
     // Pairs mode: the SSBO members AND the smem arrays are retyped
     // array-of-vNf16 (byte-identical; lower.rs view_width) — the fill
     // iterates wide units (half the instruction count per widening).
-    // D3b quad fill: pps·(R+4)·256 halves = pps·(R+4)·64 quad units —
+    // D3b quad fill: pps·(R+S·4)·256 halves = pps·(R+S·4)·64 quad units —
     // always lane-aligned (÷32 exact), and a_stage_elems = pps·R·256 is
     // ÷4 exact so no quad straddles the A/B region boundary.
     let quad = GemmPlan::coopmat_fill_quad_active(plan);
+    // D4: elems_per_lane divides by S (the workgroup has S×32 threads)
+    let wg_threads = 32 * subgroups;
     let elems_per_lane = if quad {
-        total_elems / 4 / 32
+        total_elems / 4 / wg_threads
     } else if pairs {
-        total_elems / 2 / 32
+        total_elems / 2 / wg_threads
     } else {
-        total_elems / 32
+        total_elems / wg_threads
     };
     let a_member_c = u32_const(builder, a_member);
     let b_member_c = u32_const(builder, b_member);
@@ -2770,6 +2952,7 @@ fn emit_coopmat_smem(
     };
 
     let prefetch = pairs && GemmPlan::coopmat_fill_prefetch();
+    let b_stage_elems_c = u32_const(builder, b_stage_elems);
     let fill_params = SmemFillParams {
         smem_a, smem_b, f16_wg_ptr, f16_ssbo_ptr,
         a_stage_elems_c, a_member_c, b_member_c,
@@ -2778,6 +2961,12 @@ fn emit_coopmat_smem(
         v2_ssbo_ptr, v2_wg_ptr, v2_f16_ty,
         v4_ssbo_ptr, v4_wg_ptr, v4_f16_ty, k4, n4,
         pairs, quad,
+        sub_id: io.sub_id,
+        tiles_x_c: tiles_x_c.clone(),
+        b_stage_elems_c,
+        subgroups,
+        a_stage_elems,
+        b_stage_elems,
     };
 
     // D1: pps panels per stage. The prologue fills stage 0 with the
@@ -2805,13 +2994,26 @@ fn emit_coopmat_smem(
     } else {
         u32_const(builder, 0)
     };
+    // D4: per-subgroup B smem base — each subgroup fills its own B slice.
+    // Layout: [sub0_stage0, sub0_stage1, sub1_stage0, sub1_stage1, ...]
+    let b_stage_elems = pps * 4 * 256;
+    let sub_b_base_elems = 2 * b_stage_elems; // both stages per subgroup
+    // sub_b_offset = sub_id × sub_b_base_elems (runtime — different per subgroup)
+    let sub_b_offset = if subgroups > 1 {
+        let sub_b_elems_c = u32_const(builder, sub_b_base_elems);
+        u32_binop(builder, spirv::Op::IMul, io.sub_id, sub_b_elems_c)
+    } else {
+        u32_const(builder, 0)
+    };
     for stage in 0..2u32 {
         for pi in 0..pps {
             let a_off = u32_const(
                 builder,
                 (stage * a_stage_elems + pi * tile_rows * 256) as u32,
             );
-            let b_off = u32_const(builder, (stage * pps * 4 * 256 + pi * 4 * 256) as u32);
+            let b_stage_off = u32_const(builder, (stage * pps * 4 * 256 + pi * 4 * 256) as u32);
+            // D4: b_off = sub_b_offset + stage/panel offset (per-subgroup B slice)
+            let b_off = u32_binop(builder, spirv::Op::IAdd, sub_b_offset, b_stage_off);
             let kt_panel = {
                 let raw = if stagger {
                     let off = u32_const(builder, stage * pps + pi);
@@ -2911,7 +3113,18 @@ fn emit_coopmat_smem(
     // Load B fragments from smem: pps panels × 4 tiles.
     let b_stage_size = pps * 4 * 256;
     let c_b_ss = u32_const(builder, b_stage_size);
-    let stage_off_b = u32_binop(builder, spirv::Op::IMul, s, c_b_ss);
+    // D4: each subgroup reads from its own B slice in smem_b.
+    // Layout: [sub0_stage0, sub0_stage1, sub1_stage0, sub1_stage1, ...]
+    // sub_b_base = sub_id × 2 × b_stage_size (skip other subgroups' stages)
+    // stage_off_b = sub_b_base + s × b_stage_size (stage within this subgroup's slice)
+    let sub_b_base = if subgroups > 1 {
+        let two_b = u32_const(builder, 2 * b_stage_size);
+        u32_binop(builder, spirv::Op::IMul, io.sub_id, two_b)
+    } else {
+        u32_const(builder, 0)
+    };
+    let stage_off_b_raw = u32_binop(builder, spirv::Op::IMul, s, c_b_ss);
+    let stage_off_b = u32_binop(builder, spirv::Op::IAdd, sub_b_base, stage_off_b_raw);
     let mut frag_bs: Vec<Word> = Vec::new();
     for pi in 0..pps as usize {
         let pi_c = u32_const(builder, (pi * 4 * 256) as u32);
@@ -3079,7 +3292,7 @@ fn emit_coopmat_smem(
                 let c2 = u32_const(builder, 2);
                 let c0 = u32_const(builder, 0);
                 let v2_half_ptr = builder.ptr_class(StorageClass::StorageBuffer, f16_ty);
-                let pair_idx = u32_binop(builder, spirv::Op::UDiv, c_off, c2);
+                let pair_idx = u32_shr(builder, c_off, 1);
                 builder.emit(Instruction::new(
                     spirv::Op::AccessChain, Some(v2_half_ptr), Some(y_ptr),
                     vec![Operand::IdRef(ssbo), Operand::IdRef(y_member_c),
