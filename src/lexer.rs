@@ -94,6 +94,21 @@ pub enum Token {
     #[token("atomic")]
     Atomic,
 
+    /// 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): atomic ordering
+    /// qualifiers — context-sensitive, only valid before `atomic`.
+    /// `relaxed atomic count: Int;` — memory_order_relaxed.
+    #[token("relaxed")]
+    Relaxed,
+    /// `acquire atomic flag: Bool;` — memory_order_acquire.
+    #[token("acquire")]
+    Acquire,
+    /// `release atomic payload: Int[256];` — memory_order_release.
+    #[token("release")]
+    Release,
+    /// `bartered atomic ref_count: Int;` — memory_order_acq_rel (RMW exchange).
+    #[token("bartered")]
+    Bartered,
+
     /// 2026-08-13 (layout-keywords plan Phase 6): `union` — an untagged
     /// overlay declaration: `union Name { field: Type, … };` — all fields
     /// share storage at offset 0 (SPEC §8.2).
@@ -578,6 +593,10 @@ impl std::fmt::Display for Token {
             Token::Pack => write!(f, "pack"),
             Token::Trap => write!(f, "trap"),
             Token::Atomic => write!(f, "atomic"),
+            Token::Relaxed => write!(f, "relaxed"),
+            Token::Acquire => write!(f, "acquire"),
+            Token::Release => write!(f, "release"),
+            Token::Bartered => write!(f, "bartered"),
             Token::Union => write!(f, "union"),
             Token::Coll => write!(f, "coll"),
             Token::Vol => write!(f, "vol"),
@@ -721,7 +740,7 @@ mod tests {
         let keyword_tokens: &[&str] = &[
             "export", "defn", "let", "const", "txn", "node", "async", "seq",
             "vol", "out", "spec", "pack", "trap", "atomic", "union", "coll", "await", "spawn", "term", "term!", "rollback", "import",
-            "mem",
+            "mem", "relaxed", "acquire", "release", "bartered",
             "from", "as", "frgn", "meld", "reg", "op", "prop",
             "type", "trait", "impl", "cell", "obj", "struct", "render", "enum", "trg",
             "within", "match", "quote", "foreach", "pvt", "sed",

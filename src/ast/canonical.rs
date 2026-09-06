@@ -306,16 +306,22 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
 /// 2026-08-13 (layout-keywords plan Phase 5): the set of field names declared
 /// `atomic`, from the structured `atomic_fields` metadata List. Shared by the
 /// struct and TypeDef formatters so the `atomic` prefix prints for both.
-fn atomic_field_set(metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>) -> std::collections::HashSet<&str> {
+/// 2026-09-06: Returns a map of field name → ordering ("seq", "relaxed",
+/// "acquire", "release", "bartered") from the `atomic_fields` metadata.
+/// Entries are stored as `"field_name:ordering"`.
+fn atomic_field_map(metadata: &std::collections::HashMap<String, crate::ast::PropertyValue>) -> std::collections::HashMap<&str, &str> {
     match metadata.get("atomic_fields") {
         Some(crate::ast::PropertyValue::List(entries)) => entries
             .iter()
             .filter_map(|e| match e {
-                crate::ast::PropertyValue::String(s) => Some(s.as_str()),
+                crate::ast::PropertyValue::String(s) => {
+                    let (name, ordering) = s.split_once(':').unwrap_or((s.as_str(), "seq"));
+                    Some((name, ordering))
+                }
                 _ => None,
             })
             .collect(),
-        _ => std::collections::HashSet::new(),
+        _ => std::collections::HashMap::new(),
     }
 }
 
@@ -345,12 +351,16 @@ fn format_struct_into(
         let _ = write!(out, "<{}>", params.join(", "));
     }
     let _ = write!(out, " {{ ");
-    let atomic = atomic_field_set(&def.metadata);
+    let atomic = atomic_field_map(&def.metadata);
     for (i, (fname, fty)) in def.fields.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
-        if atomic.contains(fname.as_str()) {
+        if let Some(ordering) = atomic.get(fname.as_str()) {
+            if *ordering != "seq" {
+                out.push_str(ordering);
+                out.push(' ');
+            }
             out.push_str("atomic ");
         }
         let _ = write!(out, "{}: {};", fname, fty);
@@ -668,12 +678,16 @@ fn format_typedef_into(t: &TypeDef, out: &mut String, level: usize) {
         let _ = write!(out, ": {}", protocol);
     }
     let _ = write!(out, " {{ ");
-    let atomic = atomic_field_set(&t.body.metadata);
+    let atomic = atomic_field_map(&t.body.metadata);
     for (i, slot) in t.body.slots.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
-        if atomic.contains(slot.name.as_str()) {
+        if let Some(ordering) = atomic.get(slot.name.as_str()) {
+            if *ordering != "seq" {
+                out.push_str(ordering);
+                out.push(' ');
+            }
             out.push_str("atomic ");
         }
         let _ = write!(out, "{}: {};", slot.name, slot.ty);

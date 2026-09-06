@@ -202,11 +202,11 @@ pub struct CompilerContext {
     /// element block.
     pub coll_storage: HashMap<String, crate::backend::llvm::coll_scaffold::CollStorage>,
     /// 2026-08-13 (layout-keywords plan Phase 5): atomic field slots, keyed
-    /// `"<type>.<field>"` (type name + field name disambiguate across
-    /// structs). Populated at registration from the parser's
-    /// `metadata["atomic_fields"]` carrier; field load/store emitters check
-    /// membership to emit `load atomic`/`store atomic` (SPEC §8.2).
-    pub atomic_fields: HashSet<String>,
+/// `"<type>.<field>"` → ordering ("seq", "relaxed", "acquire", "release",
+/// "bartered"). Populated at registration from the parser's
+/// metadata["atomic_fields"] carrier; field load/store emitters query
+/// membership and ordering to emit `load atomic`/`store atomic` (SPEC §8.2).
+pub atomic_fields: std::collections::HashMap<String, String>,
     /// 2026-08-13 (layout-keywords plan Phase 6): `union` type names — all
     /// fields overlay at offset 0; the type materializes as a byte array of
     /// the largest aligned field storage (SPEC §8.2).
@@ -459,7 +459,7 @@ impl CompilerContext {
             struct_types: HashMap::new(),
             packed_structs: HashSet::new(),
             coll_storage: HashMap::new(),
-            atomic_fields: HashSet::new(),
+            atomic_fields: std::collections::HashMap::new(),
             unions: HashSet::new(),
             obj_types: std::collections::HashSet::new(),
             obj_members: HashMap::new(),

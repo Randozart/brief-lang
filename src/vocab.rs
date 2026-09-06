@@ -132,6 +132,15 @@ impl LanguageVocab {
                 // per-field concurrency modifier (`atomic x: Int;`). Disclosed,
                 // never a speed path; plain fields keep the default path.
                 kw("atomic", VocabStatus::Canonical, KeywordContext::Modifier),
+                // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): atomic
+                // ORDERING qualifiers — context-sensitive, only valid before
+                // `atomic` (`relaxed atomic count: Int;`). `seq` (existing
+                // keyword) is the default ordering; `bartered` = acq_rel (an
+                // exchange of visibility between threads).
+                kw("relaxed", VocabStatus::Canonical, KeywordContext::Modifier),
+                kw("acquire", VocabStatus::Canonical, KeywordContext::Modifier),
+                kw("release", VocabStatus::Canonical, KeywordContext::Modifier),
+                kw("bartered", VocabStatus::Canonical, KeywordContext::Modifier),
                 // 2026-08-13 (layout-keywords plan Phase 6): `union` — untagged
                 // overlay declaration (fields share storage at offset 0).
                 kw("union", VocabStatus::Canonical, KeywordContext::Declaration),

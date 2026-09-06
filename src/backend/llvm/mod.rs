@@ -957,9 +957,10 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type, universe: Option<&crate::type_unive
 /// 2026-07-31: Phase 3 (§8.4-D6) — the front-member is chosen by #Int protocol
 /// membership (the `Cast.Int` universe property) instead of the literal type
 /// 2026-08-13 (layout-keywords plan Phase 5): read the parser's structured
-/// `atomic_fields` metadata (a PropertyValue::List of field-name Strings) and
-/// record each `<type>.<field>` slot in `ctx.atomic_fields` — the carrier the
-/// field load/store emitters consult. Plain (non-atomic) fields are untouched.
+/// `atomic_fields` metadata (a PropertyValue::List of "field_name:ordering"
+/// Strings) and record each `<type>.<field>` slot with its ordering in
+/// `ctx.atomic_fields` — the carrier the field load/store emitters consult.
+/// Plain (non-atomic) fields are untouched.
 fn register_atomic_fields(
     ctx: &mut CompilerContext,
     type_name: &str,
@@ -968,7 +969,11 @@ fn register_atomic_fields(
     if let Some(crate::ast::PropertyValue::List(entries)) = metadata.get("atomic_fields") {
         for entry in entries {
             if let crate::ast::PropertyValue::String(field) = entry {
-                ctx.atomic_fields.insert(format!("{}.{}", type_name, field));
+                let (name, ordering) = field.split_once(':').unwrap_or((field.as_str(), "seq"));
+                ctx.atomic_fields.insert(
+                    format!("{}.{}", type_name, name),
+                    ordering.to_string(),
+                );
             }
         }
     }

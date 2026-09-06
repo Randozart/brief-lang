@@ -682,7 +682,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                 .unwrap_or((Type::int(), ()));
                             // 2026-08-13 (Phase 5): an `atomic` self-slot stores
                             // with an atomic store.
-                            if backend.is_atomic_field(self_type, name) {
+                            if let Some(ordering) = backend.atomic_field_ordering(self_type, name) {
                                 let salt = if matches!(slot_ty, Type::Ptr(_)) {
                                     format!("i{}", backend.ctx.int_bits)
                                 } else {
@@ -695,7 +695,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                                     out, indent, &salt, &val.name, Some(val.ty.clone()),
                                     backend.ctx.type_universe.clone().as_ref(),
                                 );
-                                writeln!(out, "{}store atomic {} {}, ptr {} seq_cst, align {}", indent, salt, store_val, gep, sasz).ok();
+                                writeln!(out, "{}store atomic {} {}, ptr {} {}, align {}", indent, salt, store_val, gep, ordering, sasz).ok();
                                 backend.fun.last_val_temps.insert(name.clone(), val.name.clone());
                                 backend.fun.last_val_types.insert(name.clone(), val.ty.clone());
                                 return TypedRegister { name: val.name, ty: Type::void() };
@@ -989,7 +989,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // `obj.f = obj.f + c` / `obj.f = obj.f - c` lower to
                     // atomicrmw add/sub (read-modify-write); anything else is
                     // an atomic store (SPEC §8.2).
-                    if backend.is_atomic_field(&obj_key, name) {
+                    if let Some(ordering) = backend.atomic_field_ordering(&obj_key, name) {
                         let field_ty = backend.ctx.struct_types.get(&obj_key)
                             .and_then(|f| f.iter().find(|(n, _)| n == name))
                             .map(|(_, ty)| ty.clone())
@@ -1019,13 +1019,13 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                         };
                         if let Some((op_name, cval)) = rmw {
                             let old = backend.fun.gen_reg();
-                            writeln!(out, "{}{} = atomicrmw {} ptr {}, i64 {} seq_cst", indent, old, op_name, gep, cval).ok();
+                            writeln!(out, "{}{} = atomicrmw {} ptr {}, i64 {} {}", indent, old, op_name, gep, cval, ordering).ok();
                         } else {
                             let store_val = backend.ensure_typed_value(
                                 out, indent, &alt, &val.name, Some(val.ty.clone()),
                                 backend.ctx.type_universe.clone().as_ref(),
                             );
-                            writeln!(out, "{}store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, gep, asz).ok();
+                            writeln!(out, "{}store atomic {} {}, ptr {} {}, align {}", indent, alt, store_val, gep, ordering, asz).ok();
                         }
                         return TypedRegister { name: val.name, ty: Type::void() };
                     }

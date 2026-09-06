@@ -91,6 +91,12 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "Deref#" => Some(Signature { name: "Deref#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Index#" => Some(Signature { name: "Index#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         "Ptr#" => Some(Signature { name: "Ptr#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): pointer arithmetic
+        "PtrAdd#" => Some(Signature { name: "PtrAdd#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "PtrSub#" => Some(Signature { name: "PtrSub#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "PtrDiff#" => Some(Signature { name: "PtrDiff#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),
+        "PtrEq#" => Some(Signature { name: "PtrEq#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
+        "PtrLt#" => Some(Signature { name: "PtrLt#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false, variadic: false }),
         // ── Capacity (coll plan §3.6; compiler-owned coll capacity) ─────
         // Capacity#(h) -> Int — read the hidden cap slot.
         "Capacity#" => Some(Signature { name: "Capacity#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false, variadic: false }),

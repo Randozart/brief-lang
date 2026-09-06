@@ -189,6 +189,12 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, a.name).ok();
             return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) };
         }
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): pointer arithmetic
+        "PtrAdd#" => return emit_ptr_add(backend, out, v, args, indent),
+        "PtrSub#" => return emit_ptr_sub(backend, out, v, args, indent),
+        "PtrDiff#" => return emit_ptr_diff(backend, out, v, args, indent),
+        "PtrEq#" => return emit_ptr_eq(backend, out, v, args, indent),
+        "PtrLt#" => return emit_ptr_lt(backend, out, v, args, indent),
         _ => {}
     }
 
@@ -1513,6 +1519,83 @@ fn extract_type_from_expr(expr: &Expr) -> Option<Type> {
         Expr::Identifier(name) => Some(Type::Custom(name.clone())),
         _ => None,
     }
+}
+
+// ─── Pointer arithmetic intrinsics ──────────────────────────────────
+// 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): Ptr<T> arithmetic.
+// PtrAdd#/PtrSub# emit GEP inbounds (out-of-bounds = UB caught by LLVM).
+// PtrDiff# computes byte distance between two pointers from the same allocation.
+// PtrEq#/PtrLt# are simple pointer comparisons.
+
+fn emit_ptr_add(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr_reg = backend.emit_expr(out, &args[0], indent);
+    let offset = backend.emit_expr(out, &args[1], indent);
+    let inner_ty = match &ptr_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = backend.llvm_type(&inner_ty);
+    let gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i64 {}", indent, gep, llvm_ty, ptr_reg.name, offset.name).ok();
+    BTypedRegister { name: gep, ty: ptr_reg.ty.clone() }
+}
+
+fn emit_ptr_sub(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr_reg = backend.emit_expr(out, &args[0], indent);
+    let offset = backend.emit_expr(out, &args[1], indent);
+    let inner_ty = match &ptr_reg.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = backend.llvm_type(&inner_ty);
+    let neg_offset = backend.fun.gen_reg();
+    writeln!(out, "{}{} = sub i64 0, {}", indent, neg_offset, offset.name).ok();
+    let gep = backend.fun.gen_reg();
+    writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i64 {}", indent, gep, llvm_ty, ptr_reg.name, neg_offset).ok();
+    BTypedRegister { name: gep, ty: ptr_reg.ty.clone() }
+}
+
+fn emit_ptr_diff(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr1 = backend.emit_expr(out, &args[0], indent);
+    let ptr2 = backend.emit_expr(out, &args[1], indent);
+    let inner_ty = match &ptr1.ty { Type::Ptr(i) => *i.clone(), _ => Type::int() };
+    let llvm_ty = backend.llvm_type(&inner_ty);
+    // ptrtoint both to i64, subtract, then divide by element size
+    let addr1 = backend.fun.gen_reg();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr1, ptr1.name).ok();
+    let addr2 = backend.fun.gen_reg();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, addr2, ptr2.name).ok();
+    let byte_diff = backend.fun.gen_reg();
+    writeln!(out, "{}{} = sub i64 {}, {}", indent, byte_diff, addr1, addr2).ok();
+    // Divide by element size to get element count
+    let elem_size = backend.fun.gen_reg();
+    let size_val = crate::backend::llvm::types::type_size(&inner_ty, backend.ctx.type_universe.as_ref()).max(1);
+    writeln!(out, "{}{} = add i64 0, {}", indent, elem_size, size_val).ok();
+    writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, byte_diff, elem_size).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+fn emit_ptr_eq(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr1 = backend.emit_expr(out, &args[0], indent);
+    let ptr2 = backend.emit_expr(out, &args[1], indent);
+    writeln!(out, "{}{} = icmp eq ptr {}, {}", indent, v, ptr1.name, ptr2.name).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::bool_() }
+}
+
+fn emit_ptr_lt(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr1 = backend.emit_expr(out, &args[0], indent);
+    let ptr2 = backend.emit_expr(out, &args[1], indent);
+    writeln!(out, "{}{} = icmp ult ptr {}, {}", indent, v, ptr1.name, ptr2.name).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::bool_() }
 }
 
 

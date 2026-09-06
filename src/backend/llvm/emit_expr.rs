@@ -413,7 +413,7 @@ impl LlvmBackend {
                             }
                             // 2026-08-13 (Phase 5): an `atomic` self-slot reads
                             // with an atomic load.
-                            if self.is_atomic_field(self_type, name) {
+                            if let Some(ordering) = self.atomic_field_ordering(self_type, name) {
                                 let alt = if matches!(slot_ty, Type::Ptr(_)) {
                                     format!("i{}", self.ctx.int_bits)
                                 } else {
@@ -421,7 +421,7 @@ impl LlvmBackend {
                                 };
                                 let asz = types::type_size(&slot_ty, self.ctx.type_universe.as_ref()).max(1);
                                 let aval = self.fun.gen_reg();
-                                writeln!(out, "{}{} = load atomic {}, ptr {} seq_cst, align {}", indent, aval, alt, gep, asz).ok();
+                                writeln!(out, "{}{} = load atomic {}, ptr {} {}, align {}", indent, aval, alt, gep, ordering, asz).ok();
                                 return TypedRegister { name: aval, ty: slot_ty };
                             }
                             // 2026-08-13 (pack): a packed self-slot reads its
@@ -2386,7 +2386,7 @@ impl LlvmBackend {
             // bit-slice into the byte image (L-M-S for sub-byte fields).
             // 2026-08-13 (Phase 5): an `atomic` struct-literal field is
             // written with an atomic store (checked before the packed path).
-            if self.is_atomic_field(type_name, field_name) {
+            if let Some(ordering) = self.atomic_field_ordering(type_name, field_name) {
                 let alt = if matches!(val.ty, Type::Ptr(_)) {
                     format!("i{}", self.ctx.int_bits)
                 } else {
@@ -2397,7 +2397,7 @@ impl LlvmBackend {
                     out, indent, &alt, &val.name, Some(val.ty.clone()),
                     self.ctx.type_universe.clone().as_ref(),
                 );
-                writeln!(out, "{}  store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, ptr_reg, asz).ok();
+                writeln!(out, "{}  store atomic {} {}, ptr {} {}, align {}", indent, alt, store_val, ptr_reg, ordering, asz).ok();
                 continue;
             }
             if let Some(pf) = self.packed_field(type_name, field_name) {
@@ -2566,7 +2566,7 @@ impl LlvmBackend {
         // 2026-08-13 (Phase 5): an `atomic` field reads with an atomic load
         // (SPEC §8.2). Tried before the packed path — a whole-byte packed
         // atomic field is an atomic load of the field's LLVM type.
-        if self.is_atomic_field(&type_name, name) {
+        if let Some(ordering) = self.atomic_field_ordering(&type_name, name) {
             let lt = if matches!(field_ty, Type::Ptr(_)) {
                 format!("i{}", self.ctx.int_bits)
             } else {
@@ -2574,7 +2574,7 @@ impl LlvmBackend {
             };
             let sz = types::type_size(&field_ty, self.ctx.type_universe.as_ref()).max(1);
             let val = self.fun.gen_reg();
-            writeln!(out, "{}  {} = load atomic {}, ptr {} seq_cst, align {}", indent, val, lt, gep, sz).ok();
+            writeln!(out, "{}  {} = load atomic {}, ptr {} {}, align {}", indent, val, lt, gep, ordering, sz).ok();
             return TypedRegister { name: val, ty: field_ty.clone() };
         }
         // 2026-08-13 (pack): a packed field reads its bit-slice out of the
@@ -3458,7 +3458,7 @@ impl LlvmBackend {
                     indent, ptr_reg, alloca_reg, offset).ok();
                 // 2026-08-13 (Phase 5): an `atomic` array element field is
                 // written with an atomic store (before the packed path).
-                if self.is_atomic_field(type_name, field_name) {
+                if let Some(ordering) = self.atomic_field_ordering(type_name, field_name) {
                     let alt = if matches!(val.ty, Type::Ptr(_)) {
                         format!("i{}", self.ctx.int_bits)
                     } else {
@@ -3469,7 +3469,7 @@ impl LlvmBackend {
                         out, indent, &alt, &val.name, Some(val.ty.clone()),
                         self.ctx.type_universe.clone().as_ref(),
                     );
-                    writeln!(out, "{}  store atomic {} {}, ptr {} seq_cst, align {}", indent, alt, store_val, ptr_reg, asz).ok();
+                    writeln!(out, "{}  store atomic {} {}, ptr {} {}, align {}", indent, alt, store_val, ptr_reg, ordering, asz).ok();
                     continue;
                 }
                 // 2026-08-13 (pack): packed elements store field bit-slices.
@@ -3602,12 +3602,15 @@ impl LlvmBackend {
         }
     }
 
-    /// 2026-08-13 (Phase 5): whether a struct field is declared `atomic`.
-    /// Keyed `<type>.<field>` (registration populated the set from the
-    /// parser's structured `atomic_fields` carrier).
-    pub(crate) fn is_atomic_field(&self, type_name: &str, field_name: &str) -> bool {
-        self.ctx.atomic_fields.contains(&format!("{}.{}", type_name, field_name))
-    }
+/// 2026-08-13 (Phase 5): whether a struct field is declared `atomic`.
+/// Keyed `<type>.<field>` (registration populated the map from the
+/// parser's structured `atomic_fields` carrier). Returns the LLVM ordering
+/// string ("seq_cst", "unordered", "acquire", "release", "acq_rel") if
+/// atomic — resolved eagerly to `&'static str` so callers never hold a
+/// borrow into `self.ctx` across mutation.
+pub(crate) fn atomic_field_ordering(&self, type_name: &str, field_name: &str) -> Option<&'static str> {
+    self.ctx.atomic_fields.get(&format!("{}.{}", type_name, field_name)).map(|s| ordering_to_llvm(s))
+}
 
     /// 2026-08-13 (pack, layout-keywords plan Phase 2): the packed slice for
     /// one field, or None when the struct is not packed. The single authority
@@ -6369,6 +6372,19 @@ pub(crate) fn member_briev_name(m: &crate::ast::TopLevel) -> &str {
         crate::ast::TopLevel::Definition(d) => &d.name,
         crate::ast::TopLevel::TypeDefOperator(d) => &d.name,
         _ => "",
+    }
+}
+
+/// 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): convert an atomic
+/// ordering keyword to its LLVM IR ordering string. `seq` is the default
+/// (backward compatible with the pre-ordering behavior).
+pub(crate) fn ordering_to_llvm(ordering: &str) -> &'static str {
+    match ordering {
+        "relaxed" => "unordered",
+        "acquire" => "acquire",
+        "release" => "release",
+        "bartered" => "acq_rel",
+        _ => "seq_cst",
     }
 }
 

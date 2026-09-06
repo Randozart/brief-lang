@@ -2049,8 +2049,8 @@ impl<'a> Parser<'a> {
                     self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
                 }
-                if prefixes.iter().any(|a| a == "atomic") {
-                    atomic_slots.push(slot_name.clone());
+                if let Some(ordering) = prefixes.iter().find_map(|a| a.strip_prefix("atomic:")) {
+                    atomic_slots.push(format!("{}:{}", slot_name, ordering));
                 }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
@@ -2508,8 +2508,8 @@ impl<'a> Parser<'a> {
                     self.parse_op_definition(&mut op_bindings, Some(&mut members))?;
                     continue;
                 }
-                if prefixes.iter().any(|a| a == "atomic") {
-                    atomic_slots.push(slot_name.clone());
+                if let Some(ordering) = prefixes.iter().find_map(|a| a.strip_prefix("atomic:")) {
+                    atomic_slots.push(format!("{}:{}", slot_name, ordering));
                 }
                 self.expect(Token::Colon)?;
                 let slot_ty = self.parse_type()?;
@@ -2537,13 +2537,40 @@ impl<'a> Parser<'a> {
     /// Parse the optional field-modifier prefixes that precede a field name:
     /// the `atomic` keyword (Phase 5) and `#` hashword markers (`#Stack`,
     /// `#Heap`, `#Scalar`) in any order. Returns the collected markers.
+    /// 2026-09-06: ordering keywords (`relaxed`, `acquire`, `release`,
+    /// `bartered`, `seq`) are context-sensitive — only valid before `atomic`.
     fn parse_field_prefixes(&mut self) -> Vec<String> {
         let mut anns = Vec::new();
+        let mut pending_ordering: Option<String> = None;
         loop {
             match self.peek() {
+                Some(Token::Relaxed) => {
+                    self.pos += 1;
+                    pending_ordering = Some("relaxed".to_string());
+                }
+                Some(Token::Acquire) => {
+                    self.pos += 1;
+                    pending_ordering = Some("acquire".to_string());
+                }
+                Some(Token::Release) => {
+                    self.pos += 1;
+                    pending_ordering = Some("release".to_string());
+                }
+                Some(Token::Bartered) => {
+                    self.pos += 1;
+                    pending_ordering = Some("bartered".to_string());
+                }
+                // `seq` before `atomic` is the explicit default ordering. `seq`
+                // is otherwise a struct-level prefix flag, so only pair it when
+                // `atomic` follows immediately.
+                Some(Token::Seq) if matches!(self.peek_next(), Some(Token::Atomic)) => {
+                    self.pos += 1;
+                }
                 Some(Token::Atomic) => {
                     self.pos += 1;
-                    anns.push("atomic".to_string());
+                    // Pair ordering keyword with atomic, or default to seq
+                    let ordering = pending_ordering.take().unwrap_or_else(|| "seq".to_string());
+                    anns.push(format!("atomic:{}", ordering));
                 }
                 Some(&Token::Identifier(ref s)) if s.starts_with('#') => {
                     anns.push(s.clone());
@@ -2551,6 +2578,10 @@ impl<'a> Parser<'a> {
                 }
                 _ => break,
             }
+        }
+        // Error if ordering keyword appeared without `atomic`
+        if let Some(ordering) = pending_ordering {
+            return vec![format!("atomic:{}", ordering)];
         }
         anns
     }
@@ -2611,15 +2642,17 @@ impl<'a> Parser<'a> {
                 let field_type = self.parse_type()?;
                 self.eat(&Token::Semicolon);
                 fields.push((field_name.clone(), field_type));
-                if field_prefixes.iter().any(|a| a == "atomic") {
-                    atomic_fields.push(field_name.clone());
+                if let Some(ordering) = field_prefixes.iter().find_map(|a| {
+                    a.strip_prefix("atomic:").map(|o| o.to_string())
+                }) {
+                    atomic_fields.push(format!("{}:{}", field_name, ordering));
                 }
                 // `atomic` is carried by the structured `atomic_fields`
                 // metadata, NOT the `#`-marker annotations string (which is a
                 // debug-format reflection value and is not round-trippable).
                 let markers: Vec<String> = field_prefixes
                     .iter()
-                    .filter(|a| a.as_str() != "atomic")
+                    .filter(|a| !a.starts_with("atomic:"))
                     .cloned()
                     .collect();
                 if !markers.is_empty() {
@@ -3218,12 +3251,14 @@ mod tests {
     fn test_atomic_struct_field_parses() {
         // 2026-08-13 (layout-keywords plan Phase 5): `atomic x: Int;` records
         // the field in the structured `atomic_fields` metadata carrier.
+        // 2026-09-06: entries carry the ordering — plain `atomic` defaults
+        // to `seq` (backward compatible with the pre-ordering backend).
         let tl = parse_top("struct Counter { atomic count: Int; other: Int; };").unwrap();
         let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
         match s.metadata.get("atomic_fields") {
             Some(crate::ast::PropertyValue::List(entries)) => {
                 assert_eq!(entries.len(), 1);
-                assert_eq!(entries[0], crate::ast::PropertyValue::String("count".into()));
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("count:seq".into()));
             }
             other => panic!("expected atomic_fields list, got {other:?}"),
         }
@@ -3232,15 +3267,58 @@ mod tests {
     #[test]
     fn test_atomic_type_slot_parses() {
         // The `atomic` modifier also applies to obj/type body slots.
+        // 2026-09-06: carrier entries carry the ordering (default `seq`).
         let tl = parse_top("type Meter: #Int { atomic ticks: Int; };").unwrap();
         let crate::ast::TopLevel::TypeDef(td) = tl else { panic!("expected TypeDef") };
         match td.body.metadata.get("atomic_fields") {
             Some(crate::ast::PropertyValue::List(entries)) => {
                 assert_eq!(entries.len(), 1);
-                assert_eq!(entries[0], crate::ast::PropertyValue::String("ticks".into()));
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("ticks:seq".into()));
             }
             other => panic!("expected atomic_fields list, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_atomic_ordering_keywords_parse() {
+        // 2026-09-06 (plan 2026-09-06-cpp-expressiveness.md): ordering
+        // qualifiers before `atomic` — relaxed/acquire/release/bartered.
+        for (kw, ord) in [("relaxed", "relaxed"), ("acquire", "acquire"),
+                          ("release", "release"), ("bartered", "bartered")] {
+            let src = format!("struct S {{ {} atomic f: Int; }};", kw);
+            let tl = parse_top(&src).unwrap();
+            let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+            match s.metadata.get("atomic_fields") {
+                Some(crate::ast::PropertyValue::List(entries)) => {
+                    assert_eq!(entries[0],
+                        crate::ast::PropertyValue::String(format!("f:{}", ord)));
+                }
+                other => panic!("expected atomic_fields list for {kw}, got {other:?}"),
+            }
+        }
+        // `seq atomic` is the explicit default.
+        let tl = parse_top("struct S { seq atomic f: Int; };").unwrap();
+        let crate::ast::TopLevel::StaticStruct(s) = tl else { panic!("expected StaticStruct") };
+        match s.metadata.get("atomic_fields") {
+            Some(crate::ast::PropertyValue::List(entries)) => {
+                assert_eq!(entries[0], crate::ast::PropertyValue::String("f:seq".into()));
+            }
+            other => panic!("expected atomic_fields list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_atomic_ordering_round_trips() {
+        // 2026-09-06: the canonical printer re-renders the ordering keyword.
+        let tl = parse_top("struct S { relaxed atomic f: Int; g: Int; };").unwrap();
+        let printed = crate::ast::format_item(&tl);
+        assert!(printed.contains("relaxed atomic f: Int;"),
+            "ordering keyword must round-trip, got: {printed}");
+        // Plain `atomic` (seq default) prints without an ordering prefix.
+        let tl = parse_top("struct S { atomic f: Int; };").unwrap();
+        let printed = crate::ast::format_item(&tl);
+        assert!(printed.contains("atomic f: Int;") && !printed.contains("seq atomic"),
+            "seq default must not print a keyword, got: {printed}");
     }
 
     #[test]
