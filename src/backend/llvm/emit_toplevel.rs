@@ -2,6 +2,7 @@ use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, f32_to_f16_hex, llvm_type_byte_size, protocol_llvm_type, LlvmBackend, TypedRegister};
 use crate::type_universe::{ResolvedType, TypeUniverse};
+use crate::typechecker::defn_section_name;
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::LazyLock;
@@ -2771,7 +2772,14 @@ impl LlvmBackend {
         // Definitions never access @link trigger globals — they only
         // read/write through %state. argmemonly tells LLVM the function
         // only accesses memory through its pointer arguments.
-        writeln!(out, ") local_unnamed_addr #8 {{").ok();
+        // 2026-09-06 (Phase 8): the section(".name") placement — a define
+        // attribute (where the function's bytes live), consumed from the
+        // parser's section modifier. The no-alloc obligation is proven at
+        // the typecheck (check_section_proofs).
+        let section_attr = defn_section_name(d)
+            .map(|s| format!(" section \"{}\"", s))
+            .unwrap_or_default();
+        writeln!(out, ") local_unnamed_addr #8{} {{", section_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();

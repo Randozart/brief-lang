@@ -1285,6 +1285,7 @@ mod tests {
             name: "N".into(),
             ty: Type::int(),
             expr: Expr::Decimal(4),
+            section: None,
         }));
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),
@@ -1303,7 +1304,7 @@ mod tests {
         let mut items = vec![];
         state(&mut items);
         // const bound below crossover (would be Cpu in try mode)…
-        items.push(TopLevel::Constant(Constant { name: "nb".into(), ty: Type::int(), expr: Expr::Decimal(4) }));
+        items.push(TopLevel::Constant(Constant { name: "nb".into(), ty: Type::int(), expr: Expr::Decimal(4), section: None }));
         // …but the body is accel-keyword-marked and the policy is force → Gpu.
         let body = vec![Statement::Assign(
             Expr::Index(Box::new(Expr::Identifier("dv".into())), Box::new(Expr::Identifier("i".into()))),

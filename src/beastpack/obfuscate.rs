@@ -285,6 +285,7 @@ fn rename_toplevel(item: &TopLevel, map: &HashMap<String, String>) -> TopLevel {
             name: rename_string(&c.name, map),
             ty: c.ty.clone(),
             expr: rename_expr(&c.expr, map),
+            section: c.section.clone(),
         }),
         _ => item.clone(),
     }

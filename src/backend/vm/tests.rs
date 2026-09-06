@@ -77,6 +77,7 @@ fn test_const_reference_inlines_value() {
             name: "LIMIT".into(),
             ty: Type::int(),
             expr: Expr::Decimal(42),
+            section: None,
         }),
         TopLevel::Constant(Constant {
             name: "DERIVED".into(),
@@ -87,6 +88,7 @@ fn test_const_reference_inlines_value() {
                 Box::new(Expr::Identifier("LIMIT".into())),
                 Box::new(Expr::Decimal(2)),
             ),
+            section: None,
         }),
         defn(
             "go",
@@ -114,11 +116,13 @@ fn test_const_cycle_is_capability_error() {
             name: "A".into(),
             ty: Type::int(),
             expr: Expr::Identifier("B".into()),
+            section: None,
         }),
         TopLevel::Constant(Constant {
             name: "B".into(),
             ty: Type::int(),
             expr: Expr::Identifier("A".into()),
+            section: None,
         }),
         defn(
             "go",

@@ -4738,6 +4738,13 @@ pub fn check_program_with_target(
         }
     }
 
+    // 2026-09-06 (Phase 8, plan 2026-09-06-cpp-expressiveness.md): the
+    // section(".name") placement proofs. A sectioned defn runs where the
+    // default heap may not exist yet (boot code in .init, RAM-copied
+    // .ramfunc before relocation) — it and everything it reaches must not
+    // allocate. The proof is transitive over the program's call graph.
+    check_section_proofs(items, &mut errors);
+
     // 2026-08-06 (beginprogram plan): entry-loop validation — termination
     // (the goal must be provably reachable) and entry conflict (at most one
     // beginprogram node can be eligible at program start).
@@ -5332,11 +5339,144 @@ fn check_isr_handler(
     Ok(())
 }
 
+
+// ── section(".name") placement proofs ──────────────────────────────────
+// 2026-09-06 (Phase 8, plan 2026-09-06-cpp-expressiveness.md).
+
+/// Allocator/spawn intrinsics banned in section-placed code — a sectioned
+/// defn runs where the default heap may not exist yet (boot code in .init,
+/// RAM-copied handlers before relocation).
+const SECTION_BANNED_INTRINSICS: &[&str] = &[
+    "Malloc#", "Alloc#", "Realloc#", "Spawn#",
+];
+
+/// The transitive no-alloc proof for section(".name") defns. Any defn
+/// whose reachable callees allocate is rejected with the offending path
+/// and the fix.
+fn check_section_proofs(items: &[TopLevel], errors: &mut Vec<TypeError>) {
+    // Name → body for every callable (defn/txn/node/asm), exported defns
+    // seen through the export wrapper.
+    let mut bodies: std::collections::HashMap<&str, &[Statement]> =
+        std::collections::HashMap::new();
+    for item in items {
+        match item {
+            TopLevel::Definition(d) => { bodies.insert(d.name.as_str(), d.body.as_slice()); }
+            TopLevel::Transaction(t) => { bodies.insert(t.name.as_str(), t.body.as_slice()); }
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    bodies.insert(d.name.as_str(), d.body.as_slice());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Walk reachable callees from each sectioned defn (BFS over direct
+    // Expr::Call names); report the first offending path.
+    for item in items {
+        let (name, section, body) = match item {
+            TopLevel::Definition(d) => {
+                let Some(section) = defn_section_name(d) else { continue };
+                (d.name.clone(), section, d.body.as_slice())
+            }
+            TopLevel::Export(e) => {
+                if let TopLevel::Definition(d) = e.inner.as_ref() {
+                    let Some(section) = defn_section_name(d) else { continue };
+                    (d.name.clone(), section, d.body.as_slice())
+                } else { continue; }
+            }
+            _ => continue,
+        };
+        let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut queue: Vec<(&str, Vec<String>)> = vec![(name.as_str(), vec![name.clone()])];
+        while let Some((callee, path)) = queue.pop() {
+            if !visited.insert(callee) { continue; }
+            let Some(stmts) = bodies.get(callee) else { continue };
+            for expr in collect_body_exprs(stmts) {
+                if let Expr::Call(callee_name, _, _) = expr {
+                    if SECTION_BANNED_INTRINSICS.contains(&callee_name.as_str()) {
+                        let mut full_path = path.clone();
+                        full_path.push(callee_name.clone());
+                        errors.push(TypeError::InvalidOperation {
+                            operation: format!(
+                                "section(\"{}\") defn '{}' reaches '{}'",
+                                section, name, callee_name),
+                            type_name: format!(
+                                "section-placed code runs where the default heap may \
+                                 not exist yet — '{}' (reachable via {}) must not \
+                                 allocate. Remove the allocation from the reachable \
+                                 path, or drop the section placement.",
+                                callee_name, full_path.join(" -> ")),
+                        });
+                    } else if bodies.contains_key(callee_name.as_str()) {
+                        let mut next_path = path.clone();
+                        next_path.push(callee_name.clone());
+                        queue.push((callee_name.as_str(), next_path));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The section(".name") placement of a defn, from its modifiers (the
+/// parser carries the prefix as an Annotation with a Quoted value).
+pub(crate) fn defn_section_name(d: &crate::ast::top::Definition) -> Option<String> {
+    d.modifiers.iter().find_map(|a| {
+        if a.name != "section" { return None; }
+        match &a.value {
+            Some(crate::ast::Expr::Quoted(bytes)) => {
+                Some(String::from_utf8_lossy(bytes).to_string())
+            }
+            _ => None,
+        }
+    })
+}
+
+/// Every expression reachable in a statement list (the same walk shape as
+/// isr_body_exprs, shared here for the section proof).
+fn collect_body_exprs(stmts: &[Statement]) -> Vec<&Expr> {
+    fn walk<'a>(stmts: &'a [Statement], out: &mut Vec<&'a Expr>) {
+        for stmt in stmts {
+            match stmt {
+                Statement::Assign(lhs, rhs) => { out.push(lhs); out.push(rhs); }
+                Statement::Let { expr: Some(e), .. } => out.push(e),
+                Statement::Expression(e) => out.push(e),
+                Statement::Term(Some(e)) | Statement::EndProgram(Some(e))
+                | Statement::Rollback(Some(e)) | Statement::Check(e) | Statement::Gate(e) => out.push(e),
+                Statement::Guarded(g, body) => { out.push(g); walk(body, out); }
+                Statement::Block(body)
+                | Statement::Defer(body)
+                | Statement::Mutex(body)
+                | Statement::SyncBlock(body) => walk(body, out),
+                Statement::Foreach { list, body, .. } => { out.push(list); walk(body, out); }
+                Statement::Barrier { body, .. } => walk(body, out),
+                Statement::TrgBinding { instance, .. } => out.push(instance),
+                Statement::Match { expr, arms } => {
+                    out.push(expr);
+                    for arm in arms {
+                        walk(&arm.body, out);
+                    }
+                }
+                Statement::InlineDefn(d) => walk(&d.body, out),
+                Statement::InlineTxn(t) => {
+                    walk(&t.body, out);
+                    out.push(&t.contract.pre_condition);
+                    out.push(&t.contract.post_condition);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(stmts, &mut out);
+    out
+}
+
 /// Collect every expression reachable in an ISR body (complete statement
 /// walk — Let inits, Foreach lists, Defer/Mutex/Barrier bodies, match arms).
 fn isr_body_exprs(stmts: &[Statement]) -> Vec<&Expr> {
-    fn walk<'a>(stmts: &'a [Statement], out: &mut Vec<&'a Expr>) {
-        for stmt in stmts {
+    fn walk<'a>(stmts: &'a [Statement], out: &mut Vec<&'a Expr>) {        for stmt in stmts {
             match stmt {
                 Statement::Assign(lhs, rhs) => { out.push(lhs); out.push(rhs); }
                 Statement::Let { expr: Some(e), .. } => out.push(e),
@@ -8905,5 +9045,74 @@ type MyHalf : Float { spec MaxBits: 16; };
 let x: MyHalf = 5.9604644775390625e-8;
 "#)
         .expect("the smallest exact f16 subnormal (2^-24) must be admitted");
+    }
+}
+
+#[cfg(test)]
+mod section_proof_tests {
+    use super::*;
+
+    fn check(src: &str) -> Result<(), Vec<TypeError>> {
+        let tokens = crate::lexer::tokenize(src).unwrap();
+        let mut p = crate::parser::Parser::new(tokens, src);
+        let mut items = p.parse_program().unwrap();
+        let universe = crate::type_universe::TypeUniverse::new();
+        check_program(&mut items, &universe)
+    }
+
+    #[test]
+    fn section_defn_direct_alloc_rejected() {
+        // section-placed code runs where the default heap may not exist —
+        // a direct Malloc# in the body is rejected with the reachable path.
+        let src = "section(\".init\") defn startup() -> Int {\n\
+                   let p = Malloc#(8);\n\
+                   term 42;\n\
+                   };\n\
+                   node tick [true][n == 42] { n = startup(); term; };\n\
+                   let n: Int = 0;\n";
+        let e = check(src);
+        assert!(e.is_err(), "direct alloc in a sectioned defn must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("startup -> Malloc#"), "path in error, got: {msg}");
+        assert!(msg.contains("must not allocate"), "fix in error, got: {msg}");
+    }
+
+    #[test]
+    fn section_defn_transitive_alloc_rejected() {
+        // The proof is transitive: startup -> mid -> helper -> Malloc#.
+        let src = "defn helper() -> Int {\n\
+                   let p = Malloc#(8);\n\
+                   term 1;\n\
+                   };\n\
+                   defn mid() -> Int {\n\
+                   term helper();\n\
+                   };\n\
+                   section(\".init\") defn startup() -> Int {\n\
+                   term mid();\n\
+                   };\n\
+                   node tick [true][n == 42] { n = startup(); term; };\n\
+                   let n: Int = 0;\n";
+        let e = check(src);
+        assert!(e.is_err(), "transitive alloc must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("startup -> mid -> helper -> Malloc#"),
+            "full reachable path in error, got: {msg}");
+    }
+
+    #[test]
+    fn section_defn_alloc_free_caller_typechecks() {
+        // A sectioned defn may CALL an allocating function's NON-reachable
+        // siblings freely; and a sectioned defn with no allocation typechecks.
+        let src = "section(\".init\") defn startup() -> Int {\n\
+                   term 42;\n\
+                   };\n\
+                   defn elsewhere() -> Int {\n\
+                   let p = Malloc#(8);\n\
+                   term 1;\n\
+                   };\n\
+                   node tick [true][n == 42] { n = startup(); term; };\n\
+                   let n: Int = 0;\n";
+        let e = check(src);
+        assert!(e.is_ok(), "unreachable allocators are fine: {:?}", e);
     }
 }

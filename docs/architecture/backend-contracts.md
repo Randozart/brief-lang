@@ -96,6 +96,12 @@ Hard-won in this effort; each one corresponds to a real defect class.
 > | When a program declares ISRs, state is the GLOBAL `@__briev_state`; every `%state = alloca` site aliases it via emit_state_base (zero-GEP) | ISR bodies (hardware stack) reading main's frame alloca — undefined `@field` loads |
 > | ISR bodies + contracts are liveness roots in compute_referenced_fields | ISR-only counters eliminated as dead → undefined `@field` references |
 > | `-> Void` definitions emit `ret void` | `ret void 0` — clang rejects |
+>
+> **2026-09-06 (Phase 8, section placement).** `section(".name")` on defn/const
+> emits the LLVM section attribute (`section "..."` on the define / on the
+> `@constant` global); the transitive no-alloc proof (check_section_proofs)
+> runs at the TYPECHECK — the backend consumes the placement without re-proving
+> it (frontend-driven dispatch).
 
 ---
 

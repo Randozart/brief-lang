@@ -2483,6 +2483,11 @@ impl LlvmBackend {
                 self.ctx
                     .constants
                     .insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
+                // 2026-09-06 (Phase 8): the section(".name") placement rides
+                // a side map — the constants map stays (ty, expr).
+                if let Some(ref s) = c.section {
+                    self.ctx.constant_sections.insert(c.name.clone(), s.clone());
+                }
             }
             if let TopLevel::Init(i) = item {
                 self.ctx.inits.insert(i.name.clone(), i.clone());
@@ -3577,7 +3582,13 @@ impl LlvmBackend {
                     }
                 },
             };
-            writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
+            // 2026-09-06 (Phase 8): the section(".name") placement on the
+            // global constant (a define attribute on data — where the bytes
+            // live). Sorted iteration keeps emission deterministic.
+            let const_section = self.ctx.constant_sections.get(name)
+                .map(|s| format!(" section \"{}\"", s))
+                .unwrap_or_default();
+            writeln!(out, "@{} = constant {} {}{}", name, llvm_ty, val_str, const_section).ok();
         }
         if !self.ctx.constants.is_empty() { writeln!(out).ok(); }
 

@@ -1948,6 +1948,7 @@ mod tests {
             name: "total".to_string(),
             ty: Type::int(),
             expr: int(100),
+            section: None,
         })]);
         let ra = RegionAnalyzer::analyze(&program);
         assert_eq!(ra.classification_of("total"), Some(VarClass::Pure));
@@ -1973,6 +1974,7 @@ mod tests {
             name: name.to_string(),
             ty: Type::int(),
             expr: int(val),
+            section: None,
         })
     }
 

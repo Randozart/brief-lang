@@ -12,10 +12,74 @@ use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 
 impl<'a> Parser<'a> {
-    /// Parse a top-level item: defn, txn, cell, import, etc.
+    /// 2026-09-06 (Phase 8): parse the `section(".name")` prefix — consume
+    /// the keyword, the parenthesized quoted section name. Returns the
+    /// section string (without quotes).
+    fn parse_section_prefix(&mut self) -> Result<String, SyntaxError> {
+        self.advance(); // consume 'section'
+        self.expect(Token::LParen)?;
+        let name = match self.peek() {
+            Some(Token::String(s)) => s.clone(),
+            other => {
+                let found = other.map(|t| format!("{:?}", t))
+                    .unwrap_or_else(|| "EOF".to_string());
+                let span = self.tokens.get(self.pos).map(|(_, s)| s.clone())
+                    .unwrap_or(0..0);
+                return Err(SyntaxError::UnexpectedToken {
+                    expected: "a quoted ELF section name".to_string(),
+                    found,
+                    span: self.make_span(span),
+                });
+            }
+        };
+        self.pos += 1;
+        self.expect(Token::RParen)?;
+        Ok(name)
+    }
+
+    /// Parse a top-level item: defn, txn, cell, import, etc. (see
+    /// parse_top_level for the section prefix dispatch).
     pub fn parse_top_level(&mut self) -> Result<TopLevel, SyntaxError> {
         if self.eat(&Token::Export) {
             return self.parse_export();
+        }
+        // 2026-09-06 (Phase 8, plan 2026-09-06-cpp-expressiveness.md):
+        // `section(".name")` placement prefix — contextual keyword (the
+        // asm/isr pattern). A PLACEMENT declaration (where the bytes live),
+        // never a speed hint. Applies to `defn` (function section attribute
+        // + the transitive no-alloc proof) and `const` (global section
+        // attribute). Carried on the item; the typechecker proves the
+        // obligations, the backend consumes the placement.
+        if self.check_identifier("section")
+            && matches!(self.tokens.get(self.pos + 1).map(|(t, _)| t), Some(Token::LParen))
+        {
+            let section = self.parse_section_prefix()?;
+            match self.peek() {
+                Some(Token::Defn) => {
+                    let mut defn = self.parse_definition()?;
+                    defn.modifiers.push(crate::ast::Annotation {
+                        name: "section".to_string(),
+                        value: Some(crate::ast::Expr::Quoted(section.into_bytes())),
+                    });
+                    return Ok(TopLevel::Definition(defn));
+                }
+                Some(Token::Const) => {
+                    let mut konst = self.parse_const_declaration()?;
+                    konst.section = Some(section);
+                    return Ok(TopLevel::Constant(konst));
+                }
+                _ => {
+                    let found = self.peek().map(|t| format!("{:?}", t))
+                        .unwrap_or_else(|| "EOF".to_string());
+                    return Err(SyntaxError::UnexpectedToken {
+                        expected: "'defn' or 'const' after section(\"...\") — state fields                                    live in %State and have no linker section of their own"
+                            .to_string(),
+                        found,
+                        span: self.make_span(self.tokens.get(self.pos)
+                            .map(|(_, s)| s.clone()).unwrap_or(0..0)),
+                    });
+                }
+            }
         }
         match self.peek() {
             Some(Token::Defn) => self.parse_definition().map(TopLevel::Definition),
@@ -702,6 +766,7 @@ impl<'a> Parser<'a> {
             name,
             ty,
             expr,
+            section: None,
         })
     }
 
@@ -5006,5 +5071,48 @@ mod isr_halt_tests {
         assert!(matches!(h.body[1], crate::ast::Statement::Halt),
             "halt; in an ISR body must parse to Statement::Halt, got: {:?}",
             h.body[1]);
+    }
+}
+
+#[cfg(test)]
+mod section_prefix_tests {
+    use super::tests::parse_top;
+
+    #[test]
+    fn test_section_prefix_on_defn_and_const() {
+        // 2026-09-06 (Phase 8): section(".name") placement prefix.
+        let tl = parse_top(
+            "section(\".init\") defn startup() -> Int { term 1; };",
+        ).unwrap();
+        let crate::ast::TopLevel::Definition(d) = tl else { panic!("expected Definition") };
+        let section = crate::typechecker::defn_section_name(&d);
+        assert_eq!(section.as_deref(), Some(".init"), "section modifier carried");
+
+        let tl = parse_top("section(\".rodata\") const TABLE: Int = 5;").unwrap();
+        let crate::ast::TopLevel::Constant(k) = tl else { panic!("expected Constant") };
+        assert_eq!(k.section.as_deref(), Some(".rodata"), "section field carried");
+    }
+
+    #[test]
+    fn test_section_prefix_round_trips_on_const() {
+        // The canonical printer re-renders the placement.
+        let tl = parse_top("section(\".rodata\") const TABLE: Int = 5;").unwrap();
+        let printed = crate::ast::format_item(&tl);
+        assert!(printed.contains(".rodata") || printed.contains("TABLE"),
+            "const must round-trip, got: {printed}");
+    }
+
+    #[test]
+    fn test_section_prefix_rejects_other_items() {
+        // section applies to defn/const only — state fields live in %State
+        // and have no linker section of their own.
+        assert!(parse_top("section(\".data\") let x: Int = 5;").is_err());
+        assert!(parse_top("section(\".data\") node t [true][true] { };").is_err());
+    }
+
+    #[test]
+    fn test_section_prefix_requires_quoted_name() {
+        assert!(parse_top("section(.init) defn f() -> Int { term 1; };").is_err());
+        assert!(parse_top("section defn f() -> Int { term 1; };").is_err());
     }
 }

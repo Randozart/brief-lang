@@ -182,6 +182,10 @@ pub struct CompilerContext {
     /// init_state.
     pub obj_instance_inits: std::collections::HashMap<String, (String, Expr)>,
     pub constants: HashMap<String, (Type, Expr)>,
+    /// 2026-09-06 (Phase 8): the section(".name") placement per constant
+    /// (the parser carries it on the Constant item; the @constant global
+    /// emission reads it).
+    pub constant_sections: HashMap<String, String>,
     /// 2026-08-09 (init kind, Phase 2): runtime-seeded invariants, name → type
     /// + seeding form. Emitted as mutable globals (`@name = global ... 0`),
     /// seeded once in the pre-reactor phase (emit_init_state /
@@ -464,6 +468,7 @@ impl CompilerContext {
             instance_slots: std::collections::HashSet::new(),
             obj_instance_inits: std::collections::HashMap::new(),
             constants: HashMap::new(),
+            constant_sections: HashMap::new(),
             inits: HashMap::new(),
             struct_types: HashMap::new(),
             packed_structs: HashSet::new(),

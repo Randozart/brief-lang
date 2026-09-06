@@ -304,6 +304,7 @@ mod tests {
         let items = vec![
             TopLevel::Constant(crate::ast::top::Constant {
                 name: "pi".to_string(), ty: Type::float(), expr: Expr::Float(3.14),
+                section: None,
             }),
         ];
         let result = reorder_fields(&items);

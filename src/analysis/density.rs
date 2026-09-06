@@ -338,12 +338,15 @@ mod tests {
             field("p00"), field("p10"), field("p20"),
             TopLevel::Constant(crate::ast::Constant {
                 name: "a00".into(), ty: Type::Custom("Float".into()), expr: float_expr(1.0),
+                section: None,
             }),
             TopLevel::Constant(crate::ast::Constant {
                 name: "a01".into(), ty: Type::Custom("Float".into()), expr: float_expr(0.01),
+                section: None,
             }),
             TopLevel::Constant(crate::ast::Constant {
                 name: "a02".into(), ty: Type::Custom("Float".into()), expr: float_expr(0.0),
+                section: None,
             }),
             txn("propagate", vec![
                 let_stmt("nx0", Some(Type::Custom("Float".into())),

@@ -96,6 +96,7 @@ pub fn document_to_program_flags(doc: &DbrievDocument, name: &str, use_lazy: boo
             name: name.to_string(),
             ty,
             expr: value,
+                section: None,
         }));
     }
 
@@ -156,6 +157,7 @@ fn flatten_peripheral_constants(doc: &DbrievDocument) -> Vec<ast::TopLevel> {
                 name: format!("{}_base", key),
                 ty: ast::Type::int(),
                 expr: ast::Expr::Decimal(base.try_into().unwrap()),
+                section: None,
             }));
 
             // Emit end constant (base + size) if size is known
@@ -166,6 +168,7 @@ fn flatten_peripheral_constants(doc: &DbrievDocument) -> Vec<ast::TopLevel> {
                     name: format!("{}_end", key),
                     ty: ast::Type::int(),
                     expr: ast::Expr::Decimal((base + sz).try_into().unwrap()),
+                    section: None,
                 }));
             }
 
@@ -198,6 +201,7 @@ fn flatten_peripheral_constants(doc: &DbrievDocument) -> Vec<ast::TopLevel> {
                         name: const_name,
                         ty: ast::Type::int(),
                         expr: ast::Expr::Decimal((base + off).try_into().unwrap()),
+                        section: None,
                     }));
                 }
             }

@@ -296,7 +296,7 @@ fn parse_constant(parts: &[SExpr]) -> Result<TopLevel, String> {
     let name = tag(parts, 1)?.to_string();
     let ty = parse_type(&parts[2])?;
     let expr = parse_expr(&parts[3])?;
-    Ok(TopLevel::Constant(Constant { name, ty, expr }))
+    Ok(TopLevel::Constant(Constant { name, ty, expr, section: None }))
 }
 
 /// 2026-08-09: `(init NAME (:bound ...)? TYPE (=expr EXPR)? STMT*)`

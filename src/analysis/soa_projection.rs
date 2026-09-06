@@ -192,6 +192,7 @@ mod tests {
             name: "count".to_string(),
             ty: crate::ast::Type::int(),
             expr: Expr::Decimal(0),
+            section: None,
         });
         let items = vec![bx0, count];
         let proj = serialize_soa_projection(&items);

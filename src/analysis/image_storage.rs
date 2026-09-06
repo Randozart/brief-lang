@@ -265,6 +265,7 @@ mod tests {
                 name: "W".into(),
                 ty: Type::int(),
                 expr: Expr::Decimal(64),
+                section: None,
             }),
             TopLevel::StateDecl(StateDecl {
                 name: "i".into(),

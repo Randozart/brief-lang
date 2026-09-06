@@ -317,21 +317,29 @@ atomic ready: Bool;               // same as seq (backward compatible)
 
 **Default:** No keyword = `seq` (backward compatible, zero changes to existing code).
 
-### 4.4 Linker Sections
+### 4.4 Linker Sections — IMPLEMENTED (2026-09-06, scoped)
 
-**Strategy keyword:**
+**Implemented shape** (general `section` slice; the ISR vector table emission
+landed with the ISR plan):
 
 ```briev
-section(".isr_vector") isr_entry: Ptr<Bits<8>>;
-section(".init") defn startup(): Void { ... };
-section(".data") let globals: Int = 42;
-section(".bss") let buffer: Byte[4096];
+section(".init") defn startup() -> Int { ... };
+section(".rodata") const TABLE: Int = 5;
 ```
 
-**Proof obligations:**
-- `section` on `defn`: must not allocate, must not call non-`section` functions (transitive check)
-- `section` on `let`: initial value must be compile-time constant
-- `section(".isr_vector")`: must be `Ptr<T>` or fixed-size `Byte[N]`
+- `section` is a contextual keyword prefix (the asm/isr pattern) taking a
+  quoted ELF section name; applies to `defn` (define attribute) and `const`
+  (global attribute).
+- **Scoping decision:** `let`/state-field placement is NOT implemented —
+  state lives in `%State` (one allocation) and has no per-field linker
+  section. The per-field story needs the state decomposition feature, not a
+  keyword. `section(".isr_vector")` as a user prefix is unnecessary — the
+  ISR mechanism row already owns the table's section.
+- **Proof obligation implemented:** a sectioned defn and its transitive
+  callees must not allocate (`Malloc#`/`Alloc#`/`Realloc#`/`Spawn#`);
+  `check_section_proofs` walks the program call graph and the error names
+  the reachable path. The const-init obligation is structural (`const`
+  initializers are compile-time by construction).
 
 ### 4.5 ISR Handlers
 

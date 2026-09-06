@@ -419,6 +419,27 @@ needs your input (it warns and asks for a keyword). Rules:
   category and `docs/plans/2026-08-09-init-kind-invariant.md` for the full axis
   table.
 
+**Placement keywords (2026-09-06).** `section(".name")` is a placement
+declaration — where the function's or constant's bytes live in the output
+image — never a speed hint:
+
+```briev
+section(".init") defn startup() -> Int { ... };
+section(".rodata") const TABLE: Int = 5;
+```
+
+- Applies to `defn` and `const`. State fields live in `%State` (one
+  allocation) and have no per-field linker section — a `section` prefix on
+  anything else is a parse error.
+- **Proof obligations (compile time):** a sectioned `defn` runs where the
+  default heap may not exist yet (boot code in `.init`, RAM-copied handlers
+  before relocation) — it and everything it REACHES must not allocate
+  (`Malloc#`/`Alloc#`/`Realloc#`/`Spawn#` are banned; the proof is transitive
+  over the program's call graph, and the error names the reachable path,
+  e.g. `startup -> mid -> helper -> Malloc#`).
+- The compiler emits the placement as an LLVM section attribute on the
+  function/global; the section name is arbitrary and target-linker-owned.
+
 **Storage-strategy markers.** Where the compiler cannot select a single best
 storage strategy, the programmer classifies explicitly:
 

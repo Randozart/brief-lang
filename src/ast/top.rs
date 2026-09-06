@@ -684,6 +684,11 @@ pub struct Constant {
     pub name: String,
     pub ty: Type,
     pub expr: Expr,
+    /// 2026-09-06 (Phase 8, plan 2026-09-06-cpp-expressiveness.md): the
+    /// linker section for the emitted global — `section(".rodata")
+    /// const X: Int = 5;`. Placement is a declaration (where the bytes
+    /// live), never a speed hint. None = the default section.
+    pub section: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

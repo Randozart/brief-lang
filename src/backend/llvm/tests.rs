@@ -2666,6 +2666,7 @@ fn make_wake_program_no_triggers() -> Vec<TopLevel> {
             name: "N".to_string(),
             ty: Type::int(),
             expr: Expr::Decimal(100),
+            section: None,
         }),
         TopLevel::Transaction(Transaction {
             name: "work".to_string(),
@@ -2732,6 +2733,7 @@ fn make_exit_program(exit_expr: Option<Expr>, is_wake: bool) -> Vec<TopLevel> {
             name: "N".to_string(),
             ty: Type::int(),
             expr: Expr::Decimal(100),
+            section: None,
         }),
     ];
     // 2026-07-14: Create a trigger when is_wake is set so has_wake_triggers
@@ -2897,6 +2899,7 @@ fn make_dead_txn_program(with_reactive_node: bool) -> Vec<TopLevel> {
             name: "N".to_string(),
             ty: Type::int(),
             expr: Expr::Decimal(4),
+            section: None,
         }),
     ];
     if with_reactive_node {
@@ -3467,6 +3470,7 @@ fn make_chain_program(
             name: name.to_string(),
             ty: Type::int(),
             expr: Expr::Decimal(*val),
+            section: None,
         }));
     }
     for (name, val) in states {
@@ -4821,6 +4825,7 @@ fn test_density_consumer_downgrades_dense_txn() {
             name: n.to_string(),
             ty: Type::Custom("Float".to_string()),
             expr: Expr::Float(v),
+            section: None,
         }));
     }
     let mul = |l: Expr, r: Expr| Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r));
@@ -8670,4 +8675,23 @@ fn test_halt_x86_triple_emits_trap() {
     let ir = backend.generate(&program, None);
     assert!(ir.contains("call void @llvm.trap()"), "trap on non-ARM triples:\n{ir}");
     assert!(!ir.contains("wfi"), "no wfi under an x86 triple");
+}
+
+#[test]
+fn test_section_placement_ir() {
+    // 2026-09-06 (Phase 8): section(".name") emits define/global attributes.
+    let src = "section(\".init\") defn startup() -> Int { term 42; };\n\
+               section(\".rodata\") const TABLE: Int = 5;\n\
+               node tick [true][n == 42] { n = startup(); term; };\n\
+               let n: Int = 0;\n";
+    let program = parse_isr_program(src);
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("@TABLE = constant i64 5 section \".rodata\""),
+        "const global carries its section:\n{ir}");
+    assert!(ir.contains("section \".init\""),
+        "sectioned defn carries its section:\n{ir}");
+    // A section-less defn must NOT carry a section attribute.
+    assert!(!ir.contains("section \".rodata\" }"), "no stray attrs");
 }

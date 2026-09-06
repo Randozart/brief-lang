@@ -939,16 +939,19 @@ mod tests {
                 name: "M".into(),
                 expr: num(m),
                 ty: Type::Custom("Int".into()),
+                section: None,
             }),
             TopLevel::Constant(crate::ast::Constant {
                 name: "N".into(),
                 expr: num(n),
                 ty: Type::Custom("Int".into()),
+                section: None,
             }),
             TopLevel::Constant(crate::ast::Constant {
                 name: "K".into(),
                 expr: num(k),
                 ty: Type::Custom("Int".into()),
+                section: None,
             }),
         ];
 
