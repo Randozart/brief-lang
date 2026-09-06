@@ -61,7 +61,7 @@ File extension determines which backend (and `CompilationTarget`) is used:
 | Extension | Backend | Notes |
 |-----------|---------|-------|
 | `.bv`/`.sbv` | LLVM | Standard native binary |
-| `.ebv`/`.sebv` | LLVM | Bare-metal LLVM, `halt#` emits `wfi` |
+| `.ebv`/`.sebv` | LLVM | Bare-metal LLVM, `halt;` emits the `wfi` spin loop on ARM/RISC-V triples (trap abort elsewhere) |
 | `.rbv`/`.srbv` | Webstack | Rendered Briev → wasm32 via `LlvmBackend(wasm32)` + JS shim |
 | `.cbv` | CIRCT | Pure logic graph → MLIR |
 | `.abv` | SPIR-V | Standalone GPU-kernel binaries (`spirv/mod.rs`) |
@@ -97,9 +97,9 @@ activates embedded mode:
 | Feature | Status | Detail |
 |---------|--------|--------|
 | `CompilationTarget::Embedded` | ✅ | Typechecker uses embedded-specific rules |
-| `Intrinsic::Halt` | ✅ | `halt#()` emits `asm("wfi")` |
+| `halt;` statement | ✅ (2026-09-06) | the bare-metal stop — a `wfi` spin loop on ARM/RISC-V target triples, `llvm.trap`+`unreachable` elsewhere; interpreter raises `RuntimeError::Halt` (first drafted as the `Halt#` intrinsic, converted to a statement before commit — control flow is keyword surface, never an intrinsic) |
 | `is_embedded` flag | ✅ | `LlvmBackend.is_embedded: bool` + `with_embedded_mode()` builder |
-| `term!` → `wfi` | ✅ | `Statement::TermBang` emits `wfi` asm before `ret` in embedded mode |
+| `term!` → `wfi` | ❌ removed | `term!` no longer exists — `endprogram` is the process boundary (2026-08-06 plan); the halt primitive is the `Halt#()` intrinsic (2026-09-06) |
 | Static bump heap | ✅ | `@embedded_heap` (configurable via `ir-lowering arena_initial_size`, default 64KB) — `Malloc#`/`Alloc#`/`Free#` use it, no `@malloc`/`@free`/`@realloc` (2026-08-04, `f2b57043`) |
 | Heap types (String/List/…) | ✅ (warn) | Legal via the static arena; `check_embedded_restrictions` emits a `TargetWarning`, not an error (2026-08-04 — the old hard rejection was a `.ebv`/`.cbv` entanglement vestige; the heap rejection belongs to `.cbv`/CIRCT, not `.ebv`) |
 | Reject threading | ✅ | ThreadCreate, MutexLock, CondvarWait etc. produce `TargetError` |

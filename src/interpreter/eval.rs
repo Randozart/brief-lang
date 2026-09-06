@@ -1870,6 +1870,9 @@ pub fn eval_statement(
         }
         Statement::KeepHint(_) => Ok(Value::Void),
         Statement::Trap => Err(RuntimeError::Trap),
+        // 2026-09-06 (halt slice): the bare-metal stop — check mode reports
+        // it like the backend's wfi-spin/trap emission.
+        Statement::Halt => Err(RuntimeError::Halt),
         Statement::ArrowAssign { target, value, consume } => {
             let val = eval_expr(value, heap, bindings, functions)?;
             if let Some(t) = target.as_ref() {

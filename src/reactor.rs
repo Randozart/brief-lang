@@ -300,6 +300,7 @@ impl Reactor {
             // diagnostic stops the reactor (SPEC §8.8), mirroring the LLVM
             // `llvm.trap` + `unreachable` sequence.
             Statement::Trap => return Err(crate::interpreter::RuntimeError::Trap),
+            Statement::Halt => return Err(crate::interpreter::RuntimeError::Halt),
             Statement::Break => Ok(StmtResult::Break),
             Statement::Expression(expr) => {
                 interp.eval_expr(expr)?;

@@ -70,6 +70,12 @@ impl<'a> Parser<'a> {
                 self.eat(&Token::Semicolon);
                 Ok(Statement::Trap)
             }
+            // 2026-09-06 (halt slice): halt; — the bare-metal stop.
+            Some(Token::Halt) => {
+                self.pos += 1;
+                self.eat(&Token::Semicolon);
+                Ok(Statement::Halt)
+            }
             Some(Token::EndProgram) => self.parse_endprogram_statement(),
             Some(Token::Rollback) => self.parse_rollback_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),
@@ -811,4 +817,18 @@ mod tests {
         assert!(saw_mutex, "mutex block must parse");
         assert!(saw_barrier, "barrier block must parse");
     }
+
+    #[test]
+    fn test_halt_statement_parses_and_round_trips() {
+        // 2026-09-06 (halt slice): `halt;` parses to Statement::Halt and
+        // round-trips through the canonical printer (trap's sibling).
+        let tokens = crate::lexer::tokenize("defn f() -> Int { halt; term 1; };").unwrap();
+        let mut p = crate::parser::Parser::new(tokens, "");
+        let items = p.parse_program().unwrap();
+        let crate::ast::TopLevel::Definition(d) = &items[0] else { panic!("expected Definition") };
+        assert!(matches!(d.body[0], crate::ast::Statement::Halt), "halt; must parse to Statement::Halt");
+        let printed = crate::ast::format_item(&items[0]);
+        assert!(printed.contains("halt;"), "canonical form must round-trip, got: {printed}");
+    }
+
 }

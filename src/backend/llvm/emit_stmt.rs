@@ -1945,6 +1945,32 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             backend.fun.terminated = true;
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
+        // 2026-09-06 (halt slice): `halt;` — the bare-metal stop, trap's
+        // deliberate sibling. The wait instruction is TARGET knowledge —
+        // `wfi` only assembles on ARM/RISC-V (the same family dispatch the
+        // assembler chain uses); an x86-triple build takes the trap abort
+        // (loud, portable). The spin loop makes the halt survive spurious
+        // wakeups (a bare `wfi` returns on the next interrupt); the
+        // entry-branch pattern keeps the entry block predecessor-free.
+        // Either way the rest of the block is dead.
+        Statement::Halt => {
+            let t = &backend.ctx.target_triple;
+            let wait_family = ["arm", "thumb", "aarch64", "cortex", "riscv"]
+                .iter().any(|fam| t.contains(fam));
+            if wait_family {
+                let uid = backend.fun.txn_counter;
+                backend.fun.txn_counter += 1;
+                writeln!(out, "{}br label %halt_wait_{}", indent, uid).ok();
+                writeln!(out, "halt_wait_{}:", uid).ok();
+                writeln!(out, "  call void asm sideeffect \"wfi\", \"\"()").ok();
+                writeln!(out, "  br label %halt_wait_{}", uid).ok();
+            } else {
+                writeln!(out, "{}call void @llvm.trap()", indent).ok();
+            }
+            writeln!(out, "{}unreachable", indent).ok();
+            backend.fun.terminated = true;
+            TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
+        }
         // 2026-08-22 (Phase 8): yield; — a cancellation point. No-op in the
         // eager model; the concurrent scheduler replaces it with a suspend.
         Statement::Yield => {

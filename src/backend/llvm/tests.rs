@@ -8636,3 +8636,38 @@ fn test_isr_no_handlers_uses_plain_alloca() {
     assert!(ir.contains("%state = alloca %State"), "non-ISR programs keep the alloca");
     assert!(!ir.contains("@__briev_state"), "no shared-state global without handlers");
 }
+
+// ── halt; statement (2026-09-06 slice) ─────────────────────────────────
+
+#[test]
+fn test_halt_embedded_arm_emits_wfi_spin() {
+    // ARM-family triple → the wfi spin loop (survives spurious wakeups;
+    // entry-branch pattern keeps the entry block predecessor-free).
+    let src = "node tick [true][done == true] { done = true; halt; term; };\n\
+               let done: Bool = false;\n";
+    let program = parse_isr_program(src);
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(crate::type_universe::TypeUniverse::new())
+        .with_embedded_mode(true)
+        .with_target_triple("thumbv7em-none-eabihf");
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("br label %halt_wait_"), "branch into the wait loop:\n{ir}");
+    assert!(ir.contains("call void asm sideeffect \"wfi\", \"\"()"), "the wfi wait");
+    assert!(!ir.contains("call void @llvm.trap()"), "no trap on the ARM path");
+}
+
+#[test]
+fn test_halt_x86_triple_emits_trap() {
+    // Non-ARM family (incl. x86_64 host) → the trap abort — loud and
+    // portable; `wfi` would be an invalid mnemonic under the host
+    // assembler.
+    let src = "node tick [true][done == true] { done = true; halt; term; };\n\
+               let done: Bool = false;\n";
+    let program = parse_isr_program(src);
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(crate::type_universe::TypeUniverse::new())
+        .with_embedded_mode(true);
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("call void @llvm.trap()"), "trap on non-ARM triples:\n{ir}");
+    assert!(!ir.contains("wfi"), "no wfi under an x86 triple");
+}

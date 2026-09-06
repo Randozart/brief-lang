@@ -481,6 +481,7 @@ impl<'a> Parser<'a> {
             Token::Bartered => "bartered",
             Token::Union => "union",
             Token::Trap => "trap",
+            Token::Halt => "halt",
             Token::Spawn => "spawn",
             Token::BeginProgram => "beginprogram",
             _ => return None,

@@ -3187,7 +3187,7 @@ mod tests {
 
     // ── Layout-keywords (Phase 1): spec clause parsing ────────────────
 
-    fn parse_top(src: &str) -> Result<crate::ast::TopLevel, String> {
+    pub(super) fn parse_top(src: &str) -> Result<crate::ast::TopLevel, String> {
         let tokens = tokenize(src).map_err(|e| format!("lex: {e}"))?;
         let mut p = Parser::new(tokens, src);
         p.parse_program()
@@ -4985,5 +4985,26 @@ mod cell_b2_tests {
             c.transactions.is_empty() && c.definitions.is_empty(),
             "trigger must not leak into members"
         );
+    }
+}
+
+#[cfg(test)]
+mod isr_halt_tests {
+    use super::tests::parse_top;
+
+    #[test]
+    fn test_halt_inside_isr_body() {
+        // 2026-09-06 (halt slice): `halt;` inside an ISR body parses to
+        // Statement::Halt (the statement arm fires in the ISR body block).
+        let tl = parse_top(
+            "isr<arm_cortex_m> handler @ 1: tick() [true][done == true] {\n\
+             done = true;\n\
+             halt;\n\
+             };\n",
+        ).unwrap();
+        let crate::ast::TopLevel::IsrHandler(h) = tl else { panic!("expected IsrHandler") };
+        assert!(matches!(h.body[1], crate::ast::Statement::Halt),
+            "halt; in an ISR body must parse to Statement::Halt, got: {:?}",
+            h.body[1]);
     }
 }

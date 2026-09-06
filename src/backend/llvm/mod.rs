@@ -682,7 +682,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             if let Some(t) = target { collect_strings_expr(t, seen, out); }
             collect_strings_expr(value, seen, out);
         }
-        Statement::FreeHint(_) | Statement::KeepHint(_) | Statement::Trap => {}
+        Statement::FreeHint(_) | Statement::KeepHint(_) | Statement::Trap | Statement::Halt => {}
         Statement::Break => {}
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
         Statement::Term(Some(e)) | Statement::EndProgram(Some(e)) => { collect_strings_expr(e, seen, out); }

@@ -128,6 +128,10 @@ impl LanguageVocab {
                 // 2026-08-13 (layout-keywords plan Phase 4): `trap` — hardware
                 // abort (statement, guard body, match-arm value). Never-type.
                 kw("trap", VocabStatus::Canonical, KeywordContext::Statement),
+                // 2026-09-06 (halt slice): `halt` — the bare-metal stop,
+                // trap's deliberate sibling (statement). Never-type: control
+                // flow past it is dead.
+                kw("halt", VocabStatus::Canonical, KeywordContext::Statement),
                 // 2026-08-13 (layout-keywords plan Phase 5): `atomic` —
                 // per-field concurrency modifier (`atomic x: Int;`). Disclosed,
                 // never a speed path; plain fields keep the default path.

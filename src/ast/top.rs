@@ -303,6 +303,14 @@ pub enum Statement {
     /// reference interpreter. Valid as a statement, a guarded body, and a
     /// match-arm value.
     Trap,
+    /// 2026-09-06 (halt slice): `halt;` — the bare-metal stop, trap's
+    /// deliberate sibling (SPEC §8.8.2). Never-type: control flow past it
+    /// is dead. The backend emits a wfi spin loop on ARM/RISC-V target
+    /// triples (the halt survives spurious wakeups) and the trap abort
+    /// elsewhere; the reference interpreter reports the stop
+    /// (RuntimeError::Halt). Where trap aborts because something is wrong,
+    /// halt stops because the work is done.
+    Halt,
     /// 2026-08-22 (spec-conformance Phase 8, SPEC §12.2): `yield;` — a
     /// cooperative cancellation point. No-op in the eager reference
     /// scheduler; grows into the concurrent scheduler's suspension point.

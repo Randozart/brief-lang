@@ -71,7 +71,7 @@ impl Annotator {
                     self.collect_calls_from_body(statements, calls);
                 }
                 Statement::Gate(cond) => self.collect_calls_from_expr(cond, calls),
-                Statement::Trap => {}
+                Statement::Trap | Statement::Halt => {}
                 Statement::Break => {}
                 Statement::Term(val) => {
                     if let Some(v) = val {
@@ -441,6 +441,7 @@ impl Annotator {
                 format!("{}term! {};\n", spaces, val_str)
             }
             Statement::Trap => format!("{}trap;\n", spaces),
+            Statement::Halt => format!("{}halt;\n", spaces),
             Statement::Break => format!("{}break;\n", spaces),
             Statement::Rollback(val) => {
                 let val_str = val

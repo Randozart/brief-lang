@@ -803,6 +803,28 @@ defn parse(tag: Int) -> Int {
 > (`RuntimeError::Trap`), and the reactor stops on it — matching the process
 > abort at runtime.
 
+### 8.8.2 `halt`
+
+`halt;` is the bare-metal stop — the program stops here; no further code
+runs. It is a statement and trap's deliberate sibling: `trap` aborts because
+something is wrong, `halt` stops because the work is done. Like `trap`, it
+is a never-type: the control flow past it is dead.
+
+- ARM/RISC-V target triples: a `wfi` (wait-for-interrupt) spin loop — the
+  loop makes the halt survive spurious wakeups (a bare `wfi` returns on the
+  next interrupt). On ARM Cortex-M this is the canonical sleep-forever.
+- Any other triple (x86_64 host included): the `trap` abort — loud and
+  portable; `wfi` would not assemble.
+- The reference interpreter raises `RuntimeError::Halt` — check mode reports
+  the stop, and the reactor does not fire further transactions.
+
+```briev
+isr<arm_cortex_m> handler @ 1: main_tick() [true][done == true] {
+    done = true;
+    halt;        // work finished — wait forever for the next interrupt
+};
+```
+
 ### 8.9 Metadata
 
 `!>` is the canonical annotation operator for non-physical metadata.

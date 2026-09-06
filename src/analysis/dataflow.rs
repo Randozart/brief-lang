@@ -201,7 +201,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Gate(cond) => {
                 self.extract_ids_recursive(cond, ids);
             }
-            Statement::Trap => {}
+            Statement::Trap | Statement::Halt => {}
             Statement::Break => {}
             Statement::Expression(expr) => {
                 self.extract_ids_recursive(expr, ids);

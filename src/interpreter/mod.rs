@@ -1273,6 +1273,24 @@ mod tests {
     }
 
     #[test]
+    fn halt_statement_raises_halt() {
+        // 2026-09-06 (halt slice): `halt;` — the bare-metal stop — the
+        // program stops here; check mode reports RuntimeError::Halt (the
+        // backend emits the wfi spin loop on ARM-family targets, the trap
+        // abort elsewhere).
+        let program = parse_program(
+            "defn f() -> Int {\n  halt;\n  term 1;\n};\n",
+        );
+        let mut interp = Interpreter::new();
+        interp.load_program(&program);
+        let err = interp.call_function("f", &[]).unwrap_err();
+        assert!(
+            matches!(err, crate::errors::RuntimeError::Halt),
+            "halt; must raise RuntimeError::Halt, got {err}"
+        );
+    }
+
+    #[test]
     fn init_value_form_seeds_and_reads() {
         // Value form: the expr is evaluated once and the name resolves.
         let program = parse_program("init BufSize: Int = 64;\n");

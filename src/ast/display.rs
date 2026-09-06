@@ -370,6 +370,7 @@ impl fmt::Display for Statement {
                 }
             }
             Statement::Trap => write!(f, "trap;"),
+            Statement::Halt => write!(f, "halt;"),
             Statement::Yield => write!(f, "yield;"),
             Statement::Check(e) => write!(f, "check {};", e),
             Statement::Break => write!(f, "break;"),
