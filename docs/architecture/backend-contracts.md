@@ -84,6 +84,18 @@ Hard-won in this effort; each one corresponds to a real defect class.
 > | SIMD intrinsics gate pointees at the TYPECHECKER (`Ptr<scalar>` = universe entry with no fields); element shape derives from storage size + float bits at the emitter | Element-wise arithmetic on struct pointees; unwarpable LLVM types |
 > | SIMD chunk emission: loads → compute → store within one chunk (overlap-safe) | Aliased dst corrupting reads within a chunk |
 > | Runtime-count SIMD loops use alloca induction variables, never phis from an unlabeled current block | Phi predecessors referencing the caller's unnamed block — invalid IR |
+>
+> **2026-09-06 (ISR plan, docs/plans/2026-09-06-isr-handlers-and-sections.md).** ISR emission laws:
+>
+> | Law | Failure it prevents |
+> |-----|---------------------|
+> | The mechanism resolves explicit-`<>` → profile (`ctx.isr_mechanism`) → error naming both fixes; validated against config/isr-targets.dbvl at the TYPECHECK | The asm<target> dead-data gap — unvalidated target strings reaching codegen |
+> | The calling convention comes from the mechanism row (`IsrConv`), never name-matched in the backend | Convention drift between config and emitter |
+> | Vector table entries are plain `ptrtoint (ptr @h to iN)` constexprs; the linker applies the Thumb bit via symbol relocation | LLVM 18 rejects `or` constexprs in globals; faking the bit in IR fights the linker |
+> | The default handler's spin loop branches INTO the spin label from entry | Entry block with a self-predecessor — "Entry block to function must not have predecessors" |
+> | When a program declares ISRs, state is the GLOBAL `@__briev_state`; every `%state = alloca` site aliases it via emit_state_base (zero-GEP) | ISR bodies (hardware stack) reading main's frame alloca — undefined `@field` loads |
+> | ISR bodies + contracts are liveness roots in compute_referenced_fields | ISR-only counters eliminated as dead → undefined `@field` references |
+> | `-> Void` definitions emit `ret void` | `ret void 0` — clang rejects |
 
 ---
 

@@ -1675,6 +1675,35 @@ through the existing pointer/deref paths.
 
 Event fairness assumptions belong to explicit event-port contracts. There is no global `#assume_event` pragma.
 
+### 13.2 ISR handlers (2026-09-06)
+
+An interrupt service routine declares which hardware vector the program services:
+
+```briev
+isr<arm_cortex_m> handler @ 0x1C: tim2_irq() [true][acked == true] { ack_timer(); };
+isr handler @ TIM2: tim2_irq() [true][acked == true] { ack_timer(); };  // board file
+```
+
+- The MECHANISM (`isr<name>`) owns the vector table layout and calling
+  convention; it resolves explicit → the target profile's `isr_mechanism`
+  (briev.toml `[target.<name>]`) → compile error. The compiler never invents
+  a vector table layout — the error names both fixes.
+- The vector is a literal slot index or a name resolved through the active
+  board's `interrupts.dbvl` (loaded by `import "target"`; the addresses.dbvl
+  pattern). One vector, one handler — a duplicate slot is a compile error.
+- The compiler emits the calling convention and derives the vector table
+  from the declared handler set: gaps bind the mechanism's default handler
+  (a spin loop), the table lands in the mechanism's linker section, and the
+  SP slot (ARM convention) is reserved. The Thumb bit is a linker semantic —
+  symbol relocations apply it.
+- The body's obligations are proven at compile time: no allocation, no
+  spawn/threading/dynamic-linking, no floating point unless the mechanism's
+  `fpu_context` row stacks FP context, bounded frame. The body shares the
+  program state — an ISR program's state is a global, and the reactor and
+  every handler operate on the same instance.
+- Contracts are mandatory on ISR declarations — the body's obligations are
+  the proof surface (same discipline as asm declarations, SPEC §20).
+
 ## 14. Ownership, lifetimes, and effects
 
 ### 14.1 Universal ownership algebra

@@ -3371,6 +3371,51 @@ mod tests {
     }
 
     #[test]
+    fn test_isr_handler_parses() {
+        // 2026-09-06 (ISR plan): all three forms — explicit mechanism +
+        // literal, bare mechanism + named board vector, bare + literal.
+        let tl = parse_top(
+            "isr<arm_cortex_m> handler @ 0x1C: tim2_irq() [true][done == true] { done = true; };",
+        ).unwrap();
+        let crate::ast::TopLevel::IsrHandler(h) = tl else { panic!("expected IsrHandler") };
+        assert_eq!(h.mechanism.as_deref(), Some("arm_cortex_m"));
+        assert_eq!(h.name, "tim2_irq");
+        assert!(matches!(h.vector, crate::ast::Expr::Decimal(28)), "0x1C parses as 28, got {:?}", h.vector);
+        assert!(h.contract.explicit, "contract is mandatory");
+        assert_eq!(h.body.len(), 1);
+
+        let tl = parse_top(
+            "isr handler @ TIM2: tim2_irq() [hits == 0][hits == 1] { hits = hits + 1; };",
+        ).unwrap();
+        let crate::ast::TopLevel::IsrHandler(h) = tl else { panic!("expected IsrHandler") };
+        assert!(h.mechanism.is_none(), "no explicit mechanism");
+        assert!(matches!(h.vector, crate::ast::Expr::Identifier(ref s) if s == "TIM2"));
+
+        let tl = parse_top("isr handler @ 28: tick() [true][n == 1] { n = n + 1; };").unwrap();
+        let crate::ast::TopLevel::IsrHandler(h) = tl else { panic!("expected IsrHandler") };
+        assert!(h.mechanism.is_none());
+        assert!(matches!(h.vector, crate::ast::Expr::Decimal(28)));
+    }
+
+    #[test]
+    fn test_isr_handler_round_trips() {
+        // 2026-09-06 (ISR plan): the canonical printer re-renders the
+        // mechanism + vector exactly as written.
+        let src = "isr<arm_cortex_m> handler @ 5: tick() [true][n == 1] { n = n + 1; };";
+        let tl = parse_top(src).unwrap();
+        let printed = crate::ast::format_item(&tl);
+        assert!(printed.contains("isr<arm_cortex_m> handler @ 5: tick()"),
+            "mechanism + vector must round-trip, got: {printed}");
+    }
+
+    #[test]
+    fn test_isr_handler_requires_handler_word() {
+        // `isr` without the `handler` marker is a parse error — the word
+        // names the declaration form.
+        assert!(parse_top("isr<arm_cortex_m> @ 5: tick() [true][true] { };").is_err());
+    }
+
+    #[test]
     fn test_union_declaration_parses() {
         // 2026-08-13 (layout-keywords plan Phase 6): `union Name { … };` is a
         // standalone untagged overlay (no `struct` keyword).

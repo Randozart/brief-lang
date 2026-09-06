@@ -7093,6 +7093,96 @@ node probe [p.name != ""][true] {
         );
     }
 
+    // ── ISR handler validation (2026-09-06, ISR plan) ──────────────────
+
+    #[test]
+    fn isr_unknown_mechanism_is_rejected() {
+        // The asm<target> dead-data gap must not repeat: an unknown
+        // mechanism is a compile error naming the registry and the fix.
+        let src = "isr<arm_cortexm> handler @ 1: tick() [true][done == true] { done = true; };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_err(), "unknown mechanism must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("isr-targets.dbvl"), "error must name the registry, got: {msg}");
+        assert!(msg.contains("arm_cortex_m"), "error must list known mechanisms, got: {msg}");
+    }
+
+    #[test]
+    fn isr_without_mechanism_errors_with_fix() {
+        // Signed-off posture: no explicit mechanism + no profile = compile
+        // error; the compiler never invents a vector table layout.
+        let src = "isr handler @ 1: tick() [true][done == true] { done = true; };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_err(), "mechanism-less isr must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("will not invent a vector table layout"), "got: {msg}");
+        assert!(msg.contains("isr_mechanism"), "fix must name the profile key, got: {msg}");
+    }
+
+    #[test]
+    fn isr_valid_mechanism_and_body_typechecks() {
+        let src = "isr<arm_cortex_m> handler @ 1: tick() [true][done == true] { done = true; };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_ok(), "expected OK, got: {:?}", e);
+    }
+
+    #[test]
+    fn isr_banned_intrinsic_is_rejected() {
+        // An ISR runs at interrupt priority — allocation can deadlock the
+        // allocator against the interrupted context.
+        let src = "isr<arm_cortex_m> handler @ 1: tick() [true][done == true] {\n\
+                   let p = Malloc#(8);\n\
+                   done = true;\n\
+                   };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_err(), "Malloc# in an ISR body must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("interrupt priority"), "got: {msg}");
+    }
+
+    #[test]
+    fn isr_float_rejected_on_none_fpu_mechanism() {
+        // arm_cortex_m0 stacks no FP context — float in the handler
+        // corrupts the interrupted task's FP state.
+        let src = "isr<arm_cortex_m0> handler @ 1: tick() [true][done == true] {\n\
+                   let x = 1.5;\n\
+                   done = true;\n\
+                   };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_err(), "float in a none-fpu ISR must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("fpu_context"), "got: {msg}");
+    }
+
+    #[test]
+    fn isr_duplicate_vector_is_rejected() {
+        // One vector, one handler.
+        let src = "isr<arm_cortex_m> handler @ 3: a() [true][done == true] { done = true; };\n\
+                   isr<arm_cortex_m> handler @ 3: b() [true][done == true] { done = true; };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_err(), "duplicate vector slot must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("already bound by 'a'"), "got: {msg}");
+    }
+
+    #[test]
+    fn isr_computed_vector_shape_is_rejected() {
+        // The vector must be a literal or a board name — a computed
+        // expression has no static slot.
+        let src = "isr<arm_cortex_m> handler @ 1 + 2: tick() [true][done == true] { done = true; };\n\
+                   let done: Bool = false;\n";
+        let e = check(src);
+        assert!(e.is_err(), "computed vector must error");
+        let msg = format!("{:?}", e);
+        assert!(msg.contains("literal slot index"), "got: {msg}");
+    }
+
     #[test]
     fn type_asserting_trait_must_provide_requirements() {
         // 2026-08-05 (Phase 5): structural conformance for explicit traits.

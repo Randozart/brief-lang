@@ -327,6 +327,15 @@ zero-copy view cast (validates `N * sizeof(T) == M * sizeof(U)`). `map`,
 >   args (`AtomicLoad#(p, relaxed)`). `seq` is the default (reused
 >   strategy keyword). New RMW intrinsics: `AtomicSub#/Or#/And#/Xor#`,
 >   width-parameterized `AtomicLoadN#/AtomicStoreN#`.
+> - **ISR handlers** (SPEC §13.2, plan 2026-09-06-isr-handlers-and-sections.md):
+>   `isr[<mechanism>] handler @ (literal | Name): name() [pre][post] { … };`
+>   — mechanism registry in config/isr-targets.dbvl (explicit → profile
+>   `isr_mechanism` → error with both fixes); named vectors via the board's
+>   interrupts.dbvl; body restrictions proven at compile time (no
+>   alloc/spawn/float-per-fpu_context); vector tables + default spin handler
+>   emitted per mechanism; ISR programs share state through the global
+>   `@__briev_state` (emit_state_base aliases it at every former alloca
+>   site).
 
 ### `op Parse` discriminators
 

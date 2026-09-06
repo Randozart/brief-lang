@@ -8583,3 +8583,56 @@ txn add16 [y < 100][y <= 100] {
         &ir[..ir.len().min(3000)]
     );
 }
+
+// ── ISR emission (2026-09-06, plan 2026-09-06-isr-handlers-and-sections.md) ──
+
+fn parse_isr_program(src: &str) -> Vec<crate::ast::TopLevel> {
+    let tokens = crate::lexer::tokenize(src).unwrap();
+    let mut p = crate::parser::Parser::new(tokens, src);
+    p.parse_program().unwrap()
+}
+
+#[test]
+fn test_isr_vector_table_layout() {
+    // Golden layout: SP slot 0 (arm mechanism) + handler slot + gaps →
+    // the default spin handler; .isr_vector section; align 4.
+    let src = "isr<arm_cortex_m> handler @ 1: tick() [true][done == true] { done = true; };\n\
+               let done: Bool = false;\n";
+    let program = parse_isr_program(src);
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(crate::type_universe::TypeUniverse::new())
+        .with_isr_mechanism(None);
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("define void @tick() nounwind \"interrupt\"=\"IRQ\" {"),
+        "wrapper carries the mechanism's calling convention:\n{ir}");
+    assert!(ir.contains("define void @__isr_body_tick(ptr"), "body takes the shared state");
+    assert!(ir.contains("call void @__isr_body_tick(ptr @__briev_state)"),
+        "wrapper passes the shared state global");
+    assert!(ir.contains("@__briev_state = global %State zeroinitializer"),
+        "ISR programs share state through a global");
+    assert!(ir.contains("@__vector_table_arm_cortex_m = global [3 x i32] [ i32 0, i32 ptrtoint (ptr @tick to i32), i32 ptrtoint (ptr @Default_Handler to i32) ], section \".isr_vector\", align 4"),
+        "golden table layout (SP slot 0, handler, gap→default):\n{ir}");
+    assert!(ir.contains("define void @Default_Handler() nounwind {"), "default handler emitted");
+    // main aliases the global instead of alloca.
+    assert!(ir.contains("%state = getelementptr %State, ptr @__briev_state, i64 0"),
+        "main aliases the shared state global");
+    let alloca_lines: Vec<&str> = ir.lines()
+        .filter(|l| l.contains("%state = alloca %State") && !l.trim_start().starts_with(';'))
+        .collect();
+    assert!(alloca_lines.is_empty(),
+        "alloca must not coexist with the global alias: {:?}\n{ir}",
+        alloca_lines);
+}
+
+#[test]
+fn test_isr_no_handlers_uses_plain_alloca() {
+    // Without ISR handlers, state stays a main-local alloca (SROA path).
+    let src = "node tick [true][done == true] { done = true; term; };\n\
+               let done: Bool = false;\n";
+    let program = parse_isr_program(src);
+    let mut backend = LlvmBackend::new()
+        .with_type_universe(crate::type_universe::TypeUniverse::new());
+    let ir = backend.generate(&program, None);
+    assert!(ir.contains("%state = alloca %State"), "non-ISR programs keep the alloca");
+    assert!(!ir.contains("@__briev_state"), "no shared-state global without handlers");
+}

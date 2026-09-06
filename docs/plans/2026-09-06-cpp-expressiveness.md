@@ -348,7 +348,12 @@ isr handler @ 0x08: timer_irq() {
 - Emits: ISR prologue (save regs) → body → ISR epilogue (restore regs + `iret`)
 - Vector table entry emitted automatically
 
-**Open question:** Different architectures have different vector table layouts (ARM Cortex-M vs x86 vs RISC-V). Should `isr` accept a target parameter like `asm<target>`? E.g., `isr<arm_cortex_m> handler @ 0x08: ...`?
+**Resolved (2026-09-06, implemented in docs/plans/2026-09-06-isr-handlers-and-sections.md):**
+`isr[<mechanism>] handler @ (literal | Name): name() { ... }` — the mechanism
+rides `<>` (explicit beats configured beats inferred), named vectors resolve
+through the board's interrupts.dbvl, the posture is error-with-fix when no
+mechanism is available, and the compiler emits the calling convention and
+derives the table. See the ISR plan for the full design and implementation.
 
 ### 4.6 Restrict — DROPPED, derived instead
 
