@@ -109,6 +109,19 @@ type Int {
 | `#T` | Type parameter of generic collection | Strategy op bindings: `pop as #T` |
 | `#StdIn` / `#StdOut` / `#StdErr` | Stream symbols (Phase 4) | `#StdOut <- value` writes (→ `Print#`); `#StdErr <- <String>` writes to stderr (→ `__eprint_str`); `#StdIn` is a `Ptr<Int>` stream-handle value |
 
+> **2026-09-06 (plan 2026-09-06-cpp-expressiveness.md).** The atomic
+> ordering vocabulary (`relaxed`, `acquire`, `release`, `bartered`, `seq`)
+> is deliberately NOT a hashword set: the words are CONTEXT-SENSITIVE
+> strategy keywords — bare lowercase, valid only (a) before `atomic` in a
+> field declaration (`relaxed atomic count: Int;`) or (b) as the trailing
+> argument of an atomic intrinsic (`AtomicLoad#(p, relaxed)`). No `#`
+> marker: they are disclosed strategy words per SPEC §8.1, not
+> compiler-internal tokens. `seq` is the existing strategy keyword reused
+> (sequential consistency IS sequentialism); `bartered` names the
+> acquire+release RMW exchange (each side gives visibility AND takes it).
+> Outside the two positions they parse as expressions and surface as
+> unknown-identifier errors.
+
 ## Semantics
 
 ### In strategy property bindings (`<~`)

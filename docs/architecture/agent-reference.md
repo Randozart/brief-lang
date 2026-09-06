@@ -301,6 +301,33 @@ zero-copy view cast (validates `N * sizeof(T) == M * sizeof(U)`). `map`,
 `filter`, `fold`, `any`, `all`, `sum`, `product` are regular txns in
 `lib/std/array.bv`, vectorized via the `[i < N]` convergence contract.
 
+> **2026-09-06 (plan 2026-09-06-cpp-expressiveness.md).** Pointer
+> arithmetic + portable SIMD + atomic ordering:
+>
+> - **Pointer intrinsics** (SPEC §14.2): `PtrAdd#(p, n)`/`PtrSub#(p, n)`
+>   (element steps, `getelementptr inbounds`), `PtrDiff#(a, b)`
+>   (same-allocation element distance), `PtrEq#`/`PtrLt#` (handle
+>   comparison). The Briev pointer ABI is uniformly BOXED i64 handles —
+>   `&` ptrtoints, `Malloc#` boxes, `as Ptr<T>` retypes without changing
+>   the SSA value — so these intrinsics unconditionally `inttoptr` the
+>   base and re-box (the atomics' convention). No `ptr + int` operators.
+> - **Portable SIMD** (SPEC §15.4): `SimdAdd#/SimdSub#/SimdMul#/
+>   SimdFma#(dst, a, b[, c], count)` — memory-to-memory element-wise
+>   family. `Type::Vector` lowers to `[N x T]` LLVM arrays, so SSA
+>   vector registers cannot escape; the memory-to-memory ABI is the
+>   honest form. Chunking is overlap-safe (loads precede the store
+>   per chunk) — dst may alias sources, the case the auto-vectorizer
+>   declines. The TYPECHECKER gates `Ptr<scalar>` pointees (universe
+>   entry with no fields); the emitter derives the shape from storage
+>   size + float bits. Runtime counts use alloca induction variables
+>   (never phis from an unlabeled current block).
+> - **Atomic ordering** (SPEC §8.2): context-sensitive keywords
+>   `relaxed`/`acquire`/`release`/`bartered` before `atomic`
+>   (`bartered atomic refs: Int;`), or as trailing atomic-intrinsic
+>   args (`AtomicLoad#(p, relaxed)`). `seq` is the default (reused
+>   strategy keyword). New RMW intrinsics: `AtomicSub#/Or#/And#/Xor#`,
+>   width-parameterized `AtomicLoadN#/AtomicStoreN#`.
+
 ### `op Parse` discriminators
 
 `op Parse(Decimal, pre:"0x")`, `suf:"km"`, `reg:"[0-9a-fA-F]+"`,

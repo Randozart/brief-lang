@@ -215,11 +215,24 @@ impl Ptr<T> {
 
 **Strategy keywords:**
 
-| Keyword | Context | Effect |
-|---------|---------|--------|
-| `simd` | Loop, defn | Force vectorization (error if unvectorizable) |
-| `nosimd` | Loop, defn | Disable vectorization (scalar only) |
-| `simd<N>` | Loop | Force N-wide vectorization (error if target lacks width) |
+> **Scoping decision (2026-09-06, Phase 7 review):** bare `simd` and
+> `nosimd` are deliberately NOT added. The backend already emits
+> `!llvm.loop.vectorize.enable = true` on every counted loop (the default
+> IS the vectorized path), and `seq` already exists for the
+> sequentialism case — both keywords would duplicate existing surface
+> (accidental complexity, Rule 2). `simd<N>` width pinning is the only
+> genuinely new capability and is DEFERRED: it needs per-loop metadata
+> plumbing (AST field → loop engine) that does not exist, and width
+> pinning is an optimization nicety, not an expressiveness gap — C++
+> itself has no width control without a pragma. Revisit when a benchmark
+> demonstrates a width-pinning win the auto-vectorizer's heuristics
+> miss.
+
+| Keyword | Status | Rationale |
+|---------|--------|-----------|
+| `simd` | Not added | Duplicates the default (all counted loops already vectorize) |
+| `nosimd` | Not added | Duplicates `seq` |
+| `simd<N>` | Deferred | New capability, needs loop-metadata plumbing; no demonstrated need |
 
 **Portable intrinsics (target-agnostic, backend lowers to best HW):**
 
@@ -337,18 +350,32 @@ isr handler @ 0x08: timer_irq() {
 
 **Open question:** Different architectures have different vector table layouts (ARM Cortex-M vs x86 vs RISC-V). Should `isr` accept a target parameter like `asm<target>`? E.g., `isr<arm_cortex_m> handler @ 0x08: ...`?
 
-### 4.6 Restrict
+### 4.6 Restrict — DROPPED, derived instead
 
-**Strategy keyword:**
-
-```briev
-restrict defn process(a: Ptr<Int>, b: Ptr<Int>) {
-    // compiler assumes a and b don't alias
-    // emits LLVM noalias attributes on both parameters
-};
-```
-
-**Open question:** Should `restrict` apply to all pointer params in the function, or to individual parameters? The C model applies it per-parameter (`int *restrict a, int *restrict b`). Briev could do either — function-level is simpler, parameter-level is more precise.
+> **Scoping decision (2026-09-06, Phase 10):** the `restrict` strategy
+> keyword is DROPPED, for two reasons.
+>
+> 1. **The ABI blocks it.** Briev boxes pointers as i64 handles; LLVM 18
+>    rejects pointer-only parameter attributes (noalias, dereferenceable)
+>    on non-pointer types — the same reason dereferenceable is omitted
+>    from Ptr<T> params (emit_toplevel.rs, 2026-07-04 note). A declared
+>    `restrict` would have nothing honest to lower to.
+>
+> 2. **The philosophy forbids it.** `restrict` exists in C because C has
+>    no ownership analysis — the programmer must tell the compiler what
+>    it cannot prove. Briev HAS provenance proofs (exclusive provenance
+>    is already a hard requirement, SPEC §14.2). The Briev-true path is
+>    to DERIVE noalias from the existing provenance analysis: where the
+>    compiler proves two pointer params never alias, it emits noalias
+>    automatically — the programmer never annotates. A keyword-beaten
+>    default is a compiler bug (Rule 2); here the "default" is the
+>    compiler's own proof.
+>
+> Follow-up (separate plan): wire the exclusive-provenance proof result
+> to LLVM param attributes where the ABI permits (internal functions
+> taking ptr-typed state slices), and extend the provenance analysis to
+> cover cross-parameter exclusivity. Until then the auto-vectorizer's
+> runtime alias versioning is the correct, safe fallback.
 
 ---
 

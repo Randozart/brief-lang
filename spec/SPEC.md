@@ -511,13 +511,55 @@ type Length32: Int {
 > **2026-08-13 (field modifiers).** A field may be declared `atomic`
 > (`atomic count: Int;`) in a struct or obj/type body. It is a concurrency
 > declaration, never a speed path: plain fields stay on the default
-> (non-atomic) path. The LLVM backend emits `load atomic`/`store atomic`
-> (`seq_cst`) for atomic fields, and lowers `obj.f = obj.f + c` /
+> (non-atomic) path. The LLVM backend emits `load atomic`/`store atomic` for
+> atomic fields, and lowers `obj.f = obj.f + c` /
 > `obj.f = obj.f - c` to `atomicrmw add/sub` (read-modify-write). The
 > reference interpreter is single-threaded check mode, so atomic fields behave
 > as plain fields there — atomicity is a target concern (the explicit
 > `AtomicLoad#`/`AtomicStore#`/`AtomicAdd#` intrinsics remain for address-based
 > access).
+>
+> > **2026-09-06 (atomic ordering).** An atomic field takes an ORDERING — a
+> > strategy keyword before `atomic`, or none for the default:
+> >
+> > ```briev
+> > relaxed atomic count: Int;    // memory_order_relaxed — no ordering
+> > acquire atomic ready: Bool;   // memory_order_acquire — read barrier
+> > release atomic done: Bool;    // memory_order_release — write barrier
+> > bartered atomic refs: Int;    // memory_order_acq_rel — RMW exchange
+> > seq atomic strict: Int;       // memory_order_seq_cst — explicit default
+> > atomic plain: Int;            // identical to seq atomic
+> > ```
+> >
+> > The ordering word is context-sensitive — it is valid only before
+> > `atomic`. `seq` is the existing strategy keyword reused: sequential
+> > consistency IS sequentialism, so no new word exists for the total-order
+> > case. `bartered` names the acquire+release exchange — each side of an
+> > RMW both gives visibility (release) and takes it (acquire); a barter
+> > between threads. Field accesses and RMW lowering inherit the declared
+> > ordering. The default (`seq_cst`) is unchanged from the pre-ordering
+> > behavior — every existing atomic field compiles identically.
+>
+> > **2026-09-06 (ordering-parameterized atomic intrinsics).** The
+> > address-based atomic intrinsics take an optional trailing ORDERING
+> > argument from the same vocabulary — the words appear bare (no quotes,
+> > no hashword):
+> >
+> > ```briev
+> > AtomicLoad#(p, relaxed);                 // default seq_cst when absent
+> > AtomicStore#(p, v, release);
+> > AtomicAdd#(p, v, bartered);
+> > AtomicCas#(p, old, new, bartered, relaxed);  // success, failure orderings
+> > AtomicSub#(p, v);  AtomicOr#(p, v);  AtomicAnd#(p, v);  AtomicXor#(p, v);
+> > AtomicLoadN#(p, 4, acquire);    // width-parameterized: 1/2/4/8 bytes
+> > AtomicStoreN#(p, v, 1, relaxed);
+> > Fence#(acquire);                // default seq_cst when absent
+> > ```
+> >
+> > Ordering arguments are consumed as ordering markers — they are not
+> > values and name nothing at runtime. Check mode ignores ordering
+> > (single-threaded); the words surface as unknown identifiers anywhere
+> > except an atomic intrinsic's ordering positions.
 >
 > **2026-08-13 (`union`).** `union Name { field: Type, … };` is an untagged
 > overlay: all fields share storage at offset 0; size is the largest aligned
@@ -1676,6 +1718,22 @@ policy does for owned results and consumed inputs.
 
 There is no `Ptr!` alias and no `.^Address` acquisition form.
 
+> **2026-09-06 (pointer arithmetic).** Pointer arithmetic exists as
+> compiler-known intrinsics, never as bare operators on `Ptr<T>`:
+>
+> | Intrinsic | Shape | Semantics |
+> |-----------|-------|-----------|
+> | `PtrAdd#(p, n)` | `(Ptr<T>, Int) -> Ptr<T>` | `p` advanced `n` ELEMENTS (`getelementptr inbounds`); out-of-bounds is undefined behavior, caught by LLVM's `inbounds` contract |
+> | `PtrSub#(p, n)` | `(Ptr<T>, Int) -> Ptr<T>` | `p` moved back `n` elements |
+> | `PtrDiff#(a, b)` | `(Ptr<T>, Ptr<T>) -> Int` | element distance between two pointers — both must derive from the SAME allocation (a cross-allocation diff is meaningless, and the caller owns the proof) |
+> | `PtrEq#(a, b)` | `(Ptr<T>, Ptr<T>) -> Bool` | address equality |
+> | `PtrLt#(a, b)` | `(Ptr<T>, Ptr<T>) -> Bool` | address ordering (unsigned) |
+>
+> Pointers cross the ABI as boxed handles, so `PtrAdd#`/`PtrSub#` return
+> boxed handles like every other pointer value. There are no `ptr + int`
+> operators — arithmetic on addresses is always an explicit, named
+> operation (disclosed special treatment, Rule of the `#` marker).
+
 ### 14.3 `free` and `keep`
 
 ```briev
@@ -1783,7 +1841,45 @@ Insertion `c <- x` resolves the type's `op InsertAt`; extraction `x <- c`
 resolves `op ExtractFrom` (destructive) or `op CopyFrom` (value out). Both are
 op-as-member declarations (§15.2).
 
-### 15.4 Precedence
+### 15.4 Portable SIMD (2026-09-06)
+
+The portable SIMD family is element-wise arithmetic over POINTERS — forced
+vectorization with a deterministic shape, for the cases where the
+auto-vectorizer's profitability heuristics decline (notably: destination
+may alias a source):
+
+```briev
+SimdAdd#(dst, a, b, count);        // dst[i] = a[i] + b[i]
+SimdSub#(dst, a, b, count);        // dst[i] = a[i] - b[i]
+SimdMul#(dst, a, b, count);        // dst[i] = a[i] * b[i]
+SimdFma#(dst, a, b, c, count);     // dst[i] = a[i] * b[i] + c[i]
+```
+
+- Every pointer argument must be `Ptr<scalar>` (a type whose universe entry
+  has no fields — int/float/bit shapes); element-wise arithmetic on a struct
+  pointee is a compile error.
+- The element shape derives from the DESTINATION pointee's storage: `Float`
+  lowers as `<4 x float>` chunks, `Float64` as `<2 x double>`, fixed-width
+  ints by byte width (`i64`/`i32`/`i16`/`i8` word shapes). The values are
+  added AS STORED — a `Bit<12>` field in a 2-byte container adds as `i16`.
+- Chunking is overlap-safe: within each chunk, all loads precede the store,
+  so `dst` may fully alias `a`/`b`/`c`. The results are exactly the
+  element-wise map.
+- Constant counts lower to straight-line vector chunks plus an inline scalar
+  tail; runtime counts lower to a counted chunk loop plus a scalar tail loop.
+- Portability is structural: the chunk shapes are legal LLVM IR on every
+  target — ISel lowers them to the best vector unit (AVX/SSE/NEON) or
+  scalarizes where none exists. No target names appear in source.
+  `SimdFma#` emits fused-pair arithmetic under fast-math; the backend
+  contracts to hardware FMA where the target provides it.
+- Check mode (the reference interpreter) evaluates word-wise element loops —
+  single-threaded, no vector shape.
+
+There is no `simd`/`nosimd` keyword and no explicit vector type: the default
+already vectorizes every counted loop, `seq` is the sequentialism opt-out,
+and these intrinsics are the forced-shape escape hatch.
+
+### 15.5 Precedence
 
 From highest to lowest:
 

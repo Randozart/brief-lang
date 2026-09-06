@@ -73,6 +73,18 @@ Hard-won in this effort; each one corresponds to a real defect class.
 | LLVM IR float literals always carry a decimal point (`{:?}`, never `{:e}`) | `1e-4` parses as an integer token — clang/opt reject the module |
 | `%briev.field` constant order = C `BrievField` order (name, kind, host, elem, count, is_write, proj) | proj_offset at the wrong index misaligns runtime reads; opt type error |
 
+> **2026-09-06 (plan 2026-09-06-cpp-expressiveness.md).** New emission laws
+> for the C++-expressiveness surface:
+>
+> | Law | Failure it prevents |
+> |-----|---------------------|
+> | Pointer intrinsics (`PtrAdd#`/`PtrSub#`/`PtrDiff#`/`PtrEq#`/`PtrLt#`) treat bases as BOXED i64 handles — unconditionally `inttoptr` in, `ptrtoint` out; `&` boxes and `as Ptr<T>` retypes without changing the SSA value | `getelementptr` on an i64 SSA value — clang rejects "defined with type 'i64' but expected 'ptr'" |
+> | `PtrAdd#`/`PtrSub#` always emit `getelementptr inbounds` | Silent OOB arithmetic escaping the inbounds UB contract |
+> | Atomic orderings flow from the field carrier (`field:ordering`) and intrinsic ordering args (`ordering_arg()`); default `seq_cst` | Silent ordering downgrade or invalid IR (`fadd fast` on i64) |
+> | SIMD intrinsics gate pointees at the TYPECHECKER (`Ptr<scalar>` = universe entry with no fields); element shape derives from storage size + float bits at the emitter | Element-wise arithmetic on struct pointees; unwarpable LLVM types |
+> | SIMD chunk emission: loads → compute → store within one chunk (overlap-safe) | Aliased dst corrupting reads within a chunk |
+> | Runtime-count SIMD loops use alloca induction variables, never phis from an unlabeled current block | Phi predecessors referencing the caller's unnamed block — invalid IR |
+
 ---
 
 ## 4. VM / tamer specification
