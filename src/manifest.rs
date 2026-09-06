@@ -87,6 +87,13 @@ pub struct TargetProfile {
     /// Applied before real host queries. Keys use dot notation
     /// (e.g., "cpu.cores", "cpu.arch").
     pub overrides: HashMap<String, OverrideValue>,
+    /// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): the ISR
+    /// mechanism for this target — the configured default behind
+    /// `isr handler @ vec: ...` when the declaration names none explicitly
+    /// (e.g. `isr_mechanism = "arm_cortex_m"`). Must be a row of
+    /// config/isr-targets.dbvl; absent + no explicit mechanism = compile
+    /// error (the compiler never invents a vector table layout).
+    pub isr_mechanism: Option<String>,
 }
 
 fn default_introspection() -> String {
@@ -113,15 +120,25 @@ impl<'de> Deserialize<'de> for TargetProfile {
         let overrides: HashMap<String, OverrideValue> = raw.into_iter()
             .filter(|(k, _)| k != "introspection")
             .collect();
-        Ok(TargetProfile { introspection, overrides })
+        let isr_mechanism = overrides.get("isr_mechanism")
+            .map(|v| v.as_string());
+        let overrides: HashMap<String, OverrideValue> = overrides
+            .into_iter()
+            .filter(|(k, _)| k != "isr_mechanism")
+            .collect();
+        Ok(TargetProfile { introspection, overrides, isr_mechanism })
     }
 }
 
 impl Serialize for TargetProfile {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut map = serializer.serialize_map(Some(self.overrides.len() + 1))?;
+        let extra = self.isr_mechanism.is_some() as usize;
+        let mut map = serializer.serialize_map(Some(self.overrides.len() + 1 + extra))?;
         map.serialize_entry("introspection", &self.introspection)?;
+        if let Some(mech) = &self.isr_mechanism {
+            map.serialize_entry("isr_mechanism", mech)?;
+        }
         for (k, v) in &self.overrides {
             map.serialize_entry(k, v)?;
         }

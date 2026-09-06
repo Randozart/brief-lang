@@ -114,7 +114,7 @@ impl LlvmBackend {
         cases: &[(i64, &str)],
     ) {
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         let counter_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
         let (c_val, _) = self.emit_state_load_i64_by_idx(out, "  ", counter_idx);
@@ -159,7 +159,7 @@ impl LlvmBackend {
         bound_var: &str,
     ) {
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         writeln!(out, "  br label %.mr_loop").ok();
         writeln!(out, ".mr_loop:").ok();
@@ -322,7 +322,7 @@ impl LlvmBackend {
         }
 
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         self.emit_ssa_mt_prealloc(out, txns);
         // 2026-07-18: Convergence check — if no wake triggers and no async,
@@ -477,7 +477,7 @@ impl LlvmBackend {
         _has_wake: bool,
     ) {
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         let bound_reg = if let Some(lit) = bound_literal {
             // 2026-08-08: a shared compile-time literal bound — the fold loop

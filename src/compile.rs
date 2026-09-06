@@ -282,7 +282,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // and trg instance expressions before type checking.
     resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
-    check_types(&mut items, &universe)?;
+    check_types(&mut items, &universe, opts.isr_mechanism.as_deref())?;
     // 2026-08-04: term termination diagnostics — unreachable code after a
     // terminating `term <value>`/`term! <value>` and the bare-term-guard
     // hint. Runs here (typed AST, pre-normalizer) so the backend never sees
@@ -1254,6 +1254,11 @@ fn codegen(
             if ext == ".ebv" {
                 b = b.with_embedded_mode(true);
             }
+            // 2026-09-06 (ISR plan): the profile's ISR mechanism — the
+            // configured default for mechanism-less `isr` declarations.
+            if let Some(ref mech) = opts.isr_mechanism {
+                b = b.with_isr_mechanism(Some(mech.clone()));
+            }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
@@ -1324,6 +1329,11 @@ fn codegen(
             // wfi) — the freestanding bare-metal path.
             if ext == ".ebv" {
                 b = b.with_embedded_mode(true);
+            }
+            // 2026-09-06 (ISR plan): the profile's ISR mechanism — the
+            // configured default for mechanism-less `isr` declarations.
+            if let Some(ref mech) = opts.isr_mechanism {
+                b = b.with_isr_mechanism(Some(mech.clone()));
             }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
@@ -1411,6 +1421,11 @@ fn codegen(
             // wfi) — the freestanding bare-metal path.
             if ext == ".ebv" {
                 b = b.with_embedded_mode(true);
+            }
+            // 2026-09-06 (ISR plan): the profile's ISR mechanism — the
+            // configured default for mechanism-less `isr` declarations.
+            if let Some(ref mech) = opts.isr_mechanism {
+                b = b.with_isr_mechanism(Some(mech.clone()));
             }
             let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {

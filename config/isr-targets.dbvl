@@ -1,0 +1,42 @@
+// ── ISR mechanism registry (plan 2026-09-06-isr-handlers-and-sections.md) ──
+// Baked into the binary via include_str!. Loaded by src/target.rs
+// (IsrMechanismConfig::load).
+//
+// One row per ISR MECHANISM — the target knowledge that makes
+// `isr<arm_cortex_m> handler @ 0x1C: ...` compile. The row defines the
+// vector table layout and the calling convention; the compiler owns the
+// prologue/epilogue emission and derives the whole table from the declared
+// handler set (the programmer declares which vectors the program uses —
+// nothing else).
+//
+// Row shape (positional):
+//   <mechanism>: <entry_stride>; <sp_slot>; <thumb_bit>; <return_insn>;
+//                <fpu_context>; <max_frame>; <default_handler>;
+//
+//   entry_stride    — bytes per vector table slot.
+//   sp_slot         — "sp" = slot 0 is the initial stack pointer (ARM
+//                     Cortex-M convention); "none" = no SP slot, vector 0
+//                     is a handler slot like the rest.
+//   thumb_bit       — 1 = OR 1 into handler addresses (ARM Thumb state bit);
+//                     0 = address used as-is.
+//   return_insn     — the epilogue return instruction; validation anchor
+//                     (the mechanism exists) + emission reference.
+//   fpu_context     — "none" = Float in an ISR body is a compile error;
+//                     "lazy" = FP context stacked lazily (FPCCR ASPEN/LSPEN);
+//                     "eager" = FP context saved/restored on every entry.
+//   max_frame       — stack frame bound in bytes; a body whose frame
+//                     exceeds it is a compile error (ISRs run on the
+//                     hardware stack with no overflow handler).
+//   default_handler — the name for undeclared vectors; emitted as a spin
+//                     loop when the board file does not provide one.
+//   table_section   — the ELF section for the emitted vector table (empty =
+//                     no section attribute; x86 IDT / RISC-V mtvec tables
+//                     are runtime-built structures, not link-time data).
+//   convention      — the calling convention the emitted ISR wrapper carries:
+//                     arm_irq = LLVM "interrupt"="IRQ" attr; riscv_machine =
+//                     "interrupt"="machine"; x86_intr = x86_intrcc.
+
+arm_cortex_m:   4; sp; 1; bx lr; lazy; 512; Default_Handler; .isr_vector; arm_irq;
+arm_cortex_m0:  4; sp; 1; bx lr; none; 256; Default_Handler; .isr_vector; arm_irq;
+riscv_machine:  4; none; 0; mret; none; 512; default_isr_handler; ; riscv_machine;
+x86_idt:        8; none; 0; iretq; none; 512; default_isr_handler; ; x86_intr;

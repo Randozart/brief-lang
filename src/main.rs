@@ -454,6 +454,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         ssr: false,
         dev: false,
         accel_cpu_fallback,
+        isr_mechanism: None,
     })
 }
 
@@ -508,6 +509,7 @@ fn run_bounty(args: &[String]) -> Result<(), String> {
         ssr: false,
         dev: false,
         accel_cpu_fallback: None,
+        isr_mechanism: None,
     };
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
@@ -651,8 +653,8 @@ fn run_build(args: &[String]) -> Result<(), String> {
     };
 
     // ── Determine what to build ──────────────────────────────────────
-    // Each entry: (target_name, base_overrides_from_profile)
-    let target_profiles: Vec<(String, HashMap<String, String>)> = if let Some(ref target_name) = opts.target {
+    // Each entry: (target_name, base_overrides_from_profile, isr_mechanism)
+    let target_profiles: Vec<(String, HashMap<String, String>, Option<String>)> = if let Some(ref target_name) = opts.target {
         // --target <name>: single target from briev.toml
         let project_dir = std::path::Path::new(&opts.file_path)
             .parent().map(|p| p.to_path_buf())
@@ -666,14 +668,14 @@ fn run_build(args: &[String]) -> Result<(), String> {
             format!("target '{}' not found in briev.toml. Available targets: {}",
                 target_name, manifest.target.keys().cloned().collect::<Vec<_>>().join(", "))
         })?;
-        vec![(target_name.clone(), profile.sysquery_overrides())]
+        vec![(target_name.clone(), profile.sysquery_overrides(), profile.isr_mechanism.clone())]
     } else {
         // Single default build (no --target)
-        vec![("default".to_string(), HashMap::new())]
+        vec![("default".to_string(), HashMap::new(), None)]
     };
 
     // ── Compile each target ───────────────────────────────────────────
-    for (target_name, profile_overrides) in &target_profiles {
+    for (target_name, profile_overrides, profile_isr_mechanism) in &target_profiles {
         if target_profiles.len() > 1 {
             println!("Building for target: {}", target_name);
         }
@@ -694,6 +696,9 @@ fn run_build(args: &[String]) -> Result<(), String> {
 
         let mut target_opts = opts.clone();
         target_opts.sysquery_overrides = overrides;
+        // 2026-09-06 (ISR plan): the profile's ISR mechanism is the configured
+        // default for mechanism-less `isr` declarations.
+        target_opts.isr_mechanism = profile_isr_mechanism.clone();
 
         // Per-target output directory
         if *target_name != "default" {

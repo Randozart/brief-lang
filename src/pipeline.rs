@@ -250,6 +250,10 @@ pub struct BuildOptions {
     /// fewer work items fall to the CPU loop (--accel-cpu-fallback N).
     /// None = no fallback (current default). Only applies to .bv accel paths.
     pub accel_cpu_fallback: Option<u64>,
+    /// 2026-09-06 (ISR plan): the active target profile's ISR mechanism —
+    /// the configured default behind mechanism-less `isr` declarations.
+    /// Populated from briev.toml [target.<name>] isr_mechanism.
+    pub isr_mechanism: Option<String>,
 }
 
 pub struct PreprocessedSource {
@@ -695,6 +699,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         ssr: false,
         dev: false,
         accel_cpu_fallback: None,
+        isr_mechanism: None,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -830,7 +835,7 @@ pub fn compile_to_typed(file_path: &str, source: &str, opts: &BuildOptions) -> R
     pm.run_ast(StageKind::Resolved, &mut items, &mut TypeUniverse::new())?;
     resolve_comptime_refs(&pm, &mut items)?;
     let mut universe = TypeUniverse::new();
-    check_types(&mut items, &universe)?;
+    check_types(&mut items, &universe, opts.isr_mechanism.as_deref())?;
     pm.run_ast(StageKind::Typed, &mut items, &mut universe)?;
     Ok((items, universe))
 }
@@ -925,7 +930,7 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     resolve_comptime_refs(&pm, &mut items)?;
 
     let universe = TypeUniverse::new();
-    check_types(&mut items, &universe)?;
+    check_types(&mut items, &universe, opts.isr_mechanism.as_deref())?;
     // 2026-08-01 (C4): watchdog contract checks also run on the `check` path
     // (parse_and_check) — `brievc check` must catch trigger/handler violations
     // and missing on-fire handlers the same way `brievc build` does.
@@ -1041,9 +1046,9 @@ pub fn validate_constraints(items: &[crate::ast::TopLevel]) -> Result<(), String
     Ok(())
 }
 
-pub fn check_types(items: &mut [crate::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
+pub fn check_types(items: &mut [crate::ast::TopLevel], universe: &TypeUniverse, isr_mechanism: Option<&str>) -> Result<(), String> {
     validate_constraints(items)?;
-    crate::typechecker::check_program(items, universe)
+    crate::typechecker::check_program_with_target(items, universe, isr_mechanism)
         .map_err(|errors| {
             let msgs: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
             format!("type errors:\n  {}", msgs.join("\n  "))

@@ -1654,6 +1654,15 @@ impl LlvmBackend {
         self
     }
 
+    /// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): the active
+    /// target profile's ISR mechanism — the configured default the backend
+    /// consumes for mechanism-less `isr` declarations (the typechecker
+    /// validated resolution; the backend CONSUMES the decision).
+    pub fn with_isr_mechanism(mut self, mechanism: Option<String>) -> Self {
+        self.ctx.isr_mechanism = mechanism;
+        self
+    }
+
     pub fn with_type_universe(mut self, tu: crate::type_universe::TypeUniverse) -> Self {
         self.ctx.type_universe = Some(tu);
         self
@@ -2435,6 +2444,11 @@ impl LlvmBackend {
 
         let cg = &analysis.call_graph;
         self.ctx.has_cycles = cg.has_cycle();
+        // 2026-09-06 (ISR plan): ISR bodies share the program's state through
+        // a GLOBAL — they run on the hardware stack, outside main's frame.
+        // Main's alloca sites alias the global via emit_state_base.
+        self.ctx.state_is_global = items.iter().any(
+            |i| matches!(i, TopLevel::IsrHandler(_)));
         let sb = self.compute_state_size_bytes() as u64;
         self.ctx.state_size_bytes = sb;
         self.ctx.state_ptr_param = if sb > 0 {
@@ -2712,6 +2726,12 @@ impl LlvmBackend {
                     self.ctx.defn_params.insert(asm_fn.name.clone(), tys);
                     let ret_tys = vec![asm_fn.ret_type.clone()];
                     self.ctx.defn_return_types.insert(asm_fn.name.clone(), ret_tys);
+                }
+                // 2026-09-06 (ISR plan): pre-register handler signatures so
+                // body emission sees the param types.
+                TopLevel::IsrHandler(isr) => {
+                    let tys: Vec<Type> = isr.params.iter().map(|(_, t)| t.clone()).collect();
+                    self.ctx.defn_params.insert(isr.name.clone(), tys);
                 }
                 TopLevel::ForeignBinding(fb) => {
                     let sig = crate::ast::ForeignSignature {
@@ -3657,9 +3677,21 @@ impl LlvmBackend {
                     self.emit_asm_fn(&mut out, asm_fn);
                     writeln!(out).ok();
                 }
+                // 2026-09-06 (ISR plan): emit ISR handler bodies (calling
+                // convention per mechanism) + the vector table after all
+                // ordinary definitions (the table references handler symbols).
+                TopLevel::IsrHandler(isr) => {
+                    if let Err(e) = self.emit_isr_handler(&mut out, isr) {
+                        self.warnings.push(e);
+                    }
+                    writeln!(out).ok();
+                }
                 _ => {}
             }
         }
+        // 2026-09-06 (ISR plan): vector tables + default handlers — after
+        // every handler definition (the table references the symbols).
+        self.emit_isr_vector_tables(&mut out, items);
         // 2026-08-26 (async Phase C): segment continuations + fn-pointer
         // tables for every SPAWN-TARGETED defn, plus the runtime declares.
         // Emitted after ordinary definitions so the segment bodies reuse the
@@ -5272,7 +5304,7 @@ impl LlvmBackend {
                 // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid.
                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
                 self.emit_main_header(out, "#9", true);
-                writeln!(out, "  %state = alloca %State, align 8").ok();
+                self.emit_state_base(out);
                 self.emit_inline_init_stores(out, "%state");
                 self.emit_folded_pure_counter(out, counter_idx, tv);
                 if self.ctx.exit_condition.is_some() {

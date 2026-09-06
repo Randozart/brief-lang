@@ -182,6 +182,32 @@ fn format_item_into(item: &TopLevel, out: &mut String, level: usize) {
             }
             let _ = write!(out, "}};");
         }
+        // 2026-09-06 (ISR plan): the canonical form re-renders the explicit
+        // mechanism when present; the vector prints literal-or-name as
+        // written (round-trip fidelity — the resolution happens at
+        // typecheck, not in the printer).
+        TopLevel::IsrHandler(h) => {
+            indent(out, level);
+            if let Some(mech) = &h.mechanism {
+                let _ = write!(out, "isr<{}> handler @ ", mech);
+            } else {
+                out.push_str("isr handler @ ");
+            }
+            let _ = write!(out, "{}: {}(", h.vector, h.name);
+            for (i, (name, ty)) in h.params.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let _ = write!(out, "{}: {}", name, ty);
+            }
+            let _ = write!(out, ")");
+            let _ = write!(out, " {{ ");
+            for stmt in &h.body {
+                format_stmt_into(stmt, out, 0);
+                out.push(' ');
+            }
+            let _ = write!(out, "}};");
+        }
         TopLevel::Trait(t) => {
             indent(out, level);
             let _ = write!(out, "trait {}", t.name);

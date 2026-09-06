@@ -1220,6 +1220,12 @@ impl LlvmBackend {
 
         if self.ctx.field_types.is_empty() {
             writeln!(out, "%State = type {{ i64 }}").ok();
+            // 2026-09-06 (ISR plan): the shared state global — after the
+            // %State type (globals precede nothing else here; ISR bodies
+            // and main's emit_state_base alias both reference it).
+            if self.ctx.state_is_global {
+                writeln!(out, "@__briev_state = global %State zeroinitializer").ok();
+            }
             return;
         }
         // 2026-07-04: Emit chunk struct definitions so SROA can decompose
@@ -1246,6 +1252,12 @@ impl LlvmBackend {
             write!(out, "{}", f).ok();
         }
         writeln!(out, " }}").ok();
+        // 2026-09-06 (ISR plan): the shared state global — after the %State
+        // type definition (ISR bodies run on the hardware stack, outside
+        // main's frame; the global is the only state they can share).
+        if self.ctx.state_is_global {
+            writeln!(out, "@__briev_state = global %State zeroinitializer").ok();
+        }
     }
 
     //
@@ -2879,12 +2891,19 @@ impl LlvmBackend {
                 // 2026-07-23: Emit the correct zero value for the return type.
                 // Previously always used "ret i64 0", which broke functions
                 // returning ptr, float, double, etc.
-                let zero_val = match ll_ret_ty.as_str() {
-                    "ptr" => "null",
-                    "float" | "double" => "0.0",
-                    _ => "0",
-                };
-                writeln!(out, "  ret {} {}", ll_ret_ty, zero_val).ok();
+                // 2026-09-06: `-> Void` (output_type Some(Single(Void))) has a
+                // declared but empty return — ret void, no value (was
+                // `ret void 0`, rejected by clang).
+                if ll_ret_ty == "void" {
+                    writeln!(out, "  ret void").ok();
+                } else {
+                    let zero_val = match ll_ret_ty.as_str() {
+                        "ptr" => "null",
+                        "float" | "double" => "0.0",
+                        _ => "0",
+                    };
+                    writeln!(out, "  ret {} {}", ll_ret_ty, zero_val).ok();
+                }
             }
         }
         writeln!(out, "}}").ok();
@@ -5330,6 +5349,194 @@ impl LlvmBackend {
             writeln!(out, "  ret {} 0", ll_ret).ok();
         }
         writeln!(out, "}}").ok();
+    }
+
+    // ── ISR handlers + vector tables (2026-09-06, ISR plan) ────────────
+    //
+    // The MECHANISM (explicit in `<>`, else the profile's isr_mechanism —
+    // ctx.isr_mechanism) owns the calling convention and table layout; the
+    // compiler owns the emission. Body shape:
+    //
+    //   define void @<name>() nounwind ["interrupt"="IRQ"] {
+    //     call void @__isr_body_<name>();
+    //     ret void
+    //   }
+    //
+    // The interrupt attribute (or x86_intrcc) makes LLVM emit the
+    // mechanism's prologue/epilogue around the CALL — the body itself is
+    // an ordinary function emitted through emit_definition (one statement
+    // pipeline, DRY; the call layer optimizes away under -O3).
+
+    /// Resolve the ISR's mechanism from the declaration or the profile.
+    fn isr_resolve_mechanism(
+        &self, isr: &crate::ast::top::IsrHandler,
+    ) -> Result<(String, crate::target::IsrMechanism), String> {
+        let registry = crate::target::IsrMechanismConfig::load();
+        let name = isr.mechanism.as_deref()
+            .or(self.ctx.isr_mechanism.as_deref());
+        let Some(name) = name else {
+            return Err(format!(
+                "isr '{}': no ISR mechanism — the typecheck should have \
+                 rejected this; declare isr<mechanism> or set isr_mechanism \
+                 in the target profile",
+                isr.name
+            ));
+        };
+        registry.get(name)
+            .cloned()
+            .map(|m| (name.to_string(), m))
+            .ok_or_else(|| format!(
+                "isr '{}': mechanism '{}' is not a row of \
+                 config/isr-targets.dbvl",
+                isr.name, name
+            ))
+    }
+
+    /// Resolve the ISR's vector slot — literal index or board-file name.
+    pub(crate) fn isr_resolve_slot(&self, isr: &crate::ast::top::IsrHandler) -> Result<u64, String> {
+        match &isr.vector {
+            crate::ast::Expr::Decimal(n) => Ok(*n as u64),
+            crate::ast::Expr::Identifier(name) => {
+                crate::address_resolver::resolve_isr_vector(name).ok_or_else(|| {
+                    format!(
+                        "isr '{}': vector name '{}' has no row in the active \
+                         board's interrupts.dbvl",
+                        isr.name, name
+                    )
+                })
+            }
+            _ => Err(format!("isr '{}': vector must be a literal or a board-file name", isr.name)),
+        }
+    }
+
+    /// Emit one ISR handler: body function + interrupt-convention wrapper.
+    pub(crate) fn emit_isr_handler(
+        &mut self, out: &mut String, isr: &crate::ast::top::IsrHandler,
+    ) -> Result<(), String> {
+        let (mech_name, mech) = self.isr_resolve_mechanism(isr)?;
+        let _ = mech_name;
+        let body_name = format!("__isr_body_{}", isr.name);
+
+        // The body as an ordinary definition — one statement pipeline.
+        // Void return: an ISR never returns a value; without an explicit
+        // output_type the defn emitter would default the ret type.
+        let body_defn = crate::ast::top::Definition {
+            name: body_name.clone(),
+            type_params: vec![],
+            parameters: isr.params.clone(),
+            output_type: Some(crate::ast::top::OutputType::Single(crate::ast::Type::Void)),
+            outputs: vec![],
+            contract: isr.contract.clone(),
+            body: isr.body.clone(),
+            metadata: Default::default(),
+            derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: Some(isr.span.clone()),
+            doc: Some(format!("ISR body for {} (plan 2026-09-06-isr-handlers-and-sections.md)", isr.name)),
+        };
+        // needs_state=true — the body shares the program state (the global
+        // when ISR handlers exist; the wrapper passes it explicitly).
+        self.emit_definition(out, &body_defn, self.ctx.state_is_global);
+        writeln!(out).ok();
+
+        // The interrupt wrapper — mechanism calling convention inline.
+        let _ = mech_name;
+        let define_line = match mech.convention {
+            crate::target::IsrConv::X86Intr =>
+                format!("define x86_intrcc void @{}() nounwind {{", isr.name),
+            crate::target::IsrConv::RiscvInterrupt =>
+                format!("define void @{}() nounwind \"interrupt\"=\"machine\" {{", isr.name),
+            crate::target::IsrConv::ArmIrq =>
+                format!("define void @{}() nounwind \"interrupt\"=\"IRQ\" {{", isr.name),
+        };
+        writeln!(out, "{}", define_line).ok();
+        writeln!(out, "entry:").ok();
+        if self.ctx.state_is_global {
+            writeln!(out, "  call void @{}(ptr @__briev_state)", body_name).ok();
+        } else {
+            writeln!(out, "  call void @{}()", body_name).ok();
+        }
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        Ok(())
+    }
+
+    /// Emit the vector table(s) + default handlers — one table per
+    /// mechanism group, after all handler definitions. Layout per the
+    /// mechanism row: entry stride, optional SP slot 0, thumb bit.
+    pub(crate) fn emit_isr_vector_tables(&mut self, out: &mut String, items: &[TopLevel]) {
+        let isr_items: Vec<&crate::ast::top::IsrHandler> = items.iter().filter_map(
+            |i| match i { TopLevel::IsrHandler(h) => Some(h), _ => None },
+        ).collect();
+        if isr_items.is_empty() {
+            return;
+        }
+        // Group by resolved mechanism (sorted for deterministic emission).
+        let mut groups: std::collections::BTreeMap<String, Vec<(&crate::ast::top::IsrHandler, u64)>> = Default::default();
+        for isr in &isr_items {
+            let Ok((mech_name, _)) = self.isr_resolve_mechanism(isr) else { continue };
+            let Ok(slot) = self.isr_resolve_slot(isr) else { continue };
+            groups.entry(mech_name).or_default().push((isr, slot));
+        }
+        let registry = crate::target::IsrMechanismConfig::load();
+        for (mech_name, mut handlers) in groups {
+            let Some(mech) = registry.get(&mech_name) else { continue };
+            // SP slot (ARM): slot 0 is the initial stack pointer — the
+            // startup code sets the real value; the table reserves the
+            // slot with 0.
+            let sp_pad = if mech.sp_slot { 1 } else { 0 };
+            handlers.sort_by_key(|(_, slot)| *slot);
+            let max_slot = handlers.iter().map(|(_, s)| *s).max().unwrap_or(0);
+            let table_len = max_slot + 1 + sp_pad;
+            let word = if mech.entry_stride == 4 { "i32" } else { "i64" };
+
+            // Default handler — one spin-loop definition per group, emitted
+            // only when at least one slot is undeclared.
+            let has_gaps = (0..table_len).any(|s| {
+                let effective = if mech.sp_slot && s == 0 { u64::MAX } else { s };
+                !handlers.iter().any(|(_, slot)| *slot == effective)
+                    && !(mech.sp_slot && s == 0)
+            });
+            let default_name = mech.default_handler.clone();
+            if has_gaps {
+                // Entry block must have no predecessors — branch into the
+                // spin label rather than looping on the entry itself.
+                writeln!(out, "define void @{}() nounwind {{", default_name).ok();
+                writeln!(out, "entry:").ok();
+                writeln!(out, "  br label %spin_{}", default_name).ok();
+                writeln!(out, "spin_{}:", default_name).ok();
+                writeln!(out, "  br label %spin_{}", default_name).ok();
+                writeln!(out, "}}").ok();
+                writeln!(out).ok();
+            }
+
+            // The table itself.
+            let entries: Vec<String> = (0..table_len).map(|s| {
+                if mech.sp_slot && s == 0 {
+                    return format!("{} 0", word);
+                }
+                let handler = handlers.iter().find(|(_, slot)| *slot == s)
+                    .map(|(h, _)| h.name.clone())
+                    .unwrap_or_else(|| default_name.clone());
+                // Plain ptrtoint constexpr — the linker applies the ISA bit
+                // (Thumb) via the symbol relocation (R_ARM_ABS32 sets bit 0
+                // for Thumb symbols); LLVM 18 rejects `or` constexprs in
+                // globals, and faking the bit in IR would fight the linker.
+                format!("{} ptrtoint (ptr @{} to {})", word, handler, word)
+            }).collect();
+            let section = if mech.table_section.is_empty() {
+                String::new()
+            } else {
+                format!(", section \"{}\"", mech.table_section)
+            };
+            writeln!(out,
+                "@__vector_table_{} = global [{} x {}] [ {} ]{}, align {}",
+                mech_name, table_len, word,
+                entries.join(", "),
+                section, mech.entry_stride).ok();
+            writeln!(out).ok();
+        }
     }
 }
 

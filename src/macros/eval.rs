@@ -2236,6 +2236,7 @@ fn resolve_dollar_refs_in_toplevel(tl: &mut TopLevel, scope: &Scope) -> Result<(
         | TopLevel::SvgComponent { .. } | TopLevel::SyncGroup { .. }
         | TopLevel::Cfg(_) | TopLevel::ProtocolDef(_)
         | TopLevel::AsmFn(_)
+        | TopLevel::IsrHandler(_)
         | TopLevel::CompileTimeLet(_, _) | TopLevel::CompileTimeConst(_, _)
         | TopLevel::ModuleMetadata(_) => Ok(()),
         TopLevel::Init(init) => {

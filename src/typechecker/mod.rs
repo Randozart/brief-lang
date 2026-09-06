@@ -3576,6 +3576,9 @@ fn collect_contract_checks<'a>(
         TopLevel::Definition(d) => out.push((ContractKind::Optional, &d.name, &d.contract)),
         TopLevel::Transaction(t) => out.push((ContractKind::Required, &t.name, &t.contract)),
         TopLevel::AsmFn(a) => out.push((ContractKind::Required, &a.name, &a.contract)),
+        // 2026-09-06 (ISR plan): ISR bodies run at interrupt priority — the
+        // obligations are the proof surface, same discipline as asm.
+        TopLevel::IsrHandler(h) => out.push((ContractKind::Required, &h.name, &h.contract)),
         TopLevel::Export(e) => collect_contract_checks(&e.inner, out),
         TopLevel::TypeDef(t) => {
             for m in &t.body.members {
@@ -3910,6 +3913,19 @@ fn check_coll_declarations(items: &[TopLevel], errors: &mut Vec<TypeError>) {
 }
 
 pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
+    check_program_with_target(items, universe, None)
+}
+
+/// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): program
+/// typecheck with the active target profile's ISR mechanism — the
+/// configured default behind `isr handler @ vec: ...` when the declaration
+/// names none explicitly. None = no profile (the compiler never invents a
+/// vector table layout; mechanism-less ISR declarations error with the fix).
+pub fn check_program_with_target(
+    items: &mut [TopLevel],
+    universe: &TypeUniverse,
+    isr_mechanism: Option<&str>,
+) -> Result<(), Vec<TypeError>> {
     // 2026-08-22 (Phase 5, SPEC §8.5): the parser's relationship list is
     // SYNTACTIC — a bare name becomes the refinement parent whether or not
     // it names a trait. Here, with the trait registry known, reclassify:
@@ -4499,6 +4515,7 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         all_variant_defs: &all_variant_defs,
         ambiguous_bare_variants: &ambiguous_bare_variants,
         trigger_pins: &trigger_pins,
+        isr_mechanism,
     };
 
     // 2026-07-31 (A2): Typecheck obj member bodies with `self` + slot names
@@ -4731,6 +4748,49 @@ pub fn check_program(items: &mut [TopLevel], universe: &TypeUniverse) -> Result<
         })
         .collect();
     check_beginprogram_program(&beginprogram_nodes, &mut errors);
+
+    // 2026-09-06 (ISR plan): resolve every ISR's vector binding and reject
+    // duplicates. Named vectors resolve through the ACTIVE BOARD's
+    // interrupts.dbvl (loaded by `import "target"` — the addresses.dbvl
+    // pattern); a missing row is an error naming the board file and the fix.
+    {
+        let mut by_slot: Vec<(u64, &str)> = Vec::new();
+        for item in items.iter() {
+            let TopLevel::IsrHandler(isr) = item else { continue };
+            let slot = match &isr.vector {
+                Expr::Decimal(n) => *n as u64,
+                Expr::Identifier(name) => {
+                    let Some(v) = crate::address_resolver::resolve_isr_vector(name) else {
+                        errors.push(TypeError::InvalidOperation {
+                            operation: format!("isr declaration '{}'", isr.name),
+                            type_name: format!(
+                                "vector name '{}' has no row in the active board's \
+                                 interrupts.dbvl (lib/boards/<board>/). Add the row \
+                                 ('{}: <slot>;') or bind a literal slot index.",
+                                name, name
+                            ),
+                        });
+                        continue;
+                    };
+                    v
+                }
+                _ => continue, // shape already rejected per-item
+            };
+            if let Some((_, existing)) = by_slot.iter().find(|(s, _)| *s == slot) {
+                errors.push(TypeError::InvalidOperation {
+                    operation: format!("isr declaration '{}'", isr.name),
+                    type_name: format!(
+                        "vector slot {} is already bound by '{}' — one vector, \
+                         one handler. Bind a different slot, or chain the \
+                         handlers yourself.",
+                        slot, existing
+                    ),
+                });
+            } else {
+                by_slot.push((slot, &isr.name));
+            }
+        }
+    }
 
     if errors.is_empty() {
         // 2026-08-06 (Phase 5): with types known, elaborate declared ops into
@@ -4986,6 +5046,9 @@ struct CheckEnv<'a> {
     ambiguous_bare_variants: &'a std::collections::HashSet<String>,
     /// 2026-08-27 (Slice B): @-addressed trigger names — read-only pins.
     trigger_pins: &'a std::collections::HashSet<String>,
+    /// 2026-09-06 (ISR plan): the active target profile's ISR mechanism —
+    /// the configured default for mechanism-less `isr` declarations.
+    isr_mechanism: Option<&'a str>,
 }
 
 /// Build a typecheck context from the pre-collected maps. Shared by
@@ -5125,8 +5188,186 @@ fn check_top_level<'a>(
             }
             Ok(())
         }
+        // 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): ISR
+        // handler validation — mechanism resolution (the asm<target>
+        // dead-data gap must not repeat: an unknown mechanism is a compile
+        // error, never silent), body typecheck, body restrictions.
+        TopLevel::IsrHandler(isr) => check_isr_handler(isr, &mut ctx, env),
         _ => Ok(()),
     }
+}
+
+// ── ISR handler validation ─────────────────────────────────────────────
+// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md).
+
+/// Intrinsics banned in ISR bodies — allocation, dynamic linking, and
+/// threading. An ISR runs at interrupt priority on the hardware stack:
+/// heap operations can deadlock the allocator against the interrupted
+/// context, and blocking primitives have no scheduler to return to.
+const ISR_BANNED_INTRINSICS: &[&str] = &[
+    "Malloc#", "Alloc#", "Free#", "Realloc#",
+    "Spawn#", "Await#", "ThreadCreate#", "MutexLock#", "MutexUnlock#",
+    "BarrierWait#", "DlOpen#", "DlSym#", "DlClose#",
+];
+
+/// Resolve the ISR's mechanism and validate the body.
+fn check_isr_handler(
+    isr: &crate::ast::top::IsrHandler,
+    ctx: &mut TypecheckContext,
+    env: &CheckEnv,
+) -> Result<(), TypeError> {
+    // ── Mechanism resolution: explicit → configured → error ────────────
+    let registry = crate::target::IsrMechanismConfig::load();
+    let mechanism = match &isr.mechanism {
+        Some(explicit) => {
+            let Some(mech) = registry.get(explicit) else {
+                return Err(TypeError::InvalidOperation {
+                    operation: format!("isr<{}> declaration '{}'", explicit, isr.name),
+                    type_name: format!(
+                        "'{}' is not a row of config/isr-targets.dbvl. \
+                         Known mechanisms: {}",
+                        explicit,
+                        registry.names().join(", ")
+                    ),
+                });
+            };
+            mech.clone()
+        }
+        None => match env.isr_mechanism {
+            Some(configured) => {
+                let Some(mech) = registry.get(configured) else {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!("isr declaration '{}'", isr.name),
+                        type_name: format!(
+                            "the active target profile names ISR mechanism '{}' \
+                             but config/isr-targets.dbvl has no such row. \
+                             Fix the profile's isr_mechanism value, or name the \
+                             mechanism explicitly: isr<{}> handler @ ...",
+                            configured, configured
+                        ),
+                    });
+                };
+                mech.clone()
+            }
+            None => {
+                return Err(TypeError::InvalidOperation {
+                    operation: format!("isr declaration '{}'", isr.name),
+                    type_name: "no ISR mechanism is available — the compiler \
+                         will not invent a vector table layout. Name the \
+                         mechanism explicitly (isr<arm_cortex_m> handler @ ...), \
+                         or set isr_mechanism in the active [target.<name>] \
+                         profile of briev.toml"
+                        .into(),
+                });
+            }
+        },
+    };
+
+    // ── Vector binding shape ────────────────────────────────────────────
+    // The vector must be a literal slot index or a name resolvable through
+    // the active board's interrupts.dbvl. Resolution (and duplicate
+    // detection) completes in the program pass; here only the shape is
+    // checked (a computed vector expression has no static slot).
+    match &isr.vector {
+        Expr::Decimal(_) | Expr::Identifier(_) => {}
+        other => {
+            return Err(TypeError::InvalidOperation {
+                operation: format!("isr declaration '{}'", isr.name),
+                type_name: format!(
+                    "the vector must be a literal slot index (isr handler @ 28) \
+                     or a board-file name (isr handler @ TIM2), got: {}",
+                    other
+                ),
+            });
+        }
+    }
+
+    // ── Body typecheck (params bound, like a defn body) ─────────────────
+    for (name, ty) in &isr.params {
+        ctx.bindings.insert(name.clone(), ty.clone());
+        ctx.state_keys.insert(name.clone());
+    }
+    for stmt in &isr.body {
+        infer_statement(stmt, ctx)?;
+    }
+
+    // ── Body restrictions ───────────────────────────────────────────────
+    for expr in isr_body_exprs(&isr.body) {
+        if let Expr::Call(name, _, _) = expr {
+            if ISR_BANNED_INTRINSICS.contains(&name.as_str()) {
+                return Err(TypeError::InvalidOperation {
+                    operation: format!("'{}' in isr body '{}'", name, isr.name),
+                    type_name: format!(
+                        "an ISR runs at interrupt priority on the hardware stack \
+                         — '{}' can block or deadlock against the interrupted \
+                         context. Move the operation out of the handler.",
+                        name
+                    ),
+                });
+            }
+        }
+        // Float usage vs the mechanism's fpu_context row.
+        if mechanism.fpu_context == crate::target::IsrFpuContext::None {
+            if let Ok(ty) = infer_type_only(expr, ctx) {
+                let cat = crate::type_universe::operators::protocol_category(ctx.universe, &ty);
+                if cat.as_deref() == Some("Float") {
+                    return Err(TypeError::InvalidOperation {
+                        operation: format!("float value in isr body '{}'", isr.name),
+                        type_name: format!(
+                            "mechanism '{}' stacks no FP context (config/\
+                             isr-targets.dbvl fpu_context = none) — floating \
+                             point in the handler corrupts the interrupted \
+                             task's FP state. Move the math out, or pick a \
+                             mechanism with fpu_context = lazy/eager.",
+                            isr.mechanism.as_deref().unwrap_or("profile")
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Collect every expression reachable in an ISR body (complete statement
+/// walk — Let inits, Foreach lists, Defer/Mutex/Barrier bodies, match arms).
+fn isr_body_exprs(stmts: &[Statement]) -> Vec<&Expr> {
+    fn walk<'a>(stmts: &'a [Statement], out: &mut Vec<&'a Expr>) {
+        for stmt in stmts {
+            match stmt {
+                Statement::Assign(lhs, rhs) => { out.push(lhs); out.push(rhs); }
+                Statement::Let { expr: Some(e), .. } => out.push(e),
+                Statement::Expression(e) => out.push(e),
+                Statement::Term(Some(e)) | Statement::EndProgram(Some(e))
+                | Statement::Rollback(Some(e)) | Statement::Check(e) | Statement::Gate(e) => out.push(e),
+                Statement::Guarded(g, body) => { out.push(g); walk(body, out); }
+                Statement::Block(body)
+                | Statement::Defer(body)
+                | Statement::Mutex(body)
+                | Statement::SyncBlock(body) => walk(body, out),
+                Statement::Foreach { list, body, .. } => { out.push(list); walk(body, out); }
+                Statement::Barrier { body, .. } => walk(body, out),
+                Statement::TrgBinding { instance, .. } => out.push(instance),
+                Statement::Match { expr, arms } => {
+                    out.push(expr);
+                    for arm in arms {
+                        walk(&arm.body, out);
+                    }
+                }
+                Statement::InlineDefn(d) => walk(&d.body, out),
+                Statement::InlineTxn(t) => {
+                    walk(&t.body, out);
+                    out.push(&t.contract.pre_condition);
+                    out.push(&t.contract.post_condition);
+                }
+                // Yield / InlineAsm / break carry no expressions.
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(stmts, &mut out);
+    out
 }
 
 // ── BinaryOpKind helpers ───────────────────────────────────────────────

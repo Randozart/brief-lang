@@ -26,6 +26,11 @@ thread_local! {
     /// Active board map: normalized key (uppercase) → address.
     /// Set once per compilation by `set_active_board` (via `import "target"`).
     static ACTIVE_BOARD: RefCell<Option<HashMap<String, u64>>> = const { RefCell::new(None) };
+    /// 2026-09-06 (ISR plan): active board's named vector table — normalized
+    /// key (uppercase) → vector slot index. Loaded alongside the address map
+    /// by `set_active_board` from `lib/boards/<board>/interrupts.dbvl`
+    /// (missing file = no named vectors; only literal `@ n` bindings work).
+    static ACTIVE_ISR_TABLE: RefCell<Option<HashMap<String, u64>>> = const { RefCell::new(None) };
 }
 
 /// Default board name, matching `ImportResolver::resolve_target_import`.
@@ -50,6 +55,35 @@ pub fn set_active_board(board: &str) {
         }
     }
     ACTIVE_BOARD.with(|slot| *slot.borrow_mut() = Some(map));
+    // 2026-09-06 (ISR plan): load the named vector table alongside —
+    // `isr handler @ TIM2` resolves through the same board directory
+    // (interrupts.dbvl: `TIM2: 28;`). Missing file is non-fatal: only
+    // literal vector bindings are available on this board.
+    if let Some(isr_path) = find_board_path(board, "interrupts.dbvl") {
+        if let Ok(isr_db) = ConfigDb::from_file(&isr_path, false) {
+            let mut vectors = HashMap::new();
+            for key in isr_db.keys() {
+                // Slot values accept Int (decimal `TIM2: 28;`) or String
+                // (hex `TIM2: 0x1C;`) — the parser stores by literal shape.
+                let vec = isr_db.field_int(&key, 0).map(|v| v as u64)
+                    .or_else(|| isr_db.field_string(&key, 0)
+                        .and_then(radix_parse_hex));
+                if let Some(vec) = vec {
+                    vectors.insert(key.to_uppercase(), vec);
+                }
+            }
+            ACTIVE_ISR_TABLE.with(|slot| *slot.borrow_mut() = Some(vectors));
+        }
+    }
+}
+
+/// 2026-09-06 (ISR plan): resolve a NAMED vector through the active
+/// board's interrupts.dbvl. None = the name has no row (the caller
+/// errors with the board file and the fix).
+pub fn resolve_isr_vector(name: &str) -> Option<u64> {
+    ACTIVE_ISR_TABLE.with(|slot| {
+        slot.borrow().as_ref().and_then(|m| m.get(&name.to_uppercase()).copied())
+    })
 }
 
 /// 2026-07-15: Resolve a named address to its numeric value.
@@ -232,5 +266,16 @@ mod tests {
         set_active_board("no-such-board");
         // Falls back cleanly to config/hardcoded.
         assert_eq!(resolve_address("uart"), 0xFFE01000);
+    }
+}
+
+#[cfg(test)]
+mod isr_tests {
+    #[test]
+    fn board_isr_table_loads_and_resolves() {
+        super::set_active_board("stm32f407");
+        assert_eq!(super::resolve_isr_vector("TIM2"), Some(28), "TIM2 must resolve through lib/boards/stm32f407/interrupts.dbvl");
+        assert_eq!(super::resolve_isr_vector("tim2"), Some(28), "case-insensitive lookup");
+        assert_eq!(super::resolve_isr_vector("NOPE"), None);
     }
 }

@@ -229,7 +229,7 @@ impl LlvmBackend {
     /// reactor tick sees a consistent snapshot.
 pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
     self.emit_main_header(out, "#0", true);
-    writeln!(out, "  %state = alloca %State, align 8").ok();
+    self.emit_state_base(out);
     self.emit_inline_init_stores(out, "%state");
     // 2026-07-14: Initialize thread pool for async programs
     if self.has_async_txns && !self.is_lightweight_async {

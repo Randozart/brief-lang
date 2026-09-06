@@ -506,6 +506,14 @@ impl ImportResolver {
     fn resolve_target_import(&mut self) -> Result<Vec<TopLevel>, String> {
         let board = self.board_name.as_deref().unwrap_or("stm32f407");
 
+        // 2026-09-06 (ISR plan): activate the board UNCONDITIONALLY — the
+        // address map (addresses.dbvl) and the named ISR vector table
+        // (interrupts.dbvl) load through address_resolver's own search
+        // (lib/boards/<board>/), independent of whether the D-briev device
+        // description below resolves. Board activation must never depend on
+        // the description being present.
+        crate::address_resolver::set_active_board(board);
+
         // 2026-08-03 (Phase 2): the board map is now a directory:
         //   lib/boards/<board>/map.dbv          — schemas only
         //   lib/boards/<board>/addresses.dbvl   — flat KEY: addr; size; table

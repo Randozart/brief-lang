@@ -374,6 +374,21 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-09-06 (ISR plan): the program's state base — an alloca in the
+    /// ordinary case, a zero-GEP alias of the GLOBAL `@__briev_state` when
+    /// the program declares ISR handlers. ISR bodies run on the hardware
+    /// stack, outside main's frame — they can only share state through a
+    /// global. The alias keeps every downstream `%state` reference
+    /// unchanged (zero-GEP of a global is a valid ptr with the same
+    /// provenance; SROA sees an address-taken local either way).
+    pub(crate) fn emit_state_base(&mut self, out: &mut String) {
+        if self.ctx.state_is_global {
+            writeln!(out, "  %state = getelementptr %State, ptr @__briev_state, i64 0").ok();
+        } else {
+            writeln!(out, "  %state = alloca %State, align 8").ok();
+        }
+    }
+
     /// Emit a `main()` that stores final precomputed values and returns.
     /// EmitPureCounterFold: no runtime loop, no iteration. The region analyzer simulated
     /// all transactions within `--optimize-budget` and produced final values.
@@ -384,7 +399,8 @@ impl LlvmBackend {
         final_values: &[(Vec<String>, HashMap<String, i64>)],
     ) {
         self.emit_main_header(out, "#0", false);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for (_txn_id, bindings) in final_values {

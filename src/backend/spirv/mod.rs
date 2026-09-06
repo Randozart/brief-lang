@@ -1464,7 +1464,7 @@ async node fill [i < N][i == N] {
         // concurrent sweep would otherwise race it.
         let path = format!("examples/gpu/briev_img_pipeline_test_{}.abv", std::process::id());
         std::fs::write(&path, src).expect("write fixture");
-        let opts = crate::pipeline::BuildOptions {
+        let mut opts = crate::pipeline::BuildOptions {
             run: false,
             config_dir: None,
             file_path: path.to_string(),
@@ -1504,6 +1504,7 @@ async node fill [i < N][i == N] {
             ssr: false,
             dev: false,
             accel_cpu_fallback: None,
+            isr_mechanism: None,
         };
         let (mut items, mut universe) =
             crate::pipeline::compile_to_typed(&path, src, &opts).expect("pipeline");

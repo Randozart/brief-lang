@@ -72,6 +72,13 @@ pub enum TopLevel {
     /// 2026-07-29: Inline assembly function declaration.
     /// asm<x86_64> name(params) -> ReturnType { "instruction"; };
     AsmFn(AsmFn),
+    /// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): interrupt
+    /// service routine declaration —
+    /// `isr[<mechanism>] handler @ (literal | Name): name(params) { body };`
+    /// The mechanism (explicit or from the target profile) owns the vector
+    /// table layout; the compiler emits the calling convention and derives
+    /// the table from the declared handler set.
+    IsrHandler(IsrHandler),
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {
@@ -1247,6 +1254,44 @@ pub struct AsmFn {
     /// on asm declarations (SPEC §20).
     pub contract: Contract,
     pub body: Vec<String>,
+    pub span: Span,
+}
+
+// ── IsrHandler ────────────────────────────────────────────────────────
+
+/// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): an interrupt
+/// service routine declaration.
+///
+/// ```text
+/// isr<arm_cortex_m> handler @ 0x1C: tim2_irq() { ... };
+/// isr handler @ TIM2: tim2_irq() { ... };   // vector via board file
+/// ```
+///
+/// The MECHANISM (explicit in `<>`, or resolved from the active target
+/// profile) owns the vector table layout + calling convention — the
+/// compiler emits the prologue/epilogue and derives the whole table from
+/// the declared handler set. The vector is a literal slot index or a
+/// name resolved through the board file (`interrupts.dbvl`, the
+/// addresses.dbvl pattern).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IsrHandler {
+    /// Explicit mechanism (`isr<arm_cortex_m>`); None = resolve from the
+    /// active target profile (else compile error with the fix).
+    pub mechanism: Option<String>,
+    /// Vector binding — `Expr::Decimal(n)` literal slot index, or
+    /// `Expr::Identifier(name)` resolved through the board's
+    /// interrupts.dbvl.
+    pub vector: Expr,
+    /// Handler function name (the emitted ISR symbol).
+    pub name: String,
+    /// Parameters (empty is the common case; a payload register is
+    /// mechanism-defined — validation lives in the typecheck).
+    pub params: Vec<(String, Type)>,
+    /// Contracts are mandatory — the body's obligations are the proof
+    /// surface (same discipline as asm declarations, SPEC §20).
+    pub contract: Contract,
+    /// Handler body.
+    pub body: Vec<Statement>,
     pub span: Span,
 }
 

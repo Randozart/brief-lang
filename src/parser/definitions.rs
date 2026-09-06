@@ -330,6 +330,11 @@ impl<'a> Parser<'a> {
                 if self.check_identifier("asm") {
                     return self.parse_asm_fn().map(TopLevel::AsmFn);
                 }
+                // 2026-09-06 (ISR plan): isr[<mech>] handler @ vec: name() { };
+                // Contextual keyword like asm/proto — top-level form only.
+                if self.check_identifier("isr") {
+                    return self.parse_isr_handler().map(TopLevel::IsrHandler);
+                }
                 // 2026-08-09: `init` is a contextual keyword — top-level
                 // declaration form only, matching the proto/asm pattern.
                 // It stays a legal identifier elsewhere (e.g. `txn init(...)`
@@ -1695,6 +1700,50 @@ impl<'a> Parser<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    /// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): parse an
+    /// interrupt service routine declaration —
+    /// `isr[<mechanism>] handler @ (Decimal | Identifier): name(params) [pre][post] { body };`
+    ///
+    /// The `handler` word is REQUIRED (it names the declaration form, never a
+    /// function). The mechanism is optional in syntax; its RESOLUTION
+    /// (explicit → target profile → error) happens at the typecheck. The
+    /// vector is a `Decimal` literal slot index or an `Identifier` resolved
+    /// through the board's interrupts.dbvl (the addresses.dbvl pattern).
+    /// Contracts are mandatory — the body's obligations are the proof
+    /// surface, same discipline as asm declarations (SPEC §20).
+    fn parse_isr_handler(&mut self) -> Result<IsrHandler, SyntaxError> {
+        let start = self.pos;
+        self.advance(); // consume 'isr'
+        // Optional <mechanism> — explicit beats configured.
+        let mechanism = if self.eat(&Token::Lt) {
+            let mech = self.expect_identifier()?;
+            self.expect(Token::Gt)?;
+            Some(mech)
+        } else {
+            None
+        };
+        // The literal word `handler` — a form marker, not a function name.
+        self.expect(Token::Identifier("handler".into()))?;
+        self.expect(Token::At)?;
+        // Vector: literal slot index or board-file name.
+        let vector = self.parse_expression()?;
+        self.expect(Token::Colon)?;
+        // Handler function name (the emitted ISR symbol).
+        let name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let params = self.parse_parameter_list()?;
+        self.expect(Token::RParen)?;
+        // Contracts are mandatory on ISR declarations.
+        let contract = self.parse_contract()?;
+        let body = self.parse_block()?;
+        self.eat(&Token::Semicolon);
+        let span = self.tokens.get(start)
+            .and_then(|(_, s1)| self.tokens.get(self.pos - 1).map(|(_, s2)| (s1, s2)))
+            .map(|(s1, s2)| Span::new(s1.start, s2.end, 0, 0))
+            .unwrap_or(Span::new(0, 0, 0, 0));
+        Ok(IsrHandler { mechanism, vector, name, params, contract, body, span })
     }
 
     /// 2026-07-29: Parse asm<target> name(args) -> T { "instr"; "instr"; };

@@ -971,6 +971,12 @@ pub fn compute_referenced_fields(items: &[TopLevel]) -> HashSet<String> {
         let body: Option<&[Statement]> = match item {
             TopLevel::Transaction(t) => Some(&t.body),
             TopLevel::Definition(d) => Some(&d.body),
+            // 2026-09-06 (ISR plan): an ISR body is a HARDWARE-CALLED
+            // liveness root — the handler fires outside the reactor, so a
+            // field it touches is never dead. Without this, an ISR-only
+            // counter is eliminated by apply_field_modes and the body
+            // emits an undefined `@name` load.
+            TopLevel::IsrHandler(h) => Some(&h.body),
             // 2026-08-03 (node bridge): an `export defn` referencing a state
             // field (`term saved;`) must count as a reference — without this
             // the field is eliminated as dead by apply_field_modes and the
@@ -990,6 +996,13 @@ pub fn compute_referenced_fields(items: &[TopLevel]) -> HashSet<String> {
         if let TopLevel::Transaction(t) = item {
             collect_state_identifiers(&t.contract.pre_condition, &state_fields, &mut referenced);
             collect_state_identifiers(&t.contract.post_condition, &state_fields, &mut referenced);
+        }
+        // 2026-09-06 (ISR plan): ISR contracts are obligations over the
+        // shared state — referenced fields are liveness roots like txn
+        // contracts.
+        if let TopLevel::IsrHandler(h) = item {
+            collect_state_identifiers(&h.contract.pre_condition, &state_fields, &mut referenced);
+            collect_state_identifiers(&h.contract.post_condition, &state_fields, &mut referenced);
         }
     }
 

@@ -210,7 +210,7 @@ impl LlvmBackend {
         counter_var: Option<&str>,
     ) {
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name,
             ".fmain", use_phi, body, 1, false, bound_literal, counter_var);
@@ -294,7 +294,7 @@ impl LlvmBackend {
     ) {
         if is_main {
             self.emit_main_header(out, "#0", true);
-            writeln!(out, "  %state = alloca %State, align 8").ok();
+            self.emit_state_base(out);
             self.emit_inline_init_stores(out, "%state");
         }
         // 2026-08-13 (reactor fix): buffer the loop construction so the
@@ -645,7 +645,7 @@ impl LlvmBackend {
     ) {
         let batch_size = batch.batch_size as i64;
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         // 2026-08-13 (reactor fix): buffer the batched loop so deferred
         // struct-literal allocas flush into the PREHEADER (before the loop) —
@@ -953,7 +953,7 @@ impl LlvmBackend {
     ) {
         let batch_size = batch.batch_size as i64;
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         let c0 = self.fun.txn_counter;
         self.fun.txn_counter += 1;
@@ -1399,7 +1399,7 @@ impl LlvmBackend {
         let end_label = format!(".{}_end", vd_prefix);
 
         self.emit_main_header(out, "#0", true);
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_base(out);
         self.emit_inline_init_stores(out, "%state");
         let bound_reg = self.fun.next_reg_with_prefix("vdb");
         self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, bound_literal, c0);

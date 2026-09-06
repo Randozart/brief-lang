@@ -320,6 +320,15 @@ pub atomic_fields: std::collections::HashMap<String, String>,
 
     // Embedded mode
     pub is_embedded: bool,
+    /// 2026-09-06 (ISR plan): the active target profile's ISR mechanism —
+    /// the configured default for mechanism-less `isr` declarations.
+    pub isr_mechanism: Option<String>,
+    /// 2026-09-06 (ISR plan): true when the program declares ISR handlers —
+    /// state becomes a GLOBAL (`@__briev_state`) so ISR bodies (which run
+    /// on the hardware stack, outside main's frame) can share it with the
+    /// reactor. Every `%state = alloca` site aliases the global via a
+    /// zero-GEP instead.
+    pub state_is_global: bool,
     pub type_universe: Option<TypeUniverse>,
 
     // Operator definitions (extracted from AST TypeDef bodies)
@@ -506,6 +515,8 @@ impl CompilerContext {
                     .to_string(),
             ),
             is_embedded: false,
+            isr_mechanism: None,
+            state_is_global: false,
             type_universe: None,
             operator_defs: HashMap::new(),
             casting_graph: Some(crate::casting::graph::CastingGraph::new()),

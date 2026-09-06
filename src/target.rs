@@ -163,6 +163,137 @@ impl ProtocolConfig {
     }
 }
 
+// ── ISR Mechanism Registry ──────────────────────────────────────────────
+// 2026-09-06 (plan 2026-09-06-isr-handlers-and-sections.md): the target
+// knowledge behind `isr[<mechanism>] handler @ vector: ...` — vector table
+// layout + calling convention, per config/isr-targets.dbvl. The mechanism
+// resolves explicit-in-`<>` → target profile → compile error (what/why/fix);
+// the compiler never invents a layout ("inventing hardware layout is silent
+// wrongness" — the asm<target> dead-data gap must not repeat).
+
+/// One row of config/isr-targets.dbvl.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IsrMechanism {
+    /// Bytes per vector table slot.
+    pub entry_stride: u64,
+    /// Slot 0 is the initial stack pointer (ARM Cortex-M), not a handler.
+    pub sp_slot: bool,
+    /// OR 1 into handler addresses (ARM Thumb state bit).
+    pub thumb_bit: bool,
+    /// The epilogue return instruction (validation anchor + emission ref).
+    pub return_insn: String,
+    /// How the mechanism stacks FP context.
+    pub fpu_context: IsrFpuContext,
+    /// Stack frame bound in bytes; a body frame above it is a compile error.
+    pub max_frame: u64,
+    /// Name for undeclared vectors (emitted as a spin loop when the board
+    /// file does not provide one).
+    pub default_handler: String,
+    /// ELF section for the emitted vector table (empty = no section
+    /// attribute — x86 IDT / RISC-V mtvec tables are runtime-built).
+    pub table_section: String,
+    /// The wrapper's calling convention (config row field 8).
+    pub convention: IsrConv,
+}
+
+/// The calling convention the emitted ISR wrapper carries (config row
+/// field 8 — the backend consumes the mechanism's decision, never
+/// name-matches it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsrConv {
+    /// LLVM "interrupt"="IRQ" function attribute (ARM targets).
+    ArmIrq,
+    /// LLVM "interrupt"="machine" attribute (RISC-V targets).
+    RiscvInterrupt,
+    /// x86_intrcc calling convention.
+    X86Intr,
+}
+
+/// How the mechanism handles floating-point context in ISRs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsrFpuContext {
+    /// Float in an ISR body is a compile error.
+    None,
+    /// FP context stacked lazily (FPCCR ASPEN/LSPEN on Cortex-M4F).
+    Lazy,
+    /// FP context saved/restored on every entry.
+    Eager,
+}
+
+/// Loaded config/isr-targets.dbvl.
+#[derive(Debug, Clone)]
+pub struct IsrMechanismConfig {
+    mechanisms: HashMap<String, IsrMechanism>,
+}
+
+impl IsrMechanismConfig {
+    /// Load the compiled-in ISR mechanism registry (baked at compile time).
+    pub fn load() -> Self {
+        let content = include_str!("../config/isr-targets.dbvl");
+        let db = crate::dbriev::config_db::ConfigDb::from_str(content)
+            .unwrap_or_else(|e| panic!("config/isr-targets.dbvl parse error: {}", e));
+        let mut mechanisms = HashMap::new();
+        for key in db.keys() {
+            let entry_stride = db.field_int(&key, 0).unwrap_or(4) as u64;
+            let sp_slot = db.field_string(&key, 1) == Some("sp");
+            let thumb_bit = db.field_int(&key, 2).map(|v| v != 0).unwrap_or(false);
+            let return_insn = db
+                .field_string(&key, 3)
+                .unwrap_or("bx lr")
+                .to_string();
+            let fpu_context = match db.field_string(&key, 4) {
+                Some("lazy") => IsrFpuContext::Lazy,
+                Some("eager") => IsrFpuContext::Eager,
+                _ => IsrFpuContext::None,
+            };
+            let max_frame = db.field_int(&key, 5).unwrap_or(512) as u64;
+            let default_handler = db
+                .field_string(&key, 6)
+                .unwrap_or("Default_Handler")
+                .to_string();
+            let table_section = db
+                .field_string(&key, 7)
+                .unwrap_or("")
+                .to_string();
+            let convention = match db.field_string(&key, 8) {
+                Some("riscv_machine") => IsrConv::RiscvInterrupt,
+                Some("x86_intr") => IsrConv::X86Intr,
+                _ => IsrConv::ArmIrq,
+            };
+            mechanisms.insert(
+                key.clone(),
+                IsrMechanism {
+                    entry_stride,
+                    sp_slot,
+                    thumb_bit,
+                    return_insn,
+                    fpu_context,
+                    max_frame,
+                    default_handler,
+                    table_section,
+                    convention,
+                },
+            );
+        }
+        IsrMechanismConfig { mechanisms }
+    }
+
+    /// Registry lookup — None means the mechanism name is not a row of
+    /// config/isr-targets.dbvl (a typo'd `isr<arm_cortexm>` must fail at
+    /// the typecheck, never silently).
+    pub fn get(&self, mechanism: &str) -> Option<&IsrMechanism> {
+        self.mechanisms.get(mechanism)
+    }
+
+    /// The known mechanism names, sorted — for error messages listing the
+    /// valid choices.
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.mechanisms.keys().cloned().collect();
+        names.sort();
+        names
+    }
+}
+
 impl TargetConfig {
     /// Load the compiled-in target config (fallback).
     ///
